@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 22.12 or newer (the Electron 44 toolchain requires the current Node 22 line)
 - npm 10 or newer
 - Windows packaging is provided by Electron Builder and targets a self-contained portable Windows x64 executable plus an assisted NSIS installer that remains per-user capable; machine scope is selected by default for current Windows compatibility.
 
@@ -30,7 +30,7 @@ The output is written to `dist/` and is intentionally ignored by Git.
 npm run dist:win
 ```
 
-The v1.2.0 build targets are `release/Dentiva-Pro-1.2.0-Windows-x64.exe` and `release/Dentiva-Pro-1.2.0-Windows-x64-Setup.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, multi-size ICO icon, asar packaging, non-admin execution and no publish target. The repository workflow runs tests/build on a Windows x64 GitHub Actions runner, verifies PE `MZ` headers for both EXEs, checks that the delivery ZIP contains the built app without tests or development junk, writes SHA-256 checksums and publishes a new v1.2.0 release only after the release gate is closed.
+The v1.3.0 build targets are `release/Dentiva-Pro-1.3.0-Windows-x64.exe` and `release/Dentiva-Pro-1.3.0-Windows-x64-Setup.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, multi-size ICO icon, asar packaging, non-admin execution and no publish target. The repository workflow runs tests/build on a Windows x64 GitHub Actions runner, installs Chromium for the six required viewport checks, verifies PE `MZ` headers for both EXEs, runs the blocking portable create/restart persistence smoke, checks that the delivery ZIP contains the built app without tests or development junk, writes SHA-256 checksums and publishes a new v1.3.0 release only after the release gate is closed. The installed-app launch/restart/uninstall smoke is intentionally excluded from automated release blocking and remains manual user verification.
 
 For a portable source + built-renderer delivery package that does not include `node_modules`, use:
 

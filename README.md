@@ -1,91 +1,110 @@
 # Dentiva Pro
 
-**Professional Dental Practice Management · v1.2.0**
+**Flagship offline-first dental practice management · v1.3.0**
 
-Dentiva Pro is an offline-first dental practice workspace for clinics in Bangladesh. It is designed around a calm daily workflow: register a patient, book and queue an appointment, capture the clinical record, manage the dental chart, prescribe, bill, record payment, track inventory and protect local data with verified backups.
+Dentiva Pro is a local dental-practice workspace for clinics in Bangladesh. The flagship edition keeps the calm daily workflow from earlier releases and expands it with a configurable command center, patient workspaces, structured clinical history, safe financial statements, analytics, diagnostics and stronger recovery tooling.
 
-This repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records.
+The repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records.
 
-> **Release status:** v1.2.0 is published. The portable, visual, packaging, PE, archive and checksum gates passed in Windows CI; the installed-app launch/restart/uninstall smoke was intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. v1.0.0 and v1.1.0 are preserved. See [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md) and [`docs/V1.2_PROGRESS.md`](docs/V1.2_PROGRESS.md).
+> **Release status:** v1.3.0 is the current release candidate on `arena/01a0c66a-dentiva-pro`. v1.0.0, v1.1.0 and v1.2.0 remain preserved. The Windows workflow must still complete the portable, visual, packaging, PE, ZIP and checksum gates before a v1.3.0 release is called published. The installed-app launch/restart/uninstall smoke is intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. See [`docs/FINAL_AUDIT_REPORT_1.3.0.md`](docs/FINAL_AUDIT_REPORT_1.3.0.md) and [`docs/V1.3_PROGRESS.md`](docs/V1.3_PROGRESS.md).
 
-## Included modules
+## Flagship modules
 
-- Dashboard with today-first operational metrics, queue signals, follow-ups, stock and backup alerts
-- Patient directory, local search, profile workspace, timeline, referrals, financial statements and safe attachments
-- Day/week/month appointment calendar, chair context, double-booking warning and Today’s Queue workflow
-- Clinical visits, symptoms, findings, diagnoses, staged treatment plans, treatment notes, tooth references and follow-up dates
-- FDI adult and primary dental chart with tooth-level statuses and notes
-- Prescription records with printable instructions and clinical-safety wording
-- Billing, invoice line items, discount/tax calculation, due balances, partial payments, configurable payment methods and auditable refunds/reversals
-- Inventory, suppliers, purchase/usage/stock-out/expiry/damage/correction movements, reorder thresholds and expiry warnings
-- Staff directory, user accounts, staff association, role templates, PIN sign-in, account lockout and permission-enforced operations
-- Reports, UTF-8 CSV export, patient CSV mapping/import preview, print/PDF workflows and local audit history
-- SQLite-backed desktop persistence, managed attachment files, legacy JSON migration and verified backup/recovery behavior
-- Structured backup manifest with SHA-256 payload hash, validation preview, patient/module selective restore, conflict strategies and rollback
-- English-first UI with an existing Bengali locale layer and Bangladesh defaults (BDT, Asia/Dhaka)
-- About section crediting Md. Shohan Khan
+- Configurable dashboard command center with locally persisted widget visibility, ordering and reset, command palette, keyboard shortcuts, schedule, queue, follow-up, balance, stock and backup signals
+- Patient directory with advanced local search/filtering, pagination, status/archive handling, duplicate warning, profile workspace, alerts, age, preferred contact, normalized tags and configured custom fields
+- Patient timeline combining appointments, visits, prescriptions, invoices, payments, referrals, attachments and follow-up tasks
+- Dental chart with FDI adult/primary dentition, tooth-level status and notes
+- Clinical visits, treatment catalog, staged treatment plans with clinical goals, procedures, teeth, duration, estimate/discount and stage progress
+- Appointments with calendar, serial queue, duration, dentist/chair/room context, overlap confirmation and Today’s Queue lifecycle
+- Prescriptions with multiple medicines, structured line input, explicit clinician-authored instructions and print workflow
+- Billing, payment center, receipts, partial/full payment validation, refunds/adjustments, patient statements and one deterministic financial source of truth
+- Inventory, suppliers, movement audit, reorder thresholds, expiry warnings and negative-stock protection
+- Accounting, staff directory, local user accounts, salted PINs, active/inactive state, lockout and operation-level role authorization
+- Reports plus analytics for collections, billing, expenses, net result, completion/no-show rate, six-month trends and payment mix
+- Actionable notification center for queue, follow-up, expiry, low stock, balances and stale backups
+- Diagnostics workspace with local storage info, schema, record counts, relationship checks, attachment checks, backup health and account state
+- Structured backup manifest with SHA-256 payload hash, validation preview, relationship checks, module/patient selection, conflict strategies, ID remapping and rollback
+- UTF-8 CSV patient import preview/mapping/duplicate policy and dataset exports
+- English/Bengali interface layer, Bengali-aware number/currency/date/time formatting, Bangladesh defaults (BDT, Asia/Dhaka)
+- A4, A5, Letter and 80 mm receipt print profiles, shared footer/logo/contact controls, branded print layouts and safe Electron PDF generation
+- Offline SQLite desktop persistence, managed attachment files, atomic writes, recovery backup and non-destructive legacy JSON migration
+
+## Product boundaries
+
+Dentiva Pro is record-management software. It does not independently diagnose disease, recommend treatment or prescribe medication. Clinical decisions and the accuracy of professional input remain with the dentist. No mandatory cloud account, telemetry, paid API or external patient-data service is required.
+
+The interface is intentionally light-only. Patient and financial data remain local to the browser preview or Electron profile. SQLite is persistence, not encryption; protect the operating-system account, workstation and backup media with appropriate OS/full-disk controls.
 
 ## Security and privacy model
 
-The desktop store uses bundled `sql.js` SQLite rather than a native database build. It writes through an atomic staged path, retains an integrity-checked `.bak`, enforces a size ceiling and keeps attachment bytes in a managed directory. A v1.1 JSON store is migrated without silently deleting the original.
+The desktop store uses bundled `sql.js` SQLite with relational metadata/records tables, atomic staged writes, an integrity-checked `.bak`, a 200 MB guardrail and managed attachment files. Legacy JSON stores are migrated without silently deleting the original. Future schemas are preserved and blocked from silent downgrade.
 
-Local user accounts store no plaintext PINs. Setup and account management derive salted PBKDF2-SHA-256 hashes. Accounts include role, effective permissions, staff association, active/inactive state, failed-attempt lock state and last-login time. Permission checks are applied to routes, search results, forms and important mutation/export/print operations; hiding a button is not the authorization boundary.
+Local accounts store no plaintext PINs. Setup and account management derive salted PBKDF2-SHA-256 hashes. Failed attempts temporarily lock accounts; inactive accounts cannot sign in. Role permissions are checked at routes, searches, forms and mutation/export/print/backup operations rather than only by hiding buttons. Audit entries record important data, security, backup and settings changes.
 
-SQLite is local persistence, not database encryption. Use OS account controls, full-disk encryption and protected backup media for production. Dentiva Pro does not require a cloud account, paid API or external patient-data telemetry, and does not diagnose or prescribe automatically.
+Attachments are constrained to safe MIME types and 6 MB per file. PDF files are never embedded as active inline content. Electron uses context isolation, sandboxing, no Node integration, restricted navigation, CSP and a narrow preload bridge.
 
-## Technology
+## Run locally
 
-- Vite + modern JavaScript and CSS for the offline-capable renderer
-- `sql.js` SQLite persistence for the Electron desktop profile; browser preview retains a local-storage fallback
-- Electron shell with `contextIsolation`, sandbox, no Node integration, navigation restrictions, CSP and safe PDF boundaries
-- Browser/Windows print preview for direct printing or Save as PDF
-- No mandatory cloud service, online account, paid API or external patient-data telemetry
-
-## Run
+Use Node.js 22.12 or newer for the Electron 44 release toolchain.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the printed local URL. The server binds to `0.0.0.0` for preview compatibility.
+The Vite server binds to `0.0.0.0` for local-network and sandbox preview compatibility. Browser preview uses a local-storage fallback; Electron uses the SQLite store.
 
-## Test and build
+## Test, build and benchmark
 
 ```bash
 npm test
 npm run build
 npm run check
+npm run benchmark:datasets
 ```
 
-Run the Windows target on a Windows x64 machine with the Electron binary available:
+`npm test` covers deterministic domain workflows, financial calculations, role authorization, backup/restore relationships, attachment safety, storage recovery, release gates and security boundaries. The Windows CI workflow installs Chromium before running the six required viewport checks.
+
+Run the Windows package on a Windows x64 machine with access to the Electron binary cache:
 
 ```bash
 npm run dist:win
 ```
 
-The Windows release workflow is designed to produce a new v1.2.0 portable executable, an assisted NSIS installer (per-user capable; machine scope is selected by default for current Windows compatibility), an application-only ZIP and a SHA-256 checksum file after tests, packaging and validation pass. It runs a blocking portable create/restart persistence smoke; the installed-app launch/restart/uninstall sequence is intentionally reserved for manual user verification. The v1.2.0 artifacts are published at [GitHub Releases](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.2.0).
+## Windows release contract
+
+The workflow produces a new versioned portable executable, assisted NSIS installer, application-only ZIP and SHA-256 checksum file. It runs tests/build, visual checks, PE header checks, the blocking portable create/restart persistence smoke, ZIP inspection and checksum validation before publication. The installed-app launch/restart/uninstall workflow is intentionally excluded from automated release gating and is reserved for manual user verification.
+
+For a source + built-renderer delivery ZIP without `node_modules`, use:
+
+```bash
+npm run package:release
+```
+
+This is not a substitute for the four Windows release artifacts. Never overwrite an existing release tag or asset.
 
 ## Data handling and backup
 
-Dentiva Pro creates no records until the clinic creates them. Use **Backup & Restore → Export full backup** to create a structured, versioned `.dentiva.json` package with record counts, relationship-preserving collections and a SHA-256 hash over canonical backup data. Import verifies the hash when present, validates MIME/size/relationships, shows a dry-run preview, supports module and patient selection, and commits through a snapshot/rollback restore plan. Existing records are never silently overwritten.
+Use **Backup & Restore → Export full backup** to create a structured, versioned `.dentiva.json` package with record counts and a SHA-256 hash over canonical backup data. Import verifies the hash when present, validates MIME/size/relationships, shows a dry-run preview, supports module and patient selection and commits through a snapshot/rollback restore plan. Existing records are not silently overwritten.
 
-Keep a verified backup in a trusted location. Attachments are limited to 6 MB each and the Electron store has a 200 MB safety ceiling. A forgotten PIN cannot be recovered by the application; follow the clinic's verified recovery policy.
+Keep a verified backup in a trusted location. A forgotten PIN cannot be recovered by the application; follow the clinic's verified recovery policy.
 
-## Printing and reports
+## Printing and documents
 
-Documents use a branded print layout and the operating-system print dialog. Settings support A4, Letter and 80 mm receipt profiles; reports can use the hardened Electron HTML-to-PDF path when running in the desktop app. A Windows printer can be selected, or the document can be saved as PDF. Bengali output and all requested print/PDF surfaces retain the documented human-review boundary. The installed-app launch/restart/uninstall smoke is the sole explicitly deferred automated sequence and remains manual user verification.
+Documents use a branded print layout and the operating-system print dialog. Settings support A4, Letter and 80 mm receipt profiles. Patient statements, invoices, receipts, prescriptions, patient summaries, queues, charts and reports can be printed; the desktop PDF path rejects active scripts and remote resources. Bengali rendering and native copy review remain human acceptance items even though the locale and formatter paths are covered by source/domain tests.
 
 ## Project structure
 
 ```text
-src/main.js         UI, user sessions, permission gates, workflows, reports and print views
-src/core.js         pure financial, relationship, restore and RBAC domain helpers
-src/styles.css      light-mode design system and responsive layout
-electron/           hardened desktop shell and SQLite storage/preload bridge
-public/              icon assets
-docs/                audit, progress, user and build documentation
-tests/              Node regression and persistence tests
+src/main.js              renderer, sessions, workflows, reports and print views
+src/domain.js            deterministic analytics, statement, timeline and validation helpers
+src/core.js              financial, relationship, restore, attachment and RBAC rules
+src/styles.css           base light-only design system and responsive layout
+src/styles-flagship.css  v1.3 analytics, diagnostics, notification and customization surfaces
+electron/                 hardened desktop shell, preload bridge and SQLite persistence
+public/                   icon, manifest and service-worker assets
+docs/                     audit, requirements, progress, user and build documentation
+tests/                    Node regression and persistence tests
 ```
 
 ## Creator
@@ -96,13 +115,15 @@ WhatsApp: 01516591935
 
 ## Release identity
 
-Current code identity: **1.2.0**, build **2026.09.22**. This is a published release and does not overwrite the existing 1.0.0 or 1.1.0 tags/assets.
+Current code identity: **1.3.0**, build **2026.09.22**. This is a new semantic version after v1.2.0; earlier release tags and artifacts are not overwritten.
 
-The eventual artifact contract is:
+The v1.3 artifact contract is:
 
-- `Dentiva-Pro-1.2.0-Windows-x64.exe` — portable PE executable
-- `Dentiva-Pro-1.2.0-Windows-x64-Setup.exe` — assisted per-user NSIS installer
-- `Dentiva-Pro-1.2.0-Windows-x64.zip` — application-only delivery ZIP
-- `Dentiva-Pro-1.2.0-checksums.txt` — SHA-256 records for release artifacts
+- `Dentiva-Pro-1.3.0-Windows-x64.exe` — portable PE executable
+- `Dentiva-Pro-1.3.0-Windows-x64-Setup.exe` — assisted NSIS installer
+- `Dentiva-Pro-1.3.0-Windows-x64.zip` — application-only delivery ZIP
+- `Dentiva-Pro-1.3.0-checksums.txt` — SHA-256 records for release artifacts
 
-The factual QA, open blockers and release evidence are maintained in [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md). Historical v1.1.0 evidence is preserved in [`docs/FINAL_AUDIT_REPORT_1.1.0.md`](docs/FINAL_AUDIT_REPORT_1.1.0.md).
+The evidence ledger is [`docs/FINAL_AUDIT_REPORT_1.3.0.md`](docs/FINAL_AUDIT_REPORT_1.3.0.md). The dependency/license review is [`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md). Historical v1.2 documentation remains in [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md) and [`docs/V1.2_PROGRESS.md`](docs/V1.2_PROGRESS.md).
+
+**The Windows installed-app launch/restart/uninstall smoke was intentionally excluded from automated release gating and remains for manual user verification.**

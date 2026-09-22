@@ -25,6 +25,7 @@ test('Bengali locale covers the release-critical document and workflow surfaces'
     'Dashboard', 'Patients', 'Patient timeline', 'Appointments', 'Today’s Queue', 'Clinical records',
     'Dental chart', 'Treatment plan', 'Prescriptions', 'Billing', 'Payments', 'Inventory', 'Suppliers',
     'Staff', 'Accounting', 'Reports', 'Backup & restore', 'Settings', 'Security', 'Notifications',
+    'Saved views', 'Save view', 'Patient views', 'Save this patient view', 'View name', 'No saved searches', 'Load', 'Done', 'Day', 'Week', 'Month', 'Agenda', 'Upcoming agenda', 'Saved medication', 'Choose a saved medicine...', 'Save current medicine to catalog',
     'Financial statement', 'Print statement', 'Export PDF', 'No matching records', 'No notifications',
     'Validate and restore selection', 'Create a secure user account', 'Effective permissions'
   ]) assert.match(renderer, new RegExp(`['\\"]${label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}['\\"]\\s*:`), `Bengali translation missing: ${label}`);
@@ -32,7 +33,7 @@ test('Bengali locale covers the release-critical document and workflow surfaces'
   assert.match(renderer, /Intl\.DateTimeFormat\(state\.settings\.language === 'Bengali' \? 'bn-BD'/);
 });
 
-test('release workflow retains exact v1.2 artifact contract', () => {
+test('release workflow retains the exact current-version artifact contract', () => {
   for (const name of [
     'Dentiva-Pro-$version-Windows-x64.exe',
     'Dentiva-Pro-$version-Windows-x64-Setup.exe',

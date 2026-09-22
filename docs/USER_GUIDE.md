@@ -1,8 +1,8 @@
-# Dentiva Pro v1.2.0 user guide
+# Dentiva Pro v1.3.0 user guide
 
 ## Release note
 
-The v1.2.0 implementation is currently in a release-gate cycle. The user workflows below describe implemented behavior, while unresolved runtime, Bengali, Windows, visual and feature-gap items are listed in [`FINAL_AUDIT_REPORT.md`](FINAL_AUDIT_REPORT.md). v1.0.0 and v1.1.0 remain separate releases.
+The v1.3.0 flagship workflows below describe the current implementation. Evidence boundaries and open review items are listed in [`FINAL_AUDIT_REPORT_1.3.0.md`](FINAL_AUDIT_REPORT_1.3.0.md). v1.0.0, v1.1.0 and v1.2.0 remain separate releases.
 
 ## Start here
 
@@ -48,23 +48,45 @@ Restore strategies:
 
 You may restore whole modules or select patients from the preview. If validation or persistence fails, the local state is restored from the pre-import snapshot and the operation reports the reason. A patient-scoped restore can only include records whose relationships remain valid.
 
-Keep a verified backup in a trusted location. The v1.2 release gate still requires packaged Electron corruption, interrupted-write and rollback testing; do not treat a browser preview as that evidence.
+Keep a verified backup in a trusted location. The Node/storage tests cover corruption recovery, migration, atomic writes and restore rollback; the packaged Windows GUI remains the authoritative environment for final persistence and crash-recovery review.
 
 ## Printing and PDF
 
 Print actions open a clean print preview. Select a Windows printer, paper size and copies in the system dialog, or choose **Save as PDF**. Invoice, payment receipt, prescription, patient summary, queue, chart and report layouts include the current clinic identity when it has been configured.
 
-A4, Letter and 80 mm Receipt profiles exist. Complete Bengali rendering, configurable profile coverage and Windows printer/PDF acceptance remain v1.2 release-gate items until tested on the packaged app.
+A4, A5, Letter and 80 mm Receipt profiles exist. Settings can control the document footer and whether the clinic logo/contact appears in generated documents. Bengali rendering, native copy review and Windows printer/PDF acceptance remain explicit human review items until checked on the packaged app.
 
 ## Financial records
 
 Invoices calculate subtotal, discount, configured tax and total from line items. Payments are separate traceable records. Outstanding is calculated from invoice total minus valid payments and refunds. Refunds are append-only payment-adjustment records, and the original receipt amount remains unchanged. Do not silently edit historical payments; use the Refund action and document the reason.
 
-A complete patient financial statement and configurable statement print/PDF are still open v1.2 feature work; existing billing and payment views must not be described as that finished capability.
+The patient profile Financial statement tab and Print statement action use the same invoice/payment/refund projection as the financial source of truth. Refunds remain append-only adjustments and do not mutate the original receipt amount.
 
 ## Inventory
 
 Create a stock item with its opening quantity, then use **Adjust stock** for purchases, usage, stock-outs, expiry quarantine, damage or corrections. The application records before/after values and blocks a movement that would make stock negative. Full packaged audit-actor and restore evidence remains open.
+
+## Notifications
+
+Notifications combine due invoices, low stock, expiry, queue wait, clinical follow-up and stale-backup signals. Settings can enable or mute queue, clinical, inventory, balance and backup categories. Read state is stored locally; open a notification to jump to its relevant page or record.
+
+## Flagship command center, analytics and diagnostics
+
+The Dashboard is a command center rather than a static report. Use **Customize dashboard** to show or hide schedule, queue, follow-up and operational-signal cards, move enabled cards up or down, or reset the layout; preferences are saved for the current practice workspace. Open the command palette with **Ctrl K** (or **Cmd K** on macOS) to run common actions and permission-scoped searches without leaving the current workflow. Dashboard periods include Today, 7 days, 1 month, 3 months, 6 months, 1 year and a custom date range.
+
+**Analytics** summarizes saved collections only: collected payments, billed invoices, expenses, net operating result, appointment completion/no-show rates, six-month trends and payment mix. It does not create targets, diagnose patients or infer clinical recommendations. **Diagnostics** shows storage source/size, schema version, record counts, relationship issues, attachment issues, backup age and local-account health. Run an integrity check after an import or before a high-risk restore.
+
+## Patient profile and treatment planning
+
+Start from **Patients** and open a profile to keep overview, visits, treatment plan, dental chart, prescriptions, billing, financial statement, attachments, referrals and timeline context together. Patient records can include important alerts, preferred contact method, normalized tags and configured custom fields. Archive status is distinct from an active patient directory result; archived records are not silently deleted.
+
+Treatment plans are clinician-authored planning records. Capture a clinical goal, procedures, tooth numbers, responsible dentist, duration, estimated cost, discount, review date and line-based stages. Estimates do not create invoices. Stage buttons cycle the saved stage status and remain auditable.
+
+## Appointments, queue, rooms and prescriptions
+
+Appointments offer **Day**, **Week**, **Month** and **Agenda** views. Use the date arrows and Today button to move through the schedule; the Agenda view keeps upcoming visits in a compact chronological list. Appointment forms retain dentist, chair, room and duration. A save that overlaps an existing dentist, chair or room asks for explicit confirmation and names the shared resource. Today’s Queue cycles checked-in, waiting, in-treatment and completed states and records wait timestamps.
+
+Prescription forms preserve the first medicine fields for compatibility and accept additional medicines one per line using `medicine | strength | dosage | frequency | duration | route | instructions`. The resulting prescription remains clinician-authored, printable and free of automated medical recommendations.
 
 ## Clinical safety
 

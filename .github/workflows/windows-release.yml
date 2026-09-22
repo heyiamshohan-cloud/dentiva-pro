@@ -134,6 +134,7 @@ jobs:
           foreach ($path in $required) { if (!(Test-Path $path)) { throw "Required release asset missing: $path" } }
 
       - name: Publish GitHub release assets
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,12 +148,9 @@ jobs:
             "release\\Dentiva-Pro-$version-Windows-x64.zip",
             "release\\Dentiva-Pro-$version-checksums.txt"
           )
-          $release = gh release view $tag --json tagName 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag @assets --clobber
-          } else {
-            gh release create $tag @assets --target $env:GITHUB_SHA --title "Dentiva Pro $version" --notes-file CHANGELOG.md
-          }
+          gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists. Refusing to overwrite a prior release or its assets." }
+          gh release create $tag @assets --target $env:GITHUB_SHA --title "Dentiva Pro $version" --notes-file CHANGELOG.md
 
       - name: Upload Windows release artifacts
         uses: actions/upload-artifact@v4

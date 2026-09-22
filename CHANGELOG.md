@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0 — 2026-09-22 — flagship candidate
+
+### Command center and insight surfaces
+
+- Added deterministic analytics projections for period bounds, collections, expenses, net operating result, completion/no-show rates, payment mix and six-month trends.
+- Added a configurable dashboard widget command center, expanded command palette actions, actionable notification page and diagnostics workspace.
+- Added persisted derived-notification read state for queue, follow-up, stock, expiry, balance and backup signals.
+- Added flagship responsive/reduced-motion CSS for analytics, diagnostics, notifications, patient alerts and custom fields while retaining the light-only design system.
+
+### Patient and clinical workflows
+
+- Expanded patient validation and profile context with status/archive handling, age, important alerts, preferred contact, normalized tags and configured custom fields.
+- Expanded treatment plans with clinical goals, procedures, tooth numbers, estimated duration, estimated cost, discounts, estimated totals, responsible dentist, statuses and stage progress.
+- Added Day, Week, Month and Agenda appointment views, room capture and room-aware overlap messaging alongside existing dentist/chair/duration checks.
+- Added structured multi-medicine prescriptions, a local saved medication catalog and reusable prescription fields while preserving first-medicine compatibility and print behavior.
+- Expanded patient profiles with appointments, payments, follow-ups, notes and patient-audit sections; treatment plans can create an explicit clinical visit without creating financial transactions.
+- Added patient timeline/statement domain projections and routed the profile financial statement and print statement through the same source-of-truth helper.
+
+### Persistence, security and release hygiene
+
+- Bumped the renderer/store schema to v4 with normalized room records, custom-field migration defaults and backup/restore coverage for medication catalog, notification rules and rooms.
+- Expanded permission vocabulary and operation-level guards for analytics, diagnostics, imports/exports, plans, rooms, notifications, attachments and backup validation.
+- Upgraded the build toolchain to Electron 44.4.3 and electron-builder 26.15.3; complete `npm audit` reports zero vulnerabilities in the resolved dependency tree.
+- Added deterministic domain tests; the local Node suite now passes 46 tests and the Vite production build passes.
+- Updated release identity and documentation for the new v1.3.0 semantic version. v1.0.0, v1.1.0 and v1.2.0 remain preserved.
+- The Windows installed-app launch/restart/uninstall smoke remains intentionally excluded from automated release gating and is **MANUAL USER VERIFICATION REQUIRED**.
+
 ## 1.2.0 — 2026-09-22 — published
 
 ### Persistence and security

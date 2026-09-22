@@ -2,7 +2,7 @@
 // Keeping financial, import, relationship and file-safety rules here makes them auditable
 // without a browser and prevents UI code from becoming the source of truth.
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 export const ALLOWED_ATTACHMENT_TYPES = [
   'image/png',
@@ -18,7 +18,7 @@ export const ARRAY_COLLECTIONS = [
   'patients', 'appointments', 'visits', 'prescriptions', 'dentalRecords',
   'treatments', 'invoices', 'payments', 'inventory', 'stockMovements',
   'suppliers', 'staff', 'expenses', 'referrals', 'attachments', 'paymentAdjustments', 'audit',
-  'notifications', 'followUpTasks', 'treatmentPlans', 'users'
+  'notifications', 'followUpTasks', 'treatmentPlans', 'users', 'medicationCatalog', 'notificationRules', 'rooms', 'savedFilters', 'savedReports'
 ];
 
 export const PERMISSIONS = [
@@ -34,7 +34,14 @@ export const PERMISSIONS = [
   'backup.create', 'backup.restore',
   'settings.view', 'settings.edit', 'audit.view',
   'staff.view', 'staff.create', 'staff.edit', 'staff.disable',
-  'users.manage'
+  'users.manage',
+  'patients.import', 'patients.export', 'clinical.plan', 'clinical.attachments',
+  'appointments.cancel', 'appointments.move', 'queue.manage',
+  'inventory.view-cost', 'inventory.expiry',
+  'reports.analytics', 'reports.schedule', 'reports.clinical',
+  'data.export', 'data.import', 'backup.validate', 'backup.history',
+  'notifications.manage', 'diagnostics.view', 'diagnostics.repair',
+  'customization.edit', 'documents.templates', 'audit.export', 'attachments.delete'
 ];
 
 const roleTemplates = {
@@ -43,8 +50,8 @@ const roleTemplates = {
     'patients.view', 'patients.create', 'patients.edit', 'clinical.view', 'clinical.create', 'clinical.edit',
     'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.queue',
     'prescriptions.view', 'prescriptions.create', 'prescriptions.edit', 'prescriptions.print',
-    'billing.view', 'billing.create', 'billing.edit', 'payments.view', 'reports.view', 'reports.export',
-    'inventory.view', 'backup.create', 'audit.view', 'settings.view'
+    'billing.view', 'billing.create', 'billing.edit', 'payments.view', 'reports.view', 'reports.export', 'reports.analytics', 'reports.clinical',
+    'inventory.view', 'backup.create', 'backup.validate', 'data.export', 'clinical.plan', 'clinical.attachments', 'appointments.cancel', 'queue.manage', 'audit.view', 'settings.view'
   ],
   Manager: [
     'patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'clinical.view', 'clinical.create', 'clinical.edit',
@@ -53,10 +60,10 @@ const roleTemplates = {
     'billing.view', 'billing.create', 'billing.edit', 'billing.refund', 'billing.void', 'payments.view', 'payments.create', 'payments.adjust', 'payments.refund',
     'inventory.view', 'inventory.purchase', 'inventory.adjust', 'inventory.consume', 'inventory.correct',
     'accounting.view', 'accounting.create', 'accounting.edit', 'reports.view', 'reports.export', 'backup.create', 'backup.restore',
-    'settings.view', 'audit.view', 'staff.view', 'staff.create', 'staff.edit', 'staff.disable'
+    'settings.view', 'audit.view', 'staff.view', 'staff.create', 'staff.edit', 'staff.disable', 'patients.import', 'patients.export', 'reports.analytics', 'reports.clinical', 'data.export', 'data.import', 'backup.validate', 'backup.history', 'notifications.manage', 'diagnostics.view', 'customization.edit', 'documents.templates'
   ],
-  Receptionist: ['patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.queue', 'billing.view', 'billing.create', 'payments.view', 'payments.create', 'inventory.view', 'reports.view', 'backup.create', 'settings.view'],
-  'Dental Assistant': ['patients.view', 'clinical.view', 'clinical.create', 'appointments.view', 'appointments.queue', 'prescriptions.view', 'prescriptions.print', 'inventory.view', 'inventory.consume', 'reports.view', 'settings.view'],
+  Receptionist: ['patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'patients.import', 'patients.export', 'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.cancel', 'appointments.move', 'appointments.queue', 'queue.manage', 'billing.view', 'billing.create', 'payments.view', 'payments.create', 'inventory.view', 'reports.view', 'data.export', 'backup.create', 'backup.validate', 'settings.view'],
+  'Dental Assistant': ['patients.view', 'clinical.view', 'clinical.create', 'clinical.attachments', 'appointments.view', 'appointments.queue', 'queue.manage', 'prescriptions.view', 'prescriptions.print', 'inventory.view', 'inventory.consume', 'inventory.expiry', 'reports.view', 'settings.view'],
   'Custom Role': []
 };
 
@@ -121,9 +128,13 @@ export function paymentStatusFor(invoiceTotal, payments = []) {
 export function appointmentsOverlap(candidate, existing, defaultDuration = 30) {
   if (!candidate || !existing || candidate.id === existing.id || candidate.date !== existing.date || ['Cancelled', 'No Show'].includes(existing.status)) return false;
   const candidateChair = candidate.chair || 'Chair 1';
-  const sharedChair = candidateChair === (existing.chair || 'Chair 1');
+  const existingChair = existing.chair || 'Chair 1';
+  const normaliseResource = (value) => String(value || '').trim().toLowerCase();
+  const sameRoom = normaliseResource(candidate.room) && normaliseResource(existing.room) && normaliseResource(candidate.room) === normaliseResource(existing.room);
+  const sharedChair = candidateChair === existingChair && (!candidate.room || !existing.room || sameRoom);
   const sharedDentist = candidate.dentistId && existing.dentistId && candidate.dentistId === existing.dentistId;
-  if (!sharedChair && !sharedDentist) return false;
+  const sharedRoom = Boolean(sameRoom);
+  if (!sharedChair && !sharedDentist && !sharedRoom) return false;
   const clockMinutes = (value) => { const [hours, minutes] = String(value || '00:00').split(':').map(Number); return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0); };
   const start = clockMinutes(candidate.time); const end = start + Math.max(1, toNumber(candidate.duration) || defaultDuration);
   const otherStart = clockMinutes(existing.time); const otherEnd = otherStart + Math.max(1, toNumber(existing.duration) || defaultDuration);
@@ -154,7 +165,8 @@ export function validatePayment({ amount, due, invoiceStatus = 'Unpaid' } = {}) 
 }
 
 export function buildBackupManifest(state, version, includedModules = ARRAY_COLLECTIONS) {
-  const modules = includedModules.filter((key) => key === 'settings' || key === 'counters' || key === 'dashboard' || Array.isArray(state[key]));
+  const metadataModules = new Set(['settings', 'counters', 'dashboard', 'notificationRead']);
+  const modules = includedModules.filter((key) => metadataModules.has(key) || Array.isArray(state[key]));
   return {
     product: 'Dentiva Pro',
     version,
@@ -227,6 +239,7 @@ export function validateRelationships(store) {
   const patients = new Set((store.patients || []).map((record) => record.id));
   const invoices = new Set((store.invoices || []).map((record) => record.id));
   const inventory = new Set((store.inventory || []).map((record) => record.id));
+  const suppliers = new Set((store.suppliers || []).map((record) => record.id));
   ARRAY_COLLECTIONS.forEach((key) => errors.push(...recordIds(store[key], key)));
   const patientLinks = ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'invoices', 'payments', 'paymentAdjustments', 'referrals', 'attachments', 'followUpTasks', 'treatmentPlans'];
   patientLinks.forEach((collection) => (store[collection] || []).forEach((record) => {
@@ -235,7 +248,8 @@ export function validateRelationships(store) {
   const payments = new Set((store.payments || []).map((record) => record.id));
   (store.payments || []).forEach((record) => { if (record.invoiceId && !invoices.has(record.invoiceId)) errors.push(`payments:${record.id} references missing invoice ${record.invoiceId}.`); });
   (store.paymentAdjustments || []).forEach((record) => { if (record.paymentId && !payments.has(record.paymentId)) errors.push(`paymentAdjustments:${record.id} references missing payment ${record.paymentId}.`); if (record.invoiceId && !invoices.has(record.invoiceId)) errors.push(`paymentAdjustments:${record.id} references missing invoice ${record.invoiceId}.`); });
-  (store.stockMovements || []).forEach((record) => { if (record.itemId && !inventory.has(record.itemId)) errors.push(`stockMovements:${record.id} references missing inventory item ${record.itemId}.`); });
+  (store.inventory || []).forEach((record) => { if (record.supplierId && !suppliers.has(record.supplierId)) errors.push(`inventory:${record.id} references missing supplier ${record.supplierId}.`); });
+  (store.stockMovements || []).forEach((record) => { if (record.itemId && !inventory.has(record.itemId)) errors.push(`stockMovements:${record.id} references missing inventory item ${record.itemId}.`); if (record.supplierId && !suppliers.has(record.supplierId)) errors.push(`stockMovements:${record.id} references missing supplier ${record.supplierId}.`); });
   const codes = new Set();
   (store.patients || []).forEach((record) => { if (record.patientCode && codes.has(record.patientCode)) errors.push(`Duplicate patient code ${record.patientCode}.`); if (record.patientCode) codes.add(record.patientCode); });
   const invoiceNumbers = new Set();
@@ -275,7 +289,7 @@ const moduleCollections = {
   clinical: ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'followUpTasks', 'treatmentPlans'],
   finance: ['invoices', 'payments', 'paymentAdjustments', 'expenses'],
   operations: ['inventory', 'stockMovements', 'suppliers', 'staff', 'referrals', 'attachments'],
-  settings: ['settings', 'counters', 'dashboard', 'audit', 'users']
+  settings: ['settings', 'counters', 'dashboard', 'notificationRead', 'audit', 'users', 'medicationCatalog', 'notificationRules', 'rooms', 'savedFilters', 'savedReports']
 };
 
 export function buildRestorePlan(local, incoming, { modules = Object.keys(moduleCollections), strategy = 'Keep Existing', patientIds = [] } = {}) {
@@ -284,7 +298,7 @@ export function buildRestorePlan(local, incoming, { modules = Object.keys(module
   const plan = { strategy, modules, collections: {}, conflicts: [], skipped: [], errors: [] };
   const allowedPatient = (record) => !usePatientFilter || selected.has(record.patientId || record.id);
   modules.flatMap((module) => moduleCollections[module] || []).forEach((key) => {
-    if (key === 'settings' || key === 'counters' || key === 'dashboard') {
+    if (['settings', 'counters', 'dashboard', 'notificationRead'].includes(key)) {
       if (incoming[key] !== undefined) plan.collections[key] = [{ ...incoming[key] }];
       return;
     }
@@ -297,7 +311,7 @@ export function buildRestorePlan(local, incoming, { modules = Object.keys(module
   });
   const patientFilterActive = usePatientFilter || plan.collections.patients !== undefined;
   const patientIdsInPlan = new Set(plan.collections.patients ? plan.collections.patients.map((record) => record.id) : [...selected]);
-  ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'invoices', 'payments', 'paymentAdjustments', 'referrals', 'attachments', 'followUpTasks'].forEach((key) => {
+  ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'invoices', 'payments', 'paymentAdjustments', 'referrals', 'attachments', 'followUpTasks', 'treatmentPlans'].forEach((key) => {
     if (!plan.collections[key]) return;
     if (patientFilterActive) plan.collections[key] = plan.collections[key].filter((record) => !record.patientId || patientIdsInPlan.has(record.patientId));
   });
@@ -329,7 +343,7 @@ export function applyRestorePlan(local, plan) {
     return next;
   };
   Object.entries(plan.collections || {}).forEach(([key, incoming]) => {
-    if (key === 'settings' || key === 'counters' || key === 'dashboard') {
+    if (['settings', 'counters', 'dashboard', 'notificationRead'].includes(key)) {
       if (plan.strategy !== 'Keep Existing' && incoming[0]) result[key] = { ...incoming[0] };
       return;
     }

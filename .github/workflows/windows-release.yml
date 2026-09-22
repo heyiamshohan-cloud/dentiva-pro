@@ -43,6 +43,21 @@ jobs:
           & npm run dist:win 2>&1 | Tee-Object -FilePath release-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify Windows PE artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = Get-ChildItem release -Filter 'Dentiva-Pro-*-Windows-x64.exe' | Where-Object { $_.Name -notlike '*Setup*' } | Select-Object -First 1
+          if (!$portable) { throw 'Portable Windows executable was not found.' }
+          $bytes = [System.IO.File]::ReadAllBytes($portable.FullName)
+          if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Portable artifact is not a Windows PE executable: $($portable.Name)" }
+          Write-Host "Verified Windows PE executable: $($portable.Name) ($($bytes.Length) bytes)"
+          $setup = Get-ChildItem release -Filter '*Setup.exe' | Select-Object -First 1
+          if (!$setup) { throw 'NSIS installer was not found.' }
+          $setupBytes = [System.IO.File]::ReadAllBytes($setup.FullName)
+          if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) { throw "Installer is not a Windows PE executable: $($setup.Name)" }
+          Write-Host "Verified Windows installer: $($setup.Name) ($($setupBytes.Length) bytes)"
+
       - name: Assemble verified release package
         shell: pwsh
         run: |
@@ -67,7 +82,29 @@ jobs:
           Get-ChildItem $stage -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "$stage\checksums.txt"
           Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
           if (!(Test-Path $zip)) { throw "Release ZIP was not created" }
+          Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') } | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "release\Dentiva-Pro-$version-checksums.txt"
           Get-FileHash $zip -Algorithm SHA256 | Format-List
+
+      - name: Publish GitHub release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          $assets = @(
+            "release\\Dentiva-Pro-$version-Windows-x64.exe",
+            "release\\Dentiva-Pro-$version-Windows-x64-Setup.exe",
+            "release\\Dentiva-Pro-$version-Windows-x64.zip",
+            "release\\Dentiva-Pro-$version-checksums.txt"
+          )
+          $release = gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag @assets --target $env:GITHUB_SHA --title "Dentiva Pro $version" --notes-file CHANGELOG.md
+          }
 
       - name: Publish Windows packaging diagnostics to branch
         if: failure()

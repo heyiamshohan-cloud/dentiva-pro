@@ -1,0 +1,56 @@
+{
+  "name": "dentiva-pro",
+  "version": "1.0.0",
+  "description": "Dentiva Pro \u2014 offline-first dental practice management for Windows",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "start:desktop": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win portable",
+    "check": "npm run test && npm run build",
+    "test": "node --test tests/*.test.mjs",
+    "package:release": "npm run build && ./scripts/package-release.sh"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@vitejs/plugin-legacy": "^6.0.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.0.5"
+  },
+  "build": {
+    "appId": "com.dentiva.pro",
+    "productName": "Dentiva Pro",
+    "artifactName": "Dentiva-Pro-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "compression": "maximum",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.png",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "portable": {
+      "artifactName": "Dentiva-Pro-${version}-Windows-x64.exe"
+    },
+    "publish": null
+  }
+}

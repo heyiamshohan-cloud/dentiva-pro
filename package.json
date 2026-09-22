@@ -67,6 +67,7 @@
       "artifactName": "Dentiva-Pro-${version}-Windows-x64-Setup.exe",
       "oneClick": false,
       "perMachine": false,
+      "selectPerMachineByDefault": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,

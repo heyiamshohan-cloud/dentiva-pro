@@ -92,7 +92,7 @@ const BENGALI_DICT = {
   'New patient': 'নতুন রোগী', 'New appointment': 'নতুন অ্যাপয়েন্টমেন্ট', 'New visit': 'নতুন ভিজিট', 'New invoice': 'নতুন ইনভয়েস', 'Saved medication': 'সংরক্ষিত ওষুধ', 'Choose a saved medicine...': 'সংরক্ষিত ওষুধ বেছে নিন...', 'Save current medicine to catalog': 'বর্তমান ওষুধ ক্যাটালগে সংরক্ষণ',
   'Record payment': 'পরিশোধ রেকর্ড', 'Add stock': 'স্টক যোগ করুন', 'Complete setup': 'সেটআপ সম্পূর্ণ করুন', 'Open appointments': 'অ্যাপয়েন্টমেন্ট খুলুন',
   'View queue': 'সিরিয়াল দেখুন', 'Clinical records': 'ক্লিনিক্যাল রেকর্ড', 'Create prescription': 'প্রেসক্রিপশন তৈরি করুন',
-  'Export CSV': 'CSV এক্সপোর্ট', 'Print queue': 'সিরিয়াল প্রিন্ট', 'Print statement': 'স্টেটমেন্ট প্রিন্ট', 'Stock movement': 'স্টক মুভমেন্ট',
+  'Export CSV': 'CSV এক্সপোর্ট', 'Activity log': 'কার্যকলাপ লগ', 'Signal categories': 'সিগন্যাল বিভাগ', 'Every protected action, attributed to the account that performed it': 'প্রতিটি সুরক্ষিত কাজ, যে অ্যাকাউন্ট করেছে তার সহিত', 'Print queue': 'সিরিয়াল প্রিন্ট', 'Print statement': 'স্টেটমেন্ট প্রিন্ট', 'Stock movement': 'স্টক মুভমেন্ট',
   'Export full backup': 'সম্পূর্ণ ব্যাকআপ এক্সপোর্ট', 'Import backup': 'ব্যাকআপ ইমপোর্ট', 'Save settings': 'সেটিংস সংরক্ষণ',
   'Cancel': 'বাতিল', 'Save changes': 'পরিবর্তন সংরক্ষণ', 'Save record': 'রেকর্ড সংরক্ষণ', 'Search anything': 'যেকোনো কিছু খুঁজুন',
   'Today': 'আজ', 'Last 7 days': 'গত ৭ দিন', 'Last 1 month': 'গত ১ মাস', 'Last 3 months': 'গত ৩ মাস', 'Last 6 months': 'গত ৬ মাস', 'Last 1 year': 'গত ১ বছর', 'Custom range': 'কাস্টম সময়সীমা',
@@ -155,7 +155,7 @@ const NAV_GROUPS = [
   { label: 'Finance', items: [['billing', 'Billing', 'receipt'], ['payments', 'Payments', 'credit'], ['accounting', 'Accounting', 'dollar']] },
   { label: 'Operations', items: [['inventory', 'Inventory', 'box'], ['suppliers', 'Suppliers', 'truck'], ['staff', 'Staff', 'briefcase']] },
   { label: 'Insights', items: [['reports', 'Reports', 'chart'], ['analytics', 'Analytics', 'activity']] },
-  { label: 'System', items: [['notifications', 'Notifications', 'bell'], ['backup', 'Backup & Restore', 'backup'], ['diagnostics', 'Diagnostics', 'database'], ['users', 'User Accounts', 'users'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help'], ['about', 'About', 'info']] }
+  { label: 'System', items: [['notifications', 'Notifications', 'bell'], ['audit', 'Activity log', 'activity'], ['backup', 'Backup & Restore', 'backup'], ['diagnostics', 'Diagnostics', 'database'], ['users', 'User Accounts', 'users'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help'], ['about', 'About', 'info']] }
 ];
 
 function icon(name, size = 18, className = '') {
@@ -524,7 +524,7 @@ function unsupportedSchemaScreen() {
 /* ------------------------------------------------------------------ */
 /* Pages                                                               */
 /* ------------------------------------------------------------------ */
-const PAGE_PERMISSIONS = { patients: 'patients.view', appointments: 'appointments.view', queue: 'appointments.queue', clinical: 'clinical.view', prescriptions: 'prescriptions.view', dental: 'clinical.view', treatments: 'clinical.view', billing: 'billing.view', payments: 'payments.view', accounting: 'accounting.view', inventory: 'inventory.view', suppliers: 'inventory.view', staff: 'staff.view', reports: 'reports.view', analytics: 'reports.analytics', notifications: 'notifications.manage', backup: 'backup.create', diagnostics: 'diagnostics.view', settings: 'settings.view', users: 'users.manage' };
+const PAGE_PERMISSIONS = { patients: 'patients.view', appointments: 'appointments.view', queue: 'appointments.queue', clinical: 'clinical.view', prescriptions: 'prescriptions.view', dental: 'clinical.view', treatments: 'clinical.view', billing: 'billing.view', payments: 'payments.view', accounting: 'accounting.view', inventory: 'inventory.view', suppliers: 'inventory.view', staff: 'staff.view', reports: 'reports.view', analytics: 'reports.analytics', notifications: null, audit: 'audit.view', backup: 'backup.create', diagnostics: 'diagnostics.view', settings: 'settings.view', users: 'users.manage' };
 
 function permissionDeniedPage(title) {
   return `<div class="page"><div class="empty-state" style="padding:64px 0"><span class="empty-icon-wrap">${icon('shield', 27, 'empty-icon')}</span><h3>${esc(localized(title))}</h3><p>Your current account does not have permission to open this area. Ask an Administrator to adjust access.</p></div></div>`;
@@ -536,7 +536,7 @@ async function renderPage() {
     clinical: renderClinical, prescriptions: renderPrescriptions, dental: renderDental, treatments: renderTreatments,
     billing: renderBilling, payments: renderPayments, accounting: renderAccounting, inventory: renderInventory,
     suppliers: renderSuppliers, staff: renderStaff, reports: renderReports, analytics: renderAnalytics,
-    notifications: renderNotifications, backup: renderBackup, diagnostics: renderDiagnostics,
+    notifications: renderNotifications, audit: renderAuditLogPage, backup: renderBackup, diagnostics: renderDiagnostics,
     settings: renderSettings, users: renderUsers, help: renderHelp, about: renderAbout
   };
   const permission = PAGE_PERMISSIONS[ui.page];
@@ -1135,6 +1135,62 @@ function buildRestorePlanView(candidate) {
   const plan = candidate && candidate.state ? buildRestorePlan({}, candidate.state, { modules, strategy: ui.restoreCandidate?.strategy || 'Replace' }) : null;
   return { modules, plan };
 }
+const AUDIT_ENTITIES = ['Appointment', 'Attachment', 'Dashboard', 'Dental record', 'Expense', 'Follow-up', 'Inventory', 'Inventory movement', 'Invoice', 'Medication catalog', 'Notification', 'Notifications', 'Patient', 'Payment', 'Payment adjustment', 'Prescription', 'Referral', 'Saved search', 'Settings', 'Staff', 'Supplier', 'Treatment', 'Treatment plan', 'User', 'Visit', 'Workspace'];
+const auditState = () => listState.audit || (listState.audit = { page: 1, pageSize: 25, query: '', filters: {} });
+async function renderAuditLogPage() {
+  const state = auditState();
+  const users = can('settings.view') ? (await q('users', {}).catch(() => ({ users: [] }))) : { users: [] };
+  const userRows = users.users || users.rows || [];
+  const result = await q('auditList', {
+    page: state.page, pageSize: state.pageSize, query: state.query,
+    entity: state.filters.entity || '', userId: state.filters.userId || '',
+    from: state.filters.from || '', to: state.filters.to || ''
+  });
+  const roleByUserId = new Map(userRows.map((user) => [user.id, user.role]));
+  const rows = (result.rows || []).map((row) => `<tr>
+    <td><small>${esc(String(row.createdAt || '').replace('T', ' ').slice(0, 19))}</small></td>
+    <td><strong>${esc(row.userName || 'System')}</strong></td>
+    <td>${esc(roleByUserId.get(row.userId) || row.role || '—')}</td>
+    <td>${esc(row.action || '—')}</td>
+    <td>${esc(row.entity || '—')}</td>
+    <td><code class="code-chip">${esc(String(row.entityId || '—').slice(0, 24))}</code></td>
+    <td>${row.entity === 'Patient' && row.entityId ? esc(patientName(row.entityId)) : esc(row.patientId ? patientName(row.patientId) : '—')}</td>
+    <td>${esc(row.summary || '')}</td>
+    <td class="row-actions">${button('Details', 'audit-details', 'eye', 'link', `data-id="${attr(row.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Activity log', 'Every protected action, attributed to the account that performed it — append-only and tamper-evident.', can('audit.export') ? button('Export CSV', 'audit-export', 'download', 'secondary') : '')}
+    ${toolbar(`
+      <label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search action, user or summary" value="${attr(state.query)}" data-input="list-query" data-collection="audit" aria-label="Search audit log"></label>
+      <select data-change="audit-entity" aria-label="Filter by record type"><option value="">All record types</option>${AUDIT_ENTITIES.map((entity) => `<option value="${attr(entity)}" ${state.filters.entity === entity ? 'selected' : ''}>${esc(entity)}</option>`).join('')}</select>
+      ${userRows.length ? `<select data-change="audit-user" aria-label="Filter by user"><option value="">All users</option>${userRows.map((user) => `<option value="${attr(user.id)}" ${state.filters.userId === user.id ? 'selected' : ''}>${esc(user.name)} · ${esc(user.role)}</option>`).join('')}</select>` : ''}
+      <input type="date" data-change="audit-from" value="${attr(state.filters.from || '')}" aria-label="From date">
+      <input type="date" data-change="audit-to" value="${attr(state.filters.to || '')}" aria-label="To date">`, `${badge(`${number(result.total || 0)} entr${(result.total || 0) === 1 ? 'y' : 'ies'}`)}`)}
+    ${(result.rows || []).length ? dataTable(['Time', 'User', 'Role', 'Action', 'Record', 'ID', 'Patient', 'Summary', ''], rows) : emptyState('activity', 'No audit entries match', 'Adjust the filters or date range — the trail itself is never deleted.')}
+    ${tablePager(result.total || 0, state.page, 'audit')}
+  </div>`;
+}
+function modalAuditDetail(data = {}) {
+  const row = data.row || {};
+  const payload = (() => {
+    const candidate = row.payload && typeof row.payload === 'object' ? row.payload : {};
+    const safe = {};
+    for (const [key, value] of Object.entries(candidate)) {
+      if (/pin|hash|secret|password|salt|token/i.test(key)) continue;
+      safe[key] = value;
+    }
+    return safe;
+  })();
+  return `${modalHead('AUDIT EVENT', row.action || 'Event', `${esc(String(row.createdAt || '').replace('T', ' ').slice(0, 19))} · ${esc(row.userName || 'System')}`)}
+    <div class="detail-list">
+      <div><dt>Entity</dt><dd>${esc(row.entity || '—')} · <code class="code-chip">${esc(String(row.entityId || '—').slice(0, 32))}</code></dd></div>
+      <div><dt>Summary</dt><dd>${esc(row.summary || '—')}</dd></div>
+      ${Object.keys(payload).length ? `<div><dt>Recorded snapshot</dt><dd><pre class="audit-payload">${esc(JSON.stringify(payload, null, 2).slice(0, 4000))}</pre></dd></div>` : ''}
+    </div>
+    <p class="form-note">${icon('shield', 14)} The trail is append-only: entries can never be edited or deleted by any account. Snapshot keys that could hold secrets are removed before display.</p>
+    ${modalFooter('Close', '', '')}`;
+}
+
 async function renderBackup() {
   const [list, info] = await Promise.all([api.listBackups().catch(() => ({ ok: true, backups: [] })), api.workspaceInfo().catch(() => null)]);
   const backups = list.backups || [];
@@ -1345,7 +1401,7 @@ function modal() {
     supplier: modalSupplier, staff: modalStaff, treatment: modalTreatment, 'treatment-plan': modalTreatmentPlan,
     referral: modalReferral, followup: modalFollowup, attachment: modalAttachment, 'attachment-preview': modalAttachmentPreview,
     'user-account': modalUserAccount, security: modalSecurity, 'csv-import': modalCsvImport, search: modalSearch,
-    'saved-filters': modalSavedFilters, 'dashboard-customizer': modalDashboardCustomizer, 'audit-log': modalAuditLog,
+    'saved-filters': modalSavedFilters, 'dashboard-customizer': modalDashboardCustomizer, 'audit-detail': modalAuditDetail,
     notifications: modalNotifications, merge: modalPatientMerge, 'print-preview': modalPrintPreview
   };
   const builder = builders[type] || (() => '');
@@ -1919,11 +1975,6 @@ function modalDashboardCustomizer(data = {}) {
     <p class="form-note">The metric strip and shortcut actions are always visible. Keep at least one operational card enabled. Use the arrows to reorder enabled cards.</p>
     <div class="modal-footer"><button class="btn btn-link" data-action="reset-dashboard-widgets">Reset layout</button><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
 }
-function modalAuditLog(data = {}) {
-  return `${modalHead('AUDIT TRAIL', 'Audit log', 'Every protected action is attributed to the account that performed it.')}
-    <div class="form-grid"><label class="field-label">Search<input type="search" name="auditQuery" value="${attr(data.query || '')}" placeholder="Action, user or summary"></label></div>
-    <div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Close</button><button class="btn btn-primary" data-action="run-audit-search">${icon('search', 15)}<span>Search audit</span></button></div>`;
-}
 function modalNotifications(data = {}) {
   const notes = notificationItems().slice(0, 12);
   return `${modalHead('NOTIFICATIONS', 'Notification centre', notes.length ? 'Meaningful signals from your workspace.' : 'Your workspace is quiet.')}
@@ -2466,6 +2517,26 @@ async function handleClick(event) {
     case 'open-notifications': ui.modal = { type: 'notifications', data: {} }; return render();
     case 'mark-notifications-read': await op('notification.markAllRead', {}); await refreshNotifications(); return render();
     case 'notification-dismiss': { const dismissed = await op('notification.dismiss', { id }); if (dismissed) await refreshNotifications(); return render(); }
+    case 'audit-details': { const state = auditState(); const result = await q('auditList', { page: state.page, pageSize: state.pageSize, query: state.query, entity: state.filters.entity || '', userId: state.filters.userId || '', from: state.filters.from || '', to: state.filters.to || '' }); const row = (result.rows || []).find((entry) => entry.id === id) || {}; ui.modal = { type: 'audit-detail', data: { row } }; return render(); }
+    case 'audit-export': {
+      const state = auditState();
+      const head = ['Time', 'User', 'Action', 'Record type', 'Record ID', 'Summary'];
+      const out = [head.join(',')];
+      let page = 1; let total = Infinity; let exported = 0;
+      while (exported < total) {
+        const chunk = await q('auditList', { page, pageSize: 500, query: state.query, entity: state.filters.entity || '', userId: state.filters.userId || '', from: state.filters.from || '', to: state.filters.to || '' });
+        total = chunk.total || 0;
+        for (const row of chunk.rows || []) {
+          out.push([String(row.createdAt || ''), row.userName || 'System', row.action || '', row.entity || '', row.entityId || '', row.summary || ''].map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(','));
+        }
+        exported += (chunk.rows || []).length;
+        page += 1;
+        if (!(chunk.rows || []).length) break;
+      }
+      downloadBlob(out.join('\n'), `dentiva-audit-log-${today()}.csv`, 'text/csv');
+      notify(`Exported ${number(exported)} audit entr${exported === 1 ? 'y' : 'ies'}.`);
+      return;
+    }
     case 'notification-open':
       await op('notification.markRead', { id });
       const note = notificationItems().find((item) => item.id === id);
@@ -2774,6 +2845,10 @@ async function handleChange(event) {
     case 'analytics-range': ui.analyticsRange = target.value; return render();
     case 'report-type': ui.reportType = target.value; return render();
     case 'print-page-size': if (ui.modal?.type === 'print-preview') { ui.modal.data.pageSize = target.value; return render(); } return;
+    case 'audit-entity': auditState().filters.entity = target.value; auditState().page = 1; return render();
+    case 'audit-user': auditState().filters.userId = target.value; auditState().page = 1; return render();
+    case 'audit-from': auditState().filters.from = target.value; auditState().page = 1; return render();
+    case 'audit-to': auditState().filters.to = target.value; auditState().page = 1; return render();
     case 'notification-rule': {
       const kind = target.dataset.kind;
       const nextRules = { ...notificationRules(), [kind]: target.checked };

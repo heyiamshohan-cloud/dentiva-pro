@@ -8,10 +8,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $portable = (Resolve-Path $PortablePath).Path
 $installer = (Resolve-Path $InstallerPath).Path
-$root = Join-Path $env:RUNNER_TEMP "dentiva-pro-smoke-$([guid]::NewGuid().ToString('N'))"
+$smokeId = [guid]::NewGuid().ToString('N')
+$root = Join-Path $env:RUNNER_TEMP "dentiva-pro-smoke-$smokeId"
 $userData = Join-Path $root 'user-data'
-$installDir = Join-Path $root 'installed'
+$installDir = Join-Path $env:RUNNER_TEMP "dentiva-pro-installed-$smokeId"
+$preInstallProfile = ''
+$postInstallProfile = ''
 New-Item -ItemType Directory -Path $userData -Force | Out-Null
+
+function Profile-Snapshot([string]$directory) {
+  if (!(Test-Path $directory)) { return '<profile missing>' }
+  return ((Get-ChildItem $directory -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName.Replace($directory, '<profile>')):$($_.Length)" }) -join ', ')
+}
 
 function Stop-ChildApp([System.Diagnostics.Process]$process) {
   if ($process -and !$process.HasExited) {
@@ -50,8 +58,8 @@ function Start-AndCheck([string]$path, [string]$dataDir, [string]$phase = 'verif
   $log = Get-Content $logPath -Raw -ErrorAction SilentlyContinue
   $errorLog = Get-Content "$logPath.err" -Raw -ErrorAction SilentlyContinue
   if ($log -notmatch 'DENTIVA_SMOKE_RESULT:.*"ok":true') {
-    $profileFiles = if (Test-Path $dataDir) { (Get-ChildItem $dataDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName.Replace($dataDir, '<profile>')):$($_.Length)" }) -join ', ' } else { '<profile missing>' }
-    $diagnostic = (($log + "`n" + $errorLog + "`nprofile=$profileFiles").Trim() -replace "\r?\n", ' | ')
+    $profileFiles = Profile-Snapshot $dataDir
+    $diagnostic = (($log + "`n" + $errorLog + "`nprofile=$profileFiles`npreInstall=$preInstallProfile`npostInstall=$postInstallProfile").Trim() -replace "\r?\n", ' | ')
     if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
     Write-Host "::error title=Electron smoke phase $phase::$diagnostic"
     throw "Electron smoke phase $phase did not report success.`n$log`n$errorLog`nprofile=$profileFiles"
@@ -71,9 +79,13 @@ try {
 
   # Install to a disposable per-user directory, launch the installed executable,
   # then run the generated uninstaller. This does not touch the runner profile.
+  $preInstallProfile = Profile-Snapshot $userData
+  Write-Host "Portable profile before NSIS install: $preInstallProfile"
   Write-Host "Installing NSIS package into $installDir"
   $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
   if ($install.ExitCode -ne 0) { throw "NSIS installer returned $($install.ExitCode)" }
+  $postInstallProfile = Profile-Snapshot $userData
+  Write-Host "Portable profile after NSIS install: $postInstallProfile"
   $installedExe = Get-ChildItem -Path $installDir -Filter '*.exe' -Recurse -File | Where-Object { $_.Name -eq 'Dentiva Pro.exe' } | Select-Object -First 1
   if (!$installedExe) { throw 'Installed Dentiva Pro application executable was not found.' }
   Start-AndCheck $installedExe.FullName $userData 'installed-verify' | Out-Null
@@ -84,7 +96,7 @@ try {
   Write-Host 'Windows packaged launch/restart/install/uninstall smoke passed.'
 }
 catch {
-  $diagnostic = ($_.Exception.ToString() -replace "\r?\n", ' | ')
+  $diagnostic = (($_.Exception.ToString() + "`npreInstall=$preInstallProfile`npostInstall=$postInstallProfile") -replace "\r?\n", ' | ')
   if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
   Write-Host "::error title=Windows smoke failure::$diagnostic"
   if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows smoke failure`n`n$diagnostic" }
@@ -95,4 +107,5 @@ finally {
   New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
   if (Test-Path $root) { Get-ChildItem $root -Filter '*.log*' -File -ErrorAction SilentlyContinue | Copy-Item -Destination $evidenceDir -Force -ErrorAction SilentlyContinue }
   if (Test-Path $root) { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
+  if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue }
 }

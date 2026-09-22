@@ -1148,8 +1148,20 @@ async function renderBackup() {
       <div class="backup-stat"><span class="backup-icon">${icon('database', 20)}</span><div><small>Database</small><strong>${formatBytes(storage.bytes || 0)}</strong></div></div>
       <div class="backup-stat"><span class="backup-icon">${icon('paperclip', 20)}</span><div><small>Attachments</small><strong>${formatBytes(storage.attachmentBytes || 0)} · ${number(storage.attachmentFiles || 0)} files</strong></div></div>
       <div class="backup-stat"><span class="backup-icon">${icon('users', 20)}</span><div><small>Records</small><strong>${number(Object.values(storage.recordCounts || {}).reduce((a, b) => a + b, 0))}</strong></div></div>
-      <div class="backup-stat"><span class="backup-icon">${icon('backup', 20)}</span><div><small>Last backup</small><strong>${storage.lastBackupAt ? date(storage.lastBackupAt.slice(0, 10)) : 'Never'}</strong></div></div>
+      <div class="backup-stat"><span class="backup-icon">${icon('backup', 20)}</span><div><small>Last backup</small><strong>${(info?.lastBackupAt || storage.lastBackupAt) ? date(String(info?.lastBackupAt || storage.lastBackupAt).slice(0, 10)) : 'Never'}</strong></div></div>
     </section>
+    ${(() => {
+      const auto = (() => { try { return JSON.parse(info?.lastAutoBackupStatus || 'null'); } catch { return null; } })();
+      const enabled = appState.settings.backupEnabled !== false;
+      const freq = { 12: 'every 12 hours', 24: 'every 24 hours', 72: 'every 3 days', 168: 'weekly' }[Number(appState.settings.backupIntervalHours) || 24] || `every ${Number(appState.settings.backupIntervalHours) || 24} hours`;
+      return `<section class="card">
+        <div class="card-title"><div class="card-title-text">${icon('clock', 17)}<h2>Automatic backups</h2></div><span class="badge ${enabled ? 'success' : 'muted'}">${enabled ? 'Scheduler on' : 'Scheduler off'}</span></div>
+        ${enabled ? `<p class="form-note">${icon('backup', 14)} Runs ${esc(freq)} on this device, keeping the newest ${number(appState.settings.backupRetention || 10)} backup(s). Automatic backups are full verified snapshots — identical to manual ones.</p>` : `<p class="form-note">${icon('warning', 14)} Automatic backups are disabled in Settings → Backup behaviour. Manual backups still work; clinics are strongly advised to keep the scheduler on.</p>`}
+        ${auto ? (auto.ok
+          ? `<p class="form-note">${icon('check', 14)} Last automatic backup: ${dateFull(String(auto.at || '').slice(0, 10))} (${esc(auto.name || 'snapshot')}${auto.pruned ? ` · pruned ${number(auto.pruned)} older copy/copies` : ''})</p>`
+          : `<p class="form-note text-danger">${icon('warning', 14)} The last automatic backup failed at ${dateFull(String(auto.at || '').slice(0, 10))}: ${esc(auto.error || 'unknown error')}. Check free disk space, then create a manual backup.</p>`) : '<p class="form-note">No automatic backup has run yet in this session.</p>'}
+      </section>`;
+    })()}
     <section class="card">
       <div class="card-title"><div class="card-title-text">${icon('backup', 17)}<h2>Backups on this device</h2></div></div>
       ${backups.length ? backups.map((backup) => `<div class="record-row"><div><strong>${backup.name}</strong><small>${backup.createdAt ? dateFull(backup.createdAt.slice(0, 10)) : '—'}${backup.label ? ` · ${esc(backup.label)}` : ''} · ${formatBytes(backup.bytes || 0)} · ${number(Object.values(backup.recordCounts || {}).reduce((a, b) => a + b, 0))} records${backup.valid ? '' : ' · manifest unreadable'}</small></div><div class="row-actions">${button('Validate and restore selection', 'validate-backup', 'check', 'secondary', `data-id="${attr(backup.name)}"`)}${can('backup.restore') ? button('Restore', 'restore-backup', 'upload', 'primary', `data-id="${attr(backup.name)}"`) : ''}${can('backup.restore') ? button('Delete', 'delete-backup', 'trash', 'link', `data-id="${attr(backup.name)}"`) : ''}</div></div>`).join('') : emptyState('backup', 'No backups yet', 'Create a secure backup to protect this workspace. Restores always keep a pre-restore safety backup.')}
@@ -1253,9 +1265,12 @@ async function renderSettings() {
       </section>
       <section class="card"><div class="card-title"><div class="card-title-text">${icon('backup', 17)}<h2>Backup behaviour</h2></div></div>
         <div class="form-grid two">
-          <label class="check-label"><input type="checkbox" name="backupEnabled" ${s.backupEnabled !== false ? 'checked' : ''}> Recommend backups after 7 days</label>
+          <label class="check-label"><input type="checkbox" name="backupEnabled" ${s.backupEnabled !== false ? 'checked' : ''}> Automatically back up this workspace</label>
+          ${selectField('Automatic backup frequency', 'backupIntervalHours', [['12', 'Every 12 hours'], ['24', 'Every 24 hours (daily)'], ['72', 'Every 3 days'], ['168', 'Weekly']], String(s.backupIntervalHours || 24))}
+          ${field('Backups to keep (retention)', 'backupRetention', s.backupRetention || 10, 'number', 'min="1" max="365" step="1"')}
           <label class="check-label"><input type="checkbox" name="notifications" ${s.notifications !== false ? 'checked' : ''}> Enable operational notifications</label>
         </div>
+        <p class="form-note">${icon('shield', 14)} Automatic backups run silently on this device, keep the newest N copies, and surface their status on the Backup &amp; Restore page. Manual backups always work too.</p>
       </section>
       <div class="form-actions-bar"><div class="form-note">${icon('shield', 14)} No cloud required — settings apply to this device only.</div>${button('Cancel', 'close-modal', 'close', 'link')}${button('Save settings', 'submit', 'check', 'primary')}</div>
     </form>

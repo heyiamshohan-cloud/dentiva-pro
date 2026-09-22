@@ -420,7 +420,8 @@ class LocalApi {
       storage: this.repo.storageInfo(),
       integrity: this.repo.integrityCheck(),
       lastBackupAt: this.repo.getMeta('lastBackupAt', null),
-      lastRestoreAt: this.repo.getMeta('lastRestoreAt', null)
+      lastRestoreAt: this.repo.getMeta('lastRestoreAt', null),
+      lastAutoBackupStatus: this.repo.getMeta('lastAutoBackupStatus', null)
     };
   }
 

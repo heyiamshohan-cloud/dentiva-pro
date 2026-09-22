@@ -23,6 +23,7 @@ import { SessionManager } from './lib/auth.mjs';
 import { registerIpc } from './lib/ipc.mjs';
 import { DB_LAYOUT_VERSION } from './lib/schema.mjs';
 import { validatePrintHtml, buildIsolatedHtml, pageSizeForPrint, pageSizeForPdf, normalizePageSize, safePdfFilename } from './lib/print.mjs';
+import { startBackupScheduler } from './lib/backup-scheduler.mjs';
 import { diagnoseWorkspace } from './lib/diagnostics.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,7 @@ const isSmoke = process.env.DENTIVA_SMOKE === '1';
 const isDev = !app.isPackaged && !isSmoke;
 
 let mainWindow = null;
+let stopBackupScheduler = null;
 let workspace = null;
 let repo = null;
 let sessions = null;
@@ -284,6 +286,7 @@ app.whenReady().then(async () => {
     workspace.setMeta('migrationError', `This workspace was created by a newer Dentiva Pro (layout v${layoutVersion}; this build supports v${DB_LAYOUT_VERSION}). Export the preserved data or upgrade the application.`);
   }
   registerIpc({ repo, ws: workspace, sessions });
+  stopBackupScheduler = startBackupScheduler({ repo, ws: workspace, log: (message) => console.log(message) });
 
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
@@ -360,6 +363,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => { if (!isSmoke && process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
+  try { if (stopBackupScheduler) stopBackupScheduler(); } catch { /* timer already gone */ }
   try {
     if (workspace) {
       // Persist a health snapshot alongside the shutdown for crash forensics.

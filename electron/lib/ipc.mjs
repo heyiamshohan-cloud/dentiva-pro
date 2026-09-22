@@ -272,7 +272,8 @@ export function registerIpc({ repo, ws, sessions }) {
         storage,
         integrity: ws.integrityCheck(),
         lastBackupAt: repo.getMeta('lastBackupAt', null),
-        lastRestoreAt: repo.getMeta('lastRestoreAt', null)
+        lastRestoreAt: repo.getMeta('lastRestoreAt', null),
+        lastAutoBackupStatus: repo.getMeta('lastAutoBackupStatus', null)
       };
     }
   };

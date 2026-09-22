@@ -110,10 +110,10 @@ The patient directory is paginated at 50 rows per page. A 10,000-patient interac
 
 ### Workflow evidence
 
-- **Latest checksum-verification workflow:** [run 35691191448](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35691191448)
+- **Latest checksum-verification workflow:** [run 35691449396](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35691449396)
 - **Result:** completed successfully.
 - **Successful steps:** dependency install; Windows test/build; portable and installer packaging; PE verification; application ZIP assembly and forbidden-content inspection; checksum generation and self-validation; release publication; artifact upload.
-- The prior release build [run 35690886125](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35690886125) also completed successfully and created the initial v1.1.0 release assets.
+- The prior checksum-verification build [run 35691191448](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35691191448) and initial release build [run 35690886125](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35690886125) also completed successfully and created the initial v1.1.0 release assets.
 
 The workflow checks the first two bytes of both EXE files for the Windows PE `MZ` signature. It expands the application ZIP and requires `DentivaPro.exe`; it rejects `.git`, `node_modules`, `tests` and `test-data` content. The latest workflow also rehashes every EXE/ZIP and compares each hash to the generated checksum file before publication.
 
@@ -123,10 +123,10 @@ GitHub Release API asset metadata was checked after the latest upload. The API-r
 
 | Asset | Size | SHA-256 digest reported by GitHub |
 |---|---:|---|
-| `Dentiva-Pro-1.1.0-Windows-x64.exe` | 74,377,874 | `928943176d1a41f4d7a661a74f7f237fc81aef6f194a648af62a93ce2af8d2a0` |
-| `Dentiva-Pro-1.1.0-Windows-x64-Setup.exe` | 74,604,244 | `44e7b3a03c3ad338d1eeb317568ab8c491427bb3fd4ccaa75b2c6b6ff8bb290f` |
-| `Dentiva-Pro-1.1.0-Windows-x64.zip` | 148,813,310 | `2bc28cd6e86e7d2d782e7c5cd9b4169e2412422dd7a6db9034d56545216b3db7` |
-| `Dentiva-Pro-1.1.0-checksums.txt` | 309 | `25425262e456ca3c77cab7fe7f16dc95723977fbff19b5958c180654c9e5db79` |
+| `Dentiva-Pro-1.1.0-Windows-x64.exe` | 74,377,875 | `6b0047e40869a1c6d9342a3b65c9be85a196323a50622ebd9940721af3bebddf` |
+| `Dentiva-Pro-1.1.0-Windows-x64-Setup.exe` | 74,604,244 | `4e9dc53ea203c0c0e5132583fd94266c09df1802e55171e894d7904d5ccc1890` |
+| `Dentiva-Pro-1.1.0-Windows-x64.zip` | 148,813,319 | `2e9677efa46975d629cc1428745ef859d391457bf00407c9207c71e4af69fbf7` |
+| `Dentiva-Pro-1.1.0-checksums.txt` | 309 | `cf506b451b64ac949e3c05a20fc89461fb96cf0702cc18c87ad0167064510ea0` |
 
 The sandbox could not complete a direct CDN download of the large release assets because the release-assets connection returned EOF/SSL errors. Therefore this report does not pretend to have independently rehashed downloaded bytes locally; it records the successful Windows runner's self-validation and the authoritative GitHub asset digests instead.
 
@@ -136,7 +136,7 @@ The sandbox could not complete a direct CDN download of the large release assets
 - Checksum workflow hardening commit: `f43551f647e9218ad222c776ad6834d59923f7eb` (`ci: verify release checksums before publishing`).
 - `package.json` and `package-lock.json`: version `1.1.0`.
 - Renderer `APP_VERSION`: `1.1.0`.
-- Remote branch `arena/01a0c66a-dentiva-pro` points to the checksum workflow commit before this report commit.
+- Remote branch `arena/01a0c66a-dentiva-pro` points to the final report commit `a1b08cb1a7ccdc131aa84a7af3f2b34110ba70f8`.
 - `v1.0.0` remains at its existing commit; `v1.1.0` is a separate tag/release pointing to the new 1.1.0 implementation commit.
 - Release URL: <https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.1.0>
 - Release assets are not committed to Git; they are published through the GitHub Release and kept out of the source checkout by repository ignore rules.

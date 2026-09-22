@@ -67,16 +67,16 @@ try {
   # created patient and appointment after restarting the same SQLite profile.
   Start-AndCheck $portable $userData 'create' | Out-Null
   if (!(Test-Path $userData)) { throw 'Portable launch did not create a user-data profile.' }
-  Start-AndCheck $portable $userData 'verify' | Out-Null
+  Start-AndCheck $portable $userData 'portable-verify' | Out-Null
 
   # Install to a disposable per-user directory, launch the installed executable,
   # then run the generated uninstaller. This does not touch the runner profile.
   Write-Host "Installing NSIS package into $installDir"
   $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
   if ($install.ExitCode -ne 0) { throw "NSIS installer returned $($install.ExitCode)" }
-  $installedExe = Get-ChildItem -Path $installDir -Filter '*.exe' -Recurse -File | Where-Object { $_.Name -notlike 'unins*.exe' } | Select-Object -First 1
-  if (!$installedExe) { throw 'Installed application executable was not found.' }
-  Start-AndCheck $installedExe.FullName $userData 'verify' | Out-Null
+  $installedExe = Get-ChildItem -Path $installDir -Filter '*.exe' -Recurse -File | Where-Object { $_.Name -eq 'Dentiva Pro.exe' } | Select-Object -First 1
+  if (!$installedExe) { throw 'Installed Dentiva Pro application executable was not found.' }
+  Start-AndCheck $installedExe.FullName $userData 'installed-verify' | Out-Null
   $uninstaller = Get-ChildItem -Path $installDir -Filter 'unins*.exe' -Recurse -File | Select-Object -First 1
   if (!$uninstaller) { throw 'Generated uninstaller was not found.' }
   $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/S') -Wait -PassThru

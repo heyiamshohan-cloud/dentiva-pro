@@ -209,7 +209,8 @@ function smokeVerify() {
 }
 
 app.whenReady().then(async () => {
-  durableStore = await createSQLiteStore(app.getPath('userData'));
+  const storageDirectory = process.env.DENTIVA_USER_DATA ? path.resolve(process.env.DENTIVA_USER_DATA) : app.getPath('userData');
+  durableStore = await createSQLiteStore(storageDirectory);
 
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),

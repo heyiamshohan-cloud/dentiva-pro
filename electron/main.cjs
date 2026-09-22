@@ -93,6 +93,14 @@ async function runSmokePhase() {
 // through Electron's webContents, not a mocked DOM or a source-only assertion.
 function smokeCreate() {
   const wait = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
+  const waitFor = async (predicate, timeout = 12000) => {
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      if (predicate()) return;
+      await wait(100);
+    }
+    throw new Error('Timed out waiting for the renderer smoke state.');
+  };
   const field = (name, value) => {
     const element = document.querySelector(`[name="${name}"]`);
     if (!element) throw new Error(`missing field ${name}`);
@@ -130,22 +138,29 @@ function smokeCreate() {
     if (document.querySelector('form[data-form="user-login"]')) {
       field('pin', '2468');
       await submit('form[data-form="user-login"]');
+      await waitFor(() => !document.querySelector('form[data-form="user-login"]'));
     }
+    await waitFor(() => document.querySelector('[data-action="open-patient"]'));
     await click('[data-action="open-patient"]');
     field('fullName', 'Windows Smoke Patient');
     field('phone', '01800000000');
     await submit('form[data-form="patient"]');
+    await waitFor(() => !document.querySelector('form[data-form="patient"]'));
     await click('[data-action="navigate"][data-page="patients"]');
+    await waitFor(() => document.body.textContent.includes('Windows Smoke Patient'));
     const patient = [...document.querySelectorAll('.clickable-row, [data-id]')].some((row) => row.textContent?.includes('Windows Smoke Patient')) || document.body.textContent.includes('Windows Smoke Patient');
     if (!patient) throw new Error('created patient was not rendered');
     await click('[data-action="navigate"][data-page="appointments"]');
+    await waitFor(() => document.querySelector('[data-action="open-appointment"]'));
     await click('[data-action="open-appointment"]');
     field('patientId', [...document.querySelectorAll('form[data-form="appointment"] select[name="patientId"] option')].find((option) => option.textContent.includes('Windows Smoke Patient'))?.value || '');
     field('date', new Date().toISOString().slice(0, 10));
     field('time', '10:00');
     field('reason', 'Smoke appointment');
     await submit('form[data-form="appointment"]');
+    await waitFor(() => !document.querySelector('form[data-form="appointment"]'));
     await click('[data-action="navigate"][data-page="backup"]');
+    await waitFor(() => document.body.textContent.includes('Backup') || document.body.textContent.includes('backup'));
     const backupPage = document.body.textContent.includes('Backup') || document.body.textContent.includes('backup');
     if (!backupPage) throw new Error('backup page did not render');
     return { ok: true, patient, backupPage };
@@ -154,6 +169,14 @@ function smokeCreate() {
 
 function smokeVerify() {
   const wait = (ms = 350) => new Promise((resolve) => setTimeout(resolve, ms));
+  const waitFor = async (predicate, timeout = 12000) => {
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      if (predicate()) return;
+      await wait(100);
+    }
+    throw new Error('Timed out waiting for the renderer restart state.');
+  };
   return (async () => {
     if (document.querySelector('form[data-form="user-login"]')) {
       const pin = document.querySelector('[name="pin"]');
@@ -161,14 +184,16 @@ function smokeVerify() {
       pin.value = '2468';
       pin.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('form[data-form="user-login"] button[type="submit"]')?.click();
-      await wait();
+      await waitFor(() => !document.querySelector('form[data-form="user-login"]'));
     }
+    await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]'));
     document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
-    await wait();
+    await waitFor(() => document.body.textContent.includes('Windows Smoke Patient'));
     const patientText = document.body.textContent || '';
     const hasPatient = patientText.includes('Windows Smoke Patient');
+    await waitFor(() => document.querySelector('[data-action="navigate"][data-page="backup"]'));
     document.querySelector('[data-action="navigate"][data-page="backup"]')?.click();
-    await wait();
+    await waitFor(() => /Backup/i.test(document.body.textContent || ''));
     const backupText = document.body.textContent || '';
     const hasBackup = backupText.includes('Backup') || backupText.includes('backup');
     return { ok: hasPatient && hasBackup, hasPatient, hasBackup };

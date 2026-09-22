@@ -66,6 +66,15 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Dentiva Pro"
+    },
+    "copyright": "Copyright © 2026 Md. Shohan Khan",
+    "extraMetadata": {
+      "dentivaBuild": "2026.09.22"
     }
-  }
+  },
+  "author": {
+    "name": "Md. Shohan Khan",
+    "email": "helloiamshohan@gmail.com"
+  },
+  "license": "Proprietary"
 }

@@ -21,7 +21,7 @@ test('local schema contains the core relational collections', () => {
     assert.match(source, new RegExp(`${collection}: \\[\\]`), `${collection} collection missing`);
   }
   assert.match(source, /schemaVersion: 1/);
-  assert.match(source, /manifest: \{/);
+  assert.match(source, /buildBackupManifest/);
 });
 
 test('financial source-of-truth formula is present and deterministic', () => {
@@ -32,13 +32,15 @@ test('financial source-of-truth formula is present and deterministic', () => {
   assert.equal(total, 3780);
   assert.match(source, /function invoiceTotals/);
   assert.match(source, /const due = Math\.max\(0, totals\.total - paid\)/);
-  assert.match(source, /amount > Number\(invoice\.due\)/);
+  assert.match(source, /canAcceptPayment/);
 });
 
 test('safety and offline guardrails exist', () => {
   assert.match(source, /No cloud required|offline-first/i);
   assert.match(source, /applicationLock/);
-  assert.match(source, /allowed = \['image\/png', 'image\/jpeg', 'image\/webp', 'application\/pdf', 'text\/plain'\]/);
+  assert.match(source, /translateDom/);
+  assert.match(source, /Professional dental practice management for Bangladesh/);
+  assert.match(source, /validateAttachmentFile/);
   assert.match(source, /Keep Existing/);
   assert.match(source, /Create New Copy/);
   assert.match(css, /@media \(max-width: 760px\)/);

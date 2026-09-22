@@ -54,7 +54,7 @@ Run the configured desktop target on a machine with the Electron binary cache:
 npm run dist:win
 ```
 
-The targets are a self-contained Windows x64 portable executable and an optional per-user NSIS installer under `release/`. See [`docs/BUILD.md`](docs/BUILD.md) for release hygiene.
+The targets are a self-contained Windows x64 portable executable and a per-user NSIS installer under `release/`. The verified 1.0.0 Windows assets are published in the [GitHub release](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.0.0). See [`docs/BUILD.md`](docs/BUILD.md) for release hygiene.
 
 ## Data handling
 
@@ -71,7 +71,7 @@ src/main.js         UI, local domain store, workflows, reports and print views
 src/styles.css      light-mode design system and responsive layout
 electron/           hardened desktop shell and preload bridge
 public/              icon assets
- docs/               user and build documentation
+docs/                user and build documentation
 ```
 
 ## Creator
@@ -83,3 +83,10 @@ WhatsApp: 01516591935
 ## Release
 
 Version **1.0.0**, build **2026.09.22**.
+
+Verified Windows x64 assets:
+
+- [DentivaPro.exe / portable application](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/download/v1.0.0/Dentiva-Pro-1.0.0-Windows-x64.exe)
+- [Windows installer](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/download/v1.0.0/Dentiva-Pro-1.0.0-Windows-x64-Setup.exe)
+- [Complete Windows x64 ZIP](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/download/v1.0.0/Dentiva-Pro-1.0.0-Windows-x64.zip)
+- [SHA-256 checksums](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/download/v1.0.0/Dentiva-Pro-1.0.0-checksums.txt)

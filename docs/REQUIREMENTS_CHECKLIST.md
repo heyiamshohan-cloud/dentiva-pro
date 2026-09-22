@@ -35,11 +35,15 @@ This is the implementation audit for the 1.0.0 source release.
 - [x] GitHub Actions Windows runner workflow that builds, verifies and uploads the EXE, installer and final application ZIP
 - [x] README, user guide, build guide, changelog and automated smoke checks
 
-## Environment-dependent release step
+## Verified Windows release
 
-The repository contains the Windows portable packaging configuration, but this Linux sandbox does not have the Electron binary cache. Downloading the Electron binary was blocked by the sandbox TLS path to GitHub release assets, so `Dentiva-Pro-1.0.0-Windows-x64.exe` was not emitted here. The source release ZIP and production renderer build were generated successfully.
+The local Linux sandbox cannot execute the Windows binary, but the pinned GitHub Actions Windows x64 runner successfully built and verified the release. The workflow checked PE `MZ` headers for both the portable executable and NSIS installer, assembled the final application ZIP, generated SHA-256 checksums and published all assets to the `v1.0.0` GitHub release.
 
-A machine with ordinary access to the Electron distribution cache can run `npm run dist:win` without changing the application source.
+- Portable executable: `Dentiva-Pro-1.0.0-Windows-x64.exe`
+- Installer: `Dentiva-Pro-1.0.0-Windows-x64-Setup.exe`
+- Application ZIP: `Dentiva-Pro-1.0.0-Windows-x64.zip`
+
+The workflow also ran the renderer build and test suite on Windows before packaging.
 
 ## Deliberate product boundaries
 

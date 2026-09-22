@@ -4,7 +4,7 @@
 
 - Node.js 20 or newer
 - npm 10 or newer
-- Windows packaging is provided by Electron Builder and targets a self-contained portable Windows x64 executable.
+- Windows packaging is provided by Electron Builder and targets a self-contained portable Windows x64 executable plus a per-user NSIS installer.
 
 ## Development
 
@@ -30,7 +30,7 @@ The output is written to `dist/` and is intentionally ignored by Git.
 npm run dist:win
 ```
 
-The build targets are `release/Dentiva-Pro-1.0.0-Windows-x64.exe` and `release/Dentiva-Pro-1.0.0-Windows-x64-Setup.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, multi-size ICO icon, asar packaging, non-admin execution and no publish target.
+The build targets are `release/Dentiva-Pro-1.0.0-Windows-x64.exe` and `release/Dentiva-Pro-1.0.0-Windows-x64-Setup.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, multi-size ICO icon, asar packaging, non-admin execution and no publish target. The repository workflow runs this target on a Windows x64 GitHub Actions runner, verifies PE headers, creates the final application ZIP and publishes release assets.
 
 For a portable source + built-renderer delivery package that does not include `node_modules`, use:
 

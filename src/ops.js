@@ -20,6 +20,7 @@ import {
   moneyToCents, centsToMoney, toNumber, hasPermission, sanitizeFilename, validateAttachmentFile,
   MOVEMENT_TYPES, FOLLOWUP_STATUSES, REFERRAL_STATUSES, INVOICE_STATUSES, APPOINTMENT_STATUSES
 } from './core.js';
+import { deriveNotifications, reconcileNotifications, normalizeNotificationRules } from './notifications.js';
 import { normaliseTags, validatePatientInput, validateTreatmentPlanInput } from './domain.js';
 
 export function makeId(prefix = 'id') {
@@ -236,7 +237,7 @@ export const OPS = {
         'clinicName', 'chamberName', 'dentistName', 'professionalTitle', 'phone', 'secondaryPhone',
         'email', 'address', 'city', 'district', 'country', 'logo', 'language', 'currency', 'timezone',
         'dateFormat', 'timeFormat', 'patientPrefix', 'invoicePrefix', 'appointmentPrefix', 'serialPrefix',
-        'receiptPrefix', 'visitPrefix', 'staffPrefix', 'itemPrefix', 'defaultDuration', 'taxEnabled', 'taxRate',
+        'receiptPrefix', 'visitPrefix', 'staffPrefix', 'itemPrefix', 'defaultDuration', 'taxEnabled', 'taxRate', 'notificationRules',
         'autoLockMinutes', 'sessionTimeoutMinutes', 'notifications', 'paymentMethods', 'expenseCategories',
         'inventoryCategories', 'chairs', 'rooms', 'backupEnabled', 'backupIntervalHours', 'backupRetention',
         'backupDirectory', 'lowStockThreshold', 'attachmentMaxMb', 'accent', 'density', 'printPageSize', 'documentFooter',
@@ -251,6 +252,7 @@ export const OPS = {
         changed.push(key);
       }
       if (next.documentFooter !== undefined) next.documentTemplate = { ...(next.documentTemplate && typeof next.documentTemplate === 'object' ? next.documentTemplate : {}), footer: str(next.documentFooter) };
+      if (next.notificationRules !== undefined) next.notificationRules = normalizeNotificationRules(next.notificationRules);
       if (Array.isArray(next.paymentMethods)) next.paymentMethods = [...new Set(next.paymentMethods.map(str).filter(Boolean))].slice(0, 30);
       if (Array.isArray(next.expenseCategories)) next.expenseCategories = [...new Set(next.expenseCategories.map(str).filter(Boolean))].slice(0, 40);
       if (Array.isArray(next.inventoryCategories)) next.inventoryCategories = [...new Set(next.inventoryCategories.map(str).filter(Boolean))].slice(0, 40);
@@ -1522,6 +1524,35 @@ export const OPS = {
     }
   },
 
+  'notifications.scan': {
+    permission: null, // any signed-in staff member may converge the shared signal feed
+    run(repo, payload, ctx) {
+      const settings = repo.getSettings();
+      if (settings.notifications === false) {
+        // Notifications disabled — drop every auto-derived row, keep manual ones.
+        for (let page = 1;; page += 1) {
+          const batch = repo.listCollection('notifications', { page, pageSize: 200 });
+          for (const row of batch.rows || []) if (String(row.id).startsWith('auto_')) repo.remove('notifications', row.id);
+          if (!batch.rows || batch.rows.length < 200) break;
+        }
+        return { ok: true, disabled: true, items: [], unread: 0, audit: [] };
+      }
+      const { rows: drafts, errors } = deriveNotifications(repo, settings, { now: new Date(ctx.now()) });
+      const existing = [];
+      for (let page = 1;; page += 1) {
+        const batch = repo.listCollection('notifications', { page, pageSize: 200, sort: 'recent' });
+        existing.push(...(batch.rows || []));
+        if (!batch.rows || batch.rows.length < 200) break;
+      }
+      const plan = reconcileNotifications(drafts, existing, { now: new Date(ctx.now()) });
+      for (const row of plan.remove) repo.remove('notifications', row);
+      for (const row of plan.update) repo.update('notifications', row);
+      for (const row of plan.insert) repo.insert('notifications', row);
+      const items = repo.notificationsActive(200);
+      return { ok: true, items, unread: items.filter((item) => !item.read && !item.dismissed).length, scanned: drafts.length, changes: plan.insert.length + plan.update.length + plan.remove.length, errors, audit: [] };
+    }
+  },
+
   'notification.markRead': {
     permission: null,
     run(repo, payload) {
@@ -1536,9 +1567,13 @@ export const OPS = {
     permission: null,
     run(repo) {
       const read = repo.getMeta('notificationRead', {}) || {};
-      for (const note of repo.notificationsActive(500)) {
-        repo.update('notifications', { ...note, read: true });
-        read[note.id] = true;
+      for (let page = 1;; page += 1) {
+        const batch = repo.listCollection('notifications', { page, pageSize: 200 });
+        for (const note of batch.rows || []) {
+          if (!note.read) repo.update('notifications', { ...note, read: true });
+          read[note.id] = true;
+        }
+        if (!batch.rows || batch.rows.length < 200) break;
       }
       repo.setMeta('notificationRead', read);
       return { ok: true, notificationRead: read, audit: [{ action: 'Notifications marked read', entity: 'Notifications', entityId: '', summary: 'Notification centre cleared' }] };

@@ -77,6 +77,13 @@ const roleTemplates = {
     'accounting.view', 'accounting.create', 'accounting.edit', 'reports.view', 'reports.export', 'backup.create', 'backup.restore',
     'settings.view', 'audit.view', 'staff.view', 'staff.create', 'staff.edit', 'staff.disable', 'patients.import', 'patients.export', 'reports.analytics', 'reports.clinical', 'data.export', 'data.import', 'backup.validate', 'backup.history', 'notifications.manage', 'diagnostics.view', 'customization.edit', 'documents.templates'
   ],
+  Accountant: [
+    'patients.view', 'billing.view', 'billing.create', 'billing.edit', 'billing.refund', 'billing.void',
+    'payments.view', 'payments.create', 'payments.adjust', 'payments.refund',
+    'accounting.view', 'accounting.create', 'accounting.edit',
+    'inventory.view', 'reports.view', 'reports.export', 'reports.analytics',
+    'data.export', 'backup.create', 'backup.validate', 'settings.view', 'audit.view'
+  ],
   Receptionist: ['patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'patients.import', 'patients.export', 'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.cancel', 'appointments.move', 'appointments.queue', 'queue.manage', 'billing.view', 'billing.create', 'payments.view', 'payments.create', 'inventory.view', 'reports.view', 'data.export', 'backup.create', 'backup.validate', 'settings.view'],
   'Dental Assistant': ['patients.view', 'clinical.view', 'clinical.create', 'clinical.attachments', 'appointments.view', 'appointments.queue', 'queue.manage', 'prescriptions.view', 'prescriptions.print', 'inventory.view', 'inventory.consume', 'inventory.expiry', 'reports.view', 'settings.view'],
   Cleaner: ['settings.view'],

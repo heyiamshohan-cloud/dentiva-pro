@@ -4,6 +4,7 @@
 // collections across every runtime (single source of truth, no competing defaults).
 
 import { ARRAY_COLLECTIONS, CURRENT_SCHEMA_VERSION } from './core.js';
+import { normalizeNotificationRules } from './notifications.js';
 
 export const APP_VERSION = '1.4.0';
 
@@ -33,6 +34,7 @@ export const DEFAULT_SETTINGS = {
   defaultDuration: 30,
   taxEnabled: false,
   taxRate: 0,
+  notificationRules: normalizeNotificationRules(null),
   autoLockMinutes: 30,
   sessionTimeoutMinutes: 30,
   notifications: true,
@@ -44,9 +46,9 @@ export const DEFAULT_SETTINGS = {
   inventoryCategories: ['Medicine', 'Dental material', 'Consumable', 'Accessory', 'Equipment consumable', 'Other'],
   chairs: ['Chair 1', 'Chair 2'],
   rooms: ['Room 1'],
-  backupEnabled: false,
+  backupEnabled: true,
   backupIntervalHours: 24,
-  backupRetention: 5,
+  backupRetention: 10,
   backupDirectory: '',
   lowStockThreshold: 5,
   // Attachment ceiling is a configurable, resource-aware guard — not a product data limit.
@@ -182,6 +184,13 @@ export function migrateState(saved, appVersion = APP_VERSION) {
     attachmentMaxMb: Number(merged.settings?.attachmentMaxMb) > 0 ? Number(merged.settings.attachmentMaxMb) : base.settings.attachmentMaxMb,
     sessionTimeoutMinutes: Number(merged.settings?.sessionTimeoutMinutes) >= 0 ? Number(merged.settings.sessionTimeoutMinutes) : base.settings.sessionTimeoutMinutes
   };
+  // Legacy v1.3 workspaces stored notification rules as collection rows; the
+  // canonical store is settings.notificationRules (object by kind).
+  merged.settings.notificationRules = normalizeNotificationRules(
+    (merged.settings && merged.settings.notificationRules && typeof merged.settings.notificationRules === 'object' && !Array.isArray(merged.settings.notificationRules))
+      ? merged.settings.notificationRules
+      : (Array.isArray(source.notificationRules) ? source.notificationRules : merged.notificationRules)
+  );
 
   // v1.3.x patients stored archive state inconsistently; normalize once.
   merged.patients = merged.patients.map((patient) => (patient && typeof patient === 'object'

@@ -585,3 +585,12 @@ tr.clickable-row:hover td { background: var(--teal-50); }
 .print-preview-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
 .print-preview-toolbar .field-label.inline { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-600); }
 .print-preview-frame { width: 100%; height: 460px; border: 1px solid var(--line-200); border-radius: 10px; background: #fff; }
+
+/* Notification centre (v1.5.0) */
+.notification-rules { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 4px; }
+.notification-rule { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-700); cursor: pointer; }
+.notification-row { display: flex; align-items: stretch; gap: 6px; width: 100%; text-align: left; border-bottom: 1px solid var(--line-100); }
+.notification-row:last-child { border-bottom: 0; }
+.notification-open { flex: 1; display: flex; align-items: center; gap: 12px; padding: 10px 6px; background: none; border: 0; cursor: pointer; color: inherit; text-align: left; font: inherit; }
+.notification-open:hover { background: var(--surface-hover, #f7fafa); border-radius: 8px; }
+.notification-row .icon-button.tiny { align-self: center; }

@@ -11,6 +11,7 @@
 import { APP_VERSION } from './migrate-state.js';
 import { CURRENT_SCHEMA_VERSION } from './core.js';
 import { statementEntries, periodBounds } from './domain.js';
+import { normalizeNotificationRules } from './notifications.js';
 
 const DAY = 86400000;
 const iso = (value) => (value instanceof Date ? value.toISOString() : new Date(value).toISOString());
@@ -40,7 +41,7 @@ export const COLLECTION_PERMISSION = {
   patients: 'patients.view', visits: 'patients.view', dentalRecords: 'patients.view', prescriptions: 'patients.view',
   treatmentPlans: 'patients.view', attachments: 'patients.view', followUpTasks: 'patients.view',
   appointments: 'appointments.view', invoices: 'billing.view', payments: 'billing.view', paymentAdjustments: 'billing.view',
-  expenses: 'expenses.view', inventory: 'inventory.view', stockMovements: 'inventory.view', suppliers: 'inventory.view',
+  expenses: 'accounting.view', inventory: 'inventory.view', stockMovements: 'inventory.view', suppliers: 'inventory.view',
   staff: 'settings.view', referrals: 'patients.view', users: 'settings.view', notifications: null,
   savedFilters: null, medicationCatalog: 'patients.view', rooms: 'appointments.view', notificationRules: 'settings.view',
   savedReports: 'reports.view', audit: 'audit.view', treatments: 'settings.view',
@@ -395,7 +396,7 @@ export const QUERIES = {
     const settings = await repo.getSettings();
     const persisted = await repo.notificationsActive();
     const unread = persisted.filter((item) => !item.read && !item.dismissed).length;
-    return { items: persisted, unread, rules: settings.notificationRules || {} };
+    return { items: persisted, unread, rules: normalizeNotificationRules(settings.notificationRules) };
   },
 
   /* Workspace health (diagnostics page data). */

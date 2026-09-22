@@ -12,7 +12,7 @@
 import './styles.css';
 import { createApi } from './api.js';
 import { hasPermission, validateAttachmentFile, buildRestorePlan, calculateInvoice, moneyToCents, centsToMoney } from './core.js';
-import { deriveOperationalNotifications, periodBounds } from './domain.js';
+import { periodBounds } from './domain.js';
 
 const api = createApi();
 const app = document.querySelector('#app');
@@ -201,6 +201,7 @@ async function op(name, payload = {}) {
     notify(result?.error || 'The action could not be completed.', 'error');
     return null;
   }
+  if (!String(name).startsWith('notification')) scheduleNotificationScan();
   return result;
 }
 
@@ -334,26 +335,35 @@ function listQuery(collection, overrides = {}) {
 /* ------------------------------------------------------------------ */
 /* Notifications (service-derived + persisted)                         */
 /* ------------------------------------------------------------------ */
-const NOTIFICATION_RULES = [['queue', 'Queue wait'], ['clinical', 'Clinical follow-ups'], ['inventory', 'Stock and expiry'], ['warning', 'Outstanding balances'], ['backup', 'Backup reminders']];
-function notificationRuleEnabled(kind) { const rule = appState.notifications.find((item) => item.kind === kind); return rule ? rule.enabled !== false : true; }
-async function loadNotifications() {
+const NOTIFICATION_RULE_LABELS = [['appointments', 'Appointment reminders'], ['followups', 'Clinical follow-ups'], ['payments', 'Pending payments'], ['stock', 'Stock and expiry'], ['expiry', 'Expiry alerts'], ['queue', 'Queue wait'], ['backup', 'Backup reminders']];
+function notificationRules() { return appState.notificationRules || {}; }
+function notificationRuleEnabled(kind) { return notificationRules()[kind] !== false; }
+let notificationScanTimer = null;
+let notificationInterval = null;
+function scheduleNotificationScan(delay = 2500) {
+  if (!appState.session || ui.locked) return;
+  if (appState.settings.notifications === false) return;
+  clearTimeout(notificationScanTimer);
+  notificationScanTimer = setTimeout(() => { refreshNotifications({ scan: true }).catch(() => {}); }, delay);
+}
+function startNotificationInterval() {
+  if (notificationInterval) return;
+  notificationInterval = setInterval(() => { refreshNotifications({ scan: true }).catch(() => {}); }, 120000);
+}
+async function refreshNotifications({ scan = false } = {}) {
   try {
-    const [rules, notes] = await Promise.all([
-      q('list', { collection: 'notificationRules', page: 1, pageSize: 50 }),
-      q('list', { collection: 'notifications', page: 1, pageSize: 100 })
-    ]);
-    appState.notifications = rules.rows || [];
-    const derived = deriveOperationalNotifications({
-      appointments: [], visits: [], inventory: [],
-      notificationRules: appState.notifications
-    }, today());
-    const saved = (notes.rows || []).filter((item) => !item.dismissed).map((item) => ({ ...item, persisted: true }));
-    const seen = new Set();
-    const merged = [...derived, ...saved].filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; });
-    const readMap = (appState.boot?.notificationRead) || {};
-    appState.notifications = appState.notifications; // rules keep their slot
-    appState.notificationItems = merged.slice(0, 32).map((item) => ({ ...item, read: Boolean(item.read || readMap[item.id]) }));
-  } catch { appState.notificationItems = []; }
+    if (scan) await api.runOp('notifications.scan', {});
+    const result = await q('notifications', {});
+    if (!result) return;
+    appState.notificationRules = result.rules || {};
+    appState.notificationItems = (result.items || []).filter((item) => !item.dismissed).slice(0, 64);
+    const badge = document.querySelector('.dot-badge');
+    const unread = unreadCount();
+    if (badge && !unread) badge.remove();
+  } catch { /* signal feed failure must never break the app */ }
+}
+async function loadNotifications() {
+  return refreshNotifications({ scan: true });
 }
 function notificationItems() { return appState.notificationItems || []; }
 function unreadCount() { return notificationItems().filter((item) => !item.read).length; }
@@ -1093,21 +1103,24 @@ async function renderAnalytics() {
 
 async function renderNotifications() {
   const notes = notificationItems();
+  const rules = notificationRules();
+  const ruleRow = (kind, label) => `<label class="notification-rule"><input type="checkbox" data-change="notification-rule" data-kind="${attr(kind)}" ${rules[kind] !== false ? 'checked' : ''}><span>${esc(label)}</span></label>`;
   return `<div class="page">
-    ${pageHeader('Notifications', 'Meaningful signals from your workspace.', `${button('Mark all read', 'mark-notifications-read', 'check', 'secondary')}`)}
+    ${pageHeader('Notifications', 'Live signals from your workspace — nothing here is fabricated.', `${button('Mark all read', 'mark-notifications-read', 'check', 'secondary')}`)}
+    <section class="card">
+      <div class="card-title"><div class="card-title-text">${icon('settings', 17)}<h2>Signal categories</h2></div></div>
+      <div class="notification-rules">${NOTIFICATION_RULE_LABELS.map(([kind, label]) => ruleRow(kind, label)).join('')}</div>
+      <p class="form-note">${appState.settings.notifications === false ? 'Notifications are disabled in Settings — the feed stays quiet until re-enabled.' : 'Signals refresh automatically; turn a category off to silence just that kind.'}</p>
+    </section>
     <section class="card notification-center">
-      ${notes.length ? notes.map((n) => `<button class="notification-row ${n.read ? '' : 'unread'}" data-action="notification-open" data-id="${attr(n.id)}"><span class="notification-icon">${icon(n.type === 'warning' ? 'warning' : n.type === 'backup' ? 'backup' : n.type === 'queue' ? 'clock' : 'bell', 16)}</span><span class="notification-body"><strong>${esc(n.title)}</strong><p>${esc(n.message)}</p><small>${date(n.date || today())}</small></span>${icon('arrow', 14)}</button>`).join('') : emptyState('bell', 'No notifications', 'Appointment, follow-up, stock and backup signals will appear here.')}
+      ${notes.length ? notes.map((n) => `<div class="notification-row ${n.read ? '' : 'unread'}">
+        <button class="notification-open" data-action="notification-open" data-id="${attr(n.id)}"><span class="notification-icon">${icon(n.type === 'warning' ? 'warning' : n.type === 'backup' ? 'backup' : n.type === 'queue' ? 'clock' : 'bell', 16)}</span><span class="notification-body"><strong>${esc(n.title)}</strong><p>${esc(n.message)}</p><small>${date(n.date || today())}${n.priority === 'high' ? ' · high priority' : ''}</small></span>${icon('arrow', 14)}</button>
+        <button class="icon-button tiny" data-action="notification-dismiss" data-id="${attr(n.id)}" aria-label="Dismiss notification" title="Dismiss">${icon('close', 13)}</button>
+      </div>`).join('') : emptyState('bell', 'No notifications right now', 'Appointments, follow-ups, payments, stock, expiry, queue and backup signals appear here as they fire.')}
     </section>
   </div>`;
 }
 
-/* -------------------------------- backup ------------------------------- */
-const RESTORE_MODULE_GROUPS = {
-  clinical: ['visits', 'dentalRecords', 'prescriptions', 'treatmentPlans', 'treatments', 'attachments', 'followUpTasks', 'referrals'],
-  finance: ['invoices', 'payments', 'paymentAdjustments', 'expenses'],
-  operations: ['inventory', 'stockMovements', 'suppliers', 'staff', 'appointments'],
-  patients: ['patients']
-};
 function buildRestorePlanView(candidate) {
   const modules = [];
   if (ui.restoreCandidate && ui.restoreCandidate.selectedModules) {
@@ -1250,7 +1263,7 @@ async function renderSettings() {
 }
 
 /* -------------------------------- users -------------------------------- */
-const USER_ROLE_OPTIONS = [['Administrator', 'Administrator'], ['Dentist', 'Dentist'], ['Receptionist', 'Receptionist'], ['Dental Assistant', 'Dental Assistant'], ['Accountant', 'Accountant'], ['Custom Role', 'Custom Role']];
+const USER_ROLE_OPTIONS = [['Administrator', 'Administrator'], ['Dentist', 'Dentist'], ['Manager', 'Manager'], ['Receptionist', 'Receptionist'], ['Dental Assistant', 'Dental Assistant'], ['Accountant', 'Accountant'], ['Cleaner', 'Cleaner'], ['Other', 'Other'], ['Custom Role', 'Custom Role']];
 function effectivePermissions(user) {
   if (!user) return [];
   return permissionsForRole(user.role, user.permissions || []);
@@ -2436,7 +2449,8 @@ async function handleClick(event) {
     case 'import-csv': return importPatientsFromCsv();
 
     case 'open-notifications': ui.modal = { type: 'notifications', data: {} }; return render();
-    case 'mark-notifications-read': await op('notification.markAllRead', {}); return render();
+    case 'mark-notifications-read': await op('notification.markAllRead', {}); await refreshNotifications(); return render();
+    case 'notification-dismiss': { const dismissed = await op('notification.dismiss', { id }); if (dismissed) await refreshNotifications(); return render(); }
     case 'notification-open':
       await op('notification.markRead', { id });
       const note = notificationItems().find((item) => item.id === id);
@@ -2745,6 +2759,14 @@ async function handleChange(event) {
     case 'analytics-range': ui.analyticsRange = target.value; return render();
     case 'report-type': ui.reportType = target.value; return render();
     case 'print-page-size': if (ui.modal?.type === 'print-preview') { ui.modal.data.pageSize = target.value; return render(); } return;
+    case 'notification-rule': {
+      const kind = target.dataset.kind;
+      const nextRules = { ...notificationRules(), [kind]: target.checked };
+      appState.notificationRules = nextRules;
+      const saved = await op('settings.update', { notificationRules: nextRules });
+      if (saved) { appState.settings = saved.settings; await refreshNotifications({ scan: true }); }
+      return render();
+    }
     case 'patient-status-filter': ui.patientStatusFilter = target.value; listState.patients.page = 1; return render();
     case 'patient-balance-filter': ui.patientBalanceFilter = target.value; listState.patients.page = 1; return render();
     case 'invoice-status-filter': listState.invoices.filters = { ...listState.invoices.filters, status: target.value || undefined }; listState.invoices.page = 1; return render();
@@ -3081,6 +3103,7 @@ async function boot() {
   ui.unlockUserId = result.session?.userId || (result.userDirectory || [])[0]?.id || '';
   await refreshDirectory();
   await loadNotifications();
+  startNotificationInterval();
   appState.ready = true;
   render();
   if (appState.firstRun && !appState.setupComplete) {

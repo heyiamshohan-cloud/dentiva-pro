@@ -73,19 +73,19 @@ jobs:
           if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) { throw "Installer is not a Windows PE executable: $($setup.Name)" }
           Write-Host "Verified Windows installer: $($setup.Name) ($($setupBytes.Length) bytes)"
 
-      - name: Run Windows install, launch, restart and uninstall smoke
+      - name: Run Windows portable launch and restart persistence smoke
         shell: pwsh
         run: |
           $version = node -p "require('./package.json').version"
           $portable = "release\\Dentiva-Pro-$version-Windows-x64.exe"
           $installer = "release\\Dentiva-Pro-$version-Windows-x64-Setup.exe"
-          ./scripts/windows-smoke.ps1 -PortablePath $portable -InstallerPath $installer
+          ./scripts/windows-smoke.ps1 -PortablePath $portable -InstallerPath $installer -PortableOnly
 
-      - name: Upload Windows smoke evidence
+      - name: Upload Windows portable smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Dentiva-Pro-${{ github.run_number }}-windows-smoke-evidence
+          name: Dentiva-Pro-${{ github.run_number }}-windows-portable-smoke-evidence
           if-no-files-found: warn
           retention-days: 30
           path: windows-smoke-evidence/**

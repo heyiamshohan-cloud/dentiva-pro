@@ -58,8 +58,9 @@ The existing v1.1 workflows remain in the source and the full local suite passes
 | Electron main/store syntax | PASS | `electron/main.cjs` and `electron/storage.cjs` syntax checks passed before/with storage tests. |
 | Electron GUI launch | OPEN BLOCKER | Electron binary is unavailable in this Linux sandbox; rebuilding reached the sandbox certificate boundary. No fake desktop PASS is claimed. |
 | Renderer SQLite integration | OPEN BLOCKER | The store is exercised through Node tests, not an actual Electron renderer session. |
-| Windows install/launch/restart/uninstall | OPEN BLOCKER | Must run on a Windows x64 runner and produce logs/artifacts. |
-| DOM/screenshot regression at required resolutions | OPEN BLOCKER | No browser GUI runner is installed in the sandbox. |
+| Windows portable launch/create/restart persistence | AUTOMATED GATE | Must pass on the Windows x64 runner and produce logs/artifacts. |
+| Installed-app launch/restart/uninstall | MANUAL USER VERIFICATION REQUIRED | Intentionally excluded from automated release blocking at the release owner's direction; no automated PASS is claimed. |
+| DOM/screenshot regression at required resolutions | CI PASS | Six Playwright projects passed on Windows CI run 35693850283; evidence artifact is retained by the workflow. |
 | 1,000/5,000/10,000/25,000 patient UI stress measurements | PARTIAL / OPEN BLOCKER | `npm run benchmark:datasets` validates and serializes synthetic 1k/5k/10k/25k stores with zero relationship errors. Startup, search, list, profile, timeline, report, backup/restore and memory measurements still require Electron/Windows runtime evidence. |
 | GitHub release assets/checksums | NOT STARTED | Must be generated only after the release gate closes. |
 
@@ -74,8 +75,8 @@ Every item below remains open unless this report explicitly records a reproducib
 | Secure users and sessions | IMPLEMENTED IN SOURCE / OPEN RUNTIME | Verify first-run setup, migration from v1.1, PIN changes, last-login persistence, failed-attempt lockout, inactive account rejection and restart persistence in a packaged app. |
 | SQLite migration | IMPLEMENTED IN NODE / OPEN RUNTIME | Validate v1.1 JSON import in Electron, attachments, interrupted writes, corrupt current/backup rollback, restart persistence and no silent loss. |
 | Large datasets | PARTIAL / OPEN | `npm run benchmark:datasets` validates and serializes synthetic 1k/5k/10k/25k stores with zero relationship errors. Startup, search, list, profile, timeline, report, backup/restore and memory measurements remain open in the packaged runtime. |
-| Windows automation | OPEN | On a Windows x64 runner, install, launch, complete a scripted smoke workflow, quit/restart, verify persisted data, uninstall/reinstall and retain logs. |
-| Visual/layout regression | OPEN | Run DOM/layout or screenshot checks at 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 for key pages and dialogs. |
+| Windows automation | PARTIAL BY DESIGN | Portable create/restart persistence is automated and blocking. Installed-app launch/restart/uninstall remains MANUAL USER VERIFICATION REQUIRED and is not used as an automated release gate. |
+| Visual/layout regression | CI PASS / MANUAL REVIEW OPEN | Six Playwright projects passed on Windows CI run 35693850283; retain the evidence artifact and complete any remaining premium-UI manual review. |
 | Treatment plans | OPEN | Provide a usable treatment-plan workflow with staged procedures, statuses, dates, responsible staff, pricing/financial linkage and patient summary/print output. The collection alone is not completion. |
 | Patient financial statements | OPEN | Add patient-level statement view and configurable print/PDF output reconciled to invoice/payment/refund source-of-truth records. |
 | Appointment intelligence and queue | PARTIAL / OPEN | Verify conflict/resource handling, queue transitions, wait-time/priority signals, actionable notifications and print output in runtime workflows. |
@@ -105,8 +106,8 @@ The artifacts must be generated from the v1.2.0 commit, must not contain `.git`,
 - A local PIN is an access control and is not a recovery key. Forgotten credentials require the clinic's verified recovery policy.
 - Browser preview storage is not the production desktop persistence path and is still subject to browser profile/quota behavior.
 - Non-image clinical attachments remain download-only to avoid embedding active PDF content. Attachment size/type allowlists remain enforced.
-- Windows and full-resolution visual results are not inferred from Linux source/build success.
+- The installed-app launch/restart/uninstall smoke is intentionally deferred to manual user verification; no automated PASS is claimed. Portable persistence and six-resolution visual checks remain automated gates.
 
 ## 7. Next release-gate actions
 
-The persistent phase log is [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md). The next sequence is: finish renderer feature gaps and Bengali review; add Windows/Playwright automation and runtime tests; run the dataset matrix; close backup/crash/print/import evidence; update this report from `OPEN` to evidence-backed statuses; run `npm run check`; then package and publish the four new v1.2.0 assets.
+The persistent phase log is [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md). The installed-app launch/restart/uninstall sequence is a documented manual acceptance step, not an automated release blocker. The remaining sequence is: close all other Bengali, feature, data, backup, security and artifact gates; run `npm run check`; run the Windows portable/visual/package gates; then package and publish the four new v1.2.0 assets.

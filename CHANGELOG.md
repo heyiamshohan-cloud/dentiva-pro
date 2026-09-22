@@ -14,7 +14,7 @@
 - Added SQLite persistence, legacy migration, attachment externalization and corrupt-current/backup-recovery tests.
 - Added role-template and underlying permission regression tests; the local suite currently passes 34 tests and the Vite production build passes.
 - Added stage-based treatment plans, patient financial statement views/print output, queue wait-time signals and a validated patient CSV mapping/import preview with duplicate policy and rollback.
-- Updated the release checklist, audit report, README, user guide and persistent v1.2 phase log. Open runtime, Windows, Bengali, performance, visual and remaining feature-gap blockers are recorded explicitly; no v1.2.0 artifact or tag is claimed yet.
+- Updated the release checklist, audit report, README, user guide and persistent v1.2 phase log. The installed-app launch/restart/uninstall sequence is explicitly marked **MANUAL USER VERIFICATION REQUIRED** and removed from automated release blocking; all other gates remain binding. No v1.2.0 artifact or tag is claimed yet.
 
 ## 1.1.0 — 2026-09-22
 

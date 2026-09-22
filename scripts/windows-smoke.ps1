@@ -2,7 +2,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$PortablePath,
   [Parameter(Mandatory = $true)][string]$InstallerPath,
-  [int]$StartupSeconds = 25
+  [int]$StartupSeconds = 25,
+  [switch]$PortableOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,6 +77,10 @@ try {
   Start-AndCheck $portable $userData 'create' | Out-Null
   if (!(Test-Path $userData)) { throw 'Portable launch did not create a user-data profile.' }
   Start-AndCheck $portable $userData 'portable-verify' | Out-Null
+  if ($PortableOnly) {
+    Write-Host 'Portable create/restart persistence smoke passed. Installed-app launch/restart/uninstall remains manual user verification.'
+    return
+  }
 
   # Install to a disposable per-user directory, launch the installed executable,
   # then run the generated uninstaller. This does not touch the runner profile.

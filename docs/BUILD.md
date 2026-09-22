@@ -4,7 +4,7 @@
 
 - Node.js 20 or newer
 - npm 10 or newer
-- Windows packaging is provided by Electron Builder and targets a self-contained portable Windows x64 executable plus a per-user NSIS installer.
+- Windows packaging is provided by Electron Builder and targets a self-contained portable Windows x64 executable plus an assisted NSIS installer that remains per-user capable; machine scope is selected by default for current Windows compatibility.
 
 ## Development
 

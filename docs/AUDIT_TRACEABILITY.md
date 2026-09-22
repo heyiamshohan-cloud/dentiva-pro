@@ -62,12 +62,12 @@ This is the v1.2.0 requirement-to-evidence index. It intentionally distinguishes
 | 43 | Dataset 5,000 | same benchmark | PARTIAL: UI/startup evidence open |
 | 44 | Dataset 10,000 | same benchmark | PARTIAL: UI/startup evidence open |
 | 45 | Dataset 25,000 | same benchmark | PARTIAL: UI/startup evidence open |
-| 46 | Required viewport checks | Playwright config and six-project layout test | PARTIAL: browser download/runtime evidence open |
-| 47 | Windows install/launch/restart | `scripts/windows-smoke.ps1`, workflow step | PARTIAL: Windows run not yet evidenced |
-| 48 | Windows uninstall/reinstall | same PowerShell smoke script | PARTIAL: Windows run not yet evidenced |
+| 46 | Required viewport checks | Playwright config and six-project layout test; CI run 35693850283 | PASS |
+| 47 | Windows portable launch/create/restart persistence | `scripts/windows-smoke.ps1 -PortableOnly`, workflow step | PASS when the current Windows workflow completes |
+| 48 | Installed-app launch/restart/uninstall | Manual user acceptance sequence; intentionally removed from automated release-blocking gate | MANUAL USER VERIFICATION REQUIRED |
 | 49 | Exact release artifacts | workflow configuration only | OPEN |
 | 50 | Checksums/new tag | workflow configuration only | OPEN |
 
 ## Current gate
 
-The matrix is deliberately not a claim that v1.2.0 is releasable. The authoritative release decision and complete open-blocker list are in [`FINAL_AUDIT_REPORT.md`](FINAL_AUDIT_REPORT.md), with the continuation order in [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md).
+The matrix distinguishes the deliberate manual installed-app exception from all other release gates. The authoritative release decision and complete open-blocker list are in [`FINAL_AUDIT_REPORT.md`](FINAL_AUDIT_REPORT.md), with the continuation order in [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md).

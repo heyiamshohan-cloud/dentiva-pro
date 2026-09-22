@@ -6,7 +6,7 @@ Dentiva Pro is an offline-first dental practice workspace for clinics in Banglad
 
 This repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records.
 
-> **Release status:** v1.2.0 implementation is in progress and currently blocked on Electron/Windows runtime, full Bengali review, visual regression, dataset stress evidence and remaining feature gaps. v1.0.0 and v1.1.0 are preserved. See [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md) and [`docs/V1.2_PROGRESS.md`](docs/V1.2_PROGRESS.md).
+> **Release status:** v1.2.0 implementation is in progress. The automated installed-app launch/restart/uninstall smoke is intentionally deferred to manual user verification; portable persistence, visual, packaging, security, Bengali, data and feature gates remain release-blocking. v1.0.0 and v1.1.0 are preserved. See [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md) and [`docs/V1.2_PROGRESS.md`](docs/V1.2_PROGRESS.md).
 
 ## Included modules
 
@@ -64,7 +64,7 @@ Run the Windows target on a Windows x64 machine with the Electron binary availab
 npm run dist:win
 ```
 
-The Windows release workflow is designed to produce a new v1.2.0 portable executable, per-user NSIS installer, application-only ZIP and SHA-256 checksum file only after tests, packaging and validation pass. Current v1.2.0 artifacts are not yet published.
+The Windows release workflow is designed to produce a new v1.2.0 portable executable, an assisted NSIS installer (per-user capable; machine scope is selected by default for current Windows compatibility), an application-only ZIP and a SHA-256 checksum file after tests, packaging and validation pass. It runs a blocking portable create/restart persistence smoke; the installed-app launch/restart/uninstall sequence is intentionally reserved for manual user verification. Current v1.2.0 artifacts are not yet published.
 
 ## Data handling and backup
 
@@ -74,7 +74,7 @@ Keep a verified backup in a trusted location. Attachments are limited to 6 MB ea
 
 ## Printing and reports
 
-Documents use a branded print layout and the operating-system print dialog. Settings support A4, Letter and 80 mm receipt profiles; reports can use the hardened Electron HTML-to-PDF path when running in the desktop app. A Windows printer can be selected, or the document can be saved as PDF. Bengali output and all requested print/PDF surfaces remain part of the v1.2 release gate until reviewed on runtime.
+Documents use a branded print layout and the operating-system print dialog. Settings support A4, Letter and 80 mm receipt profiles; reports can use the hardened Electron HTML-to-PDF path when running in the desktop app. A Windows printer can be selected, or the document can be saved as PDF. Bengali output and all requested print/PDF surfaces remain part of the v1.2 release gate until reviewed on runtime. The installed-app launch/restart/uninstall smoke is the sole explicitly deferred automated sequence and remains manual user verification.
 
 ## Project structure
 

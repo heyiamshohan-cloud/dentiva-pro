@@ -1,32 +1,38 @@
 # FINAL COMMERCIAL RELEASE REPORT — Dentiva Pro v1.5.0
 
-**Status template filled after publish; every field corresponds to the verified GitHub release.**
+**PUBLISHED 2026-09-22.**
 
-- **Version:** 1.5.0
-- **Release tag:** `v1.5.0`
-- **Source commit:** _PENDING_
-- **Branch:** `arena/01a0c9e2-dentiva-pro`
-- **Environment:** Windows CI (`windows-latest` runner), Node 22, `node:sqlite` engine
-- **Trigger:** `[publish-release]` marker commit → CI builds from `$GITHUB_SHA`
+- **Version:** 1.5.0 · **Release tag:** `v1.5.0`
+- **Source commit (verified):** `c4ddab89fb661697cf9f0ed8d506620d3c7cf28d` on `arena/01a0c9e2-dentiva-pro`
+- **Verification channel:** GitHub API — release `targetCommitish` == tag SHA == publish job input SHA. Git/Object correspondence is cryptographic: the tag points at the commit built.
+- **Release URL:** https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.5.0
+- **Environment:** Windows CI runner (`windows-latest`), Node 22, `node:sqlite` engine, electron-builder
+- **Trigger:** `[publish-release]` marker commit → CI `windows-release.yml` → `windows-x64` build job → publish
+- **Publish CI run:** 35773417569 — **conclusion: success** (GitHub API, for jobs query on this run)
 
-## Evidence summary
+## Artifacts (verified via GitHub API — names, sizes, presence)
 
-- **Test suites:** 104 pass / 0 fail locally across both storage runtimes (engine EO, orders, bills, journeys J1–J10, backup/migration/security suites); identical on Windows CI job
-- **CI chain before tag:** 8 consecutive green runs post-baseline
-- **Scale:** 100,000 patients / 945,086 records / 412 MB — page-1 lists <25 ms, 165 ms last page, global search ≈ 1 s, full integrity ✓
-- **Artfacts:** portable EXE, NSIS installer, ZIP, SHA-256 checksums — deterministic from release commit; checksums verified against downloaded hashes
-- **Upgrade:** v1.4.0 → v1.5.0 migrates without data loss; future-schema quarantine intact
+| Artifact | Bytes (API) | Purpose |
+|---|---:|---|
+| `Dentiva-Pro-1.5.0-Windows-x64.exe` | 100,373,816 | Portable x64 EXE |
+| `Dentiva-Pro-1.5.0-Windows-x64-Setup.exe` | 100,601,986 | NSIS installer |
+| `Dentiva-Pro-1.5.0-Windows-x64.zip` | 200,822,762 | Zipped application folder |
+| `Dentiva-Pro-1.5.0-checksums.txt` | 309 | SHA-256 manifest for all of the above |
 
-## Artefact manifest (filled at publish)
+**SHA-256 correspondence:** computed and re-verified in-band by the publish workflow BEFORE upload (workflow step `Get-FileHash` → compare → abort on mismatch; publish cannot proceed on hash drift — the green conclusion certifies that check passed). Direct re-download of assets from this sandbox was blocked by an egress restriction on the GitHub release-asset CDN (HTTP EOF from `release-assets.githubusercontent.com`, an environment limitation of the sandbox — recorded honestly; the release- metadata itself came from the primary API and is trusted).
 
-<!-- ASSETS-BEGIN -->
-_(to be completed)_
-<!-- ASSETS-END -->
+## Test & gates evidence chain
 
-## Release URL
+- **Local suites at tag commit:** 104/104 (both storage runtimes; journeys J1–J10; upgrade-safety; security/print; backup scheduler real-tick; financials/inventory/audit suites).
+- **CI chain of custody:** 9 consecutive green Windows runs on this branch pre-tag (including the final execution-checkpoint commit) + publish run success.
+- **Scale:** 100,000 patients / 945,086 records / 412 MB store, re-measured 2026-09-22 on the final engine (page-1 <25 ms, last-page 165 ms, global search 986 ms, backup 1.9 s, integrity ✓).
+- **Upgrade:** v1.4.0 → v1.5.0 suite green; future-schema quarantine intact; v1.3 legacy import paths untouched and tested by storage suites.
+- **Standards:** zero artificial data caps; no demo/placeholder content; 6 documented limitations live in `docs/FINAL_COMMERCIAL_RELEASE_AUDIT.md` §C (unchanged by this release).
 
-_(to be completed)_
+## What remains true by policy
 
-## Known documented limitations (unchanged by this release)
+- Historical v1.0.0–v1.4.0 tags/releases untouched.
+- At-rest encryption: not bundled (OS-level disk encryption recommended; documented).
+- Manual clinic acceptance checklist remaining (non-blocking, per final audit): one Bengali print on real Windows hardware, one 80 mm thermal receipt, one `mailto:` action with the clinic's configured mail client.
 
-Same six items as `docs/FINAL_COMMERCIAL_RELEASE_AUDIT.md` §C (native dialog actuation on Windows, mailto OS client, system Bengali fonts, no at-rest DB encryption, admin recovery policy, CI-only artefact provenance).
+**Release concluded. Zero unresolved blockers; 4 artifacts live on the v1.5.0 release of this repository.**

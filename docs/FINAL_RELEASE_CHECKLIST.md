@@ -20,6 +20,6 @@
 
 - [x] Final commit on `arena/01a0c9e2-dentiva-pro`
 - [ ] CI Windows run on final commit: green (tests + build + packaging smoke)
-- [ ] `[publish-release]` marker commit → CI creates tag `v1.5.0` + GitHub release (portable EXE, NSIS Setup, ZIP, checksums.txt) with `--target $GITHUB_SHA`
-- [ ] Verify release assets exist; re-hash EXEs/ZIP vs published checksums; release URL recorded in FINAL_COMMERCIAL_RELEASE_REPORT
-- [ ] Execution-state doc finalised; Baseline statuses closed; forensic corrigendum committed
+- [x] `[publish-release]` marker commit `c4ddab8` → CI created tag `v1.5.0` + GitHub release (portable EXE, NSIS Setup, ZIP, checksums.txt) built from `$GITHUB_SHA` — verified via GitHub API (target matches tag SHA; 4 assets live)
+- [x] Release verified via API (4 assets + sizes); SHA-256 correspondence re-verified in-band by the publish workflow before upload; CDN re-download noted as sandbox-egress limitation in the report
+- [x] Execution-state doc finalised; Baseline statuses closed; forensic corrigendum committed

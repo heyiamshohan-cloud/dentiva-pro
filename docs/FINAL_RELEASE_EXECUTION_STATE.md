@@ -1,7 +1,7 @@
 # FINAL RELEASE — EXECUTION STATE (authoritative continuation checkpoint)
 
 ## Current phase
-PHASE 4 — Publish gate. All fix work complete + documented; waiting for CI green on tip; then `[publish-release]` marker commit which tags v1.5.0 and publishes the GitHub release from that SHA.
+✅ RELEASE COMPLETE — v1.5.0 published from verified commit c4ddab8. All fix work complete + documented; waiting for CI green on tip; then `[publish-release]` marker commit which tags v1.5.0 and publishes the GitHub release from that SHA.
 
 ## Completed phases
 - Phase 0 — Preserve & audit
@@ -46,7 +46,7 @@ Windows CI on the marker commit (includes packaging smoke + publish).
 Portable EXE + NSIS Setup + ZIP + checksums produced by CI publish step only; gate: `[publish-release]` in commit message (or workflow_dispatch). Not yet triggered.
 
 ## Release status
-NOT PUBLISHED — awaiting marker commit. Tag will be `v1.5.0`, created by CI with `--target $GITHUB_SHA`.
+**PUBLISHED** 2026-09-22 — tag `v1.5.0` at `c4ddab89fb661697cf9f0ed8d506620d3c7cf28d`, 4 artifacts (portable EXE, NSIS Setup, ZIP, checksums.txt), URL https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.5.0. Publish run 35773417569 = success. SHA verification performed in-band by workflow pre-upload; sandbox CDN download limitation documented in the release report.
 
 ## Known remaining risks
 - Historical v1.4.0 artefacts on GitHub remain as-is by policy (untouched).
@@ -55,3 +55,4 @@ NOT PUBLISHED — awaiting marker commit. Tag will be `v1.5.0`, created by CI wi
 ## Work log (append most recent at bottom)
 - 2026-09-22: v1.4.0 import; CI trigger widened; baseline docs; first green CI after i18n/corrigendum commits; sandbox crash + recovery (tip restored from origin hash-identity; fetchspec fix).
 - 2026-09-22 19:00Z: suites 104/104; journeys & upgrade tests in repo; v1.5.0 bump; docs closeout pushed (ea90ed9); publish gate armed.
+- 2026-09-22 20:30Z: RELEASE CUT — marker commit c4ddab8 → CI publish green → v1.5.0 live with 4 artifacts; report/checklist closed; execution state finalized.

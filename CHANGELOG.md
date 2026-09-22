@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.5.0 — Live signals, automated protection, complete surfaces
+
+**New & completed**
+- Live notification engine: workspace signal scan (appointments, follow-ups, payments, stock, expiry, queue waiting, backup reminders) with persistent read/dismiss state, per-category rule toggles, debounced post-write refresh, 120s background refresh. Signal source is never fabricated — all rows derive from real workspace data.
+- Automatic backup scheduler: enable/cadence/retention from Settings; runs in the main process with single-flight, same-second collision retry, verified full snapshots identical to manual backups, automatic prune, and failure surfacing on the Backup & Restore page. Enabled by default (opt-out, ~45s post-boot first check, 5-minute cadence check).
+- Global audit trail (Activity log): every protected op attributed to the account that ran it — filter by record type, user, or date range; paginated; per-entry detail with secrets stripped before display; streaming CSV export (all pages) respecting `audit.export`.
+- Custom patient fields: practice-defined fields (label + type, up to 40), stored per patient, rendered dynamically in the patient form and profile; definitions normalized and clamped.
+- Start-visit one-click from appointment cards/details; recording a visit against an appointment walks it to Completed with timestamps + audit breadcrumb.
+- Inventory movement ledger on the Inventory page (immutable before/after, reason, attribution; most-recent 12 of full history).
+- Idle application lock: `autoLockMinutes` is now enforced (watchdog on pointer/key/wheel activity; zero disables).
+
+**Fixes**
+- v1.4.0 live bug: the Expenses page was permission-blocked for every account including Administrator (collection→permission mapping); restored via `accounting.view`.
+- `patient.update` silently dropped custom-field edits; now round-trips on both runtimes.
+- Bengali UI: 130+ surface strings localized; residual-scan coverage verified.
+- Queue page grid switches to intrinsic autofill (no fixed-column squeeze at marginal widths).
+- Notification rules storage unified (legacy array entries translated to object map).
+
+**Verification (see docs/FINAL_COMMERCIAL_RELEASE_AUDIT.md)**
+- 104/104 node:test suites on both runtimes (journeys J1–J10, upgrade-safety, scheduler, custom fields, audit, notifications, security print-IPC).
+- Scale: 100,000 patients / 945,086 real records re-measured on the final engine (page-1 list < 25 ms; global search ≈ 1 s; backup 1.9 s; integrity ✓).
+- Upgrade: v1.4.0 workspaces forward-migrated without data loss; future-schema workspaces quarantined without writes.
+
+
 ## v1.4.0 — Relational engine, shared service layer, premium light UI
 
 **Storage**

@@ -48,3 +48,24 @@
 
 ## Provenance statement
 All baseline claims above were verified during the forensic audit (same day, `docs/V1.4.0_FORENSIC_AUDIT.md`) or re-verified on commit `3ac0305`. Anything not re-verifiable in-session is labeled UNKNOWN in the final release audit, not assumed.
+
+---
+
+## Resolution tracker (filled at close of release phase, 2026-09-22)
+
+| Item | Status | Evidence |
+|---|---|---|
+| 1 Printing silently discarded | RESOLVED | `print:html`/`print:html-pdf` channels, print lib, preview modal, Windows-CI smoke |
+| 2 Notification engine unwired | RESOLVED | engine wired end-to-end; 7/7 suite; rules persist both runtimes |
+| 3 No backup scheduler | RESOLVED | scheduler module + main wiring; real tick→real backup→prune test |
+| 4 No audit-log UI | RESOLVED | Activity log page + export + detail |
+| 5 CI all-failing | RESOLVED | 6 consecutive green Windows runs ahead of tag |
+| 6 Repo topology | RESOLVED | this branch = production source |
+| 7 RBAC gaps | RESOLVED | Accountant template; all roles; expenses-page live bug fixed |
+| 8 Backend-only 7 | RESOLVED | custom-fields built; 6 proven absent (corrigendum) |
+| 9 Dead settings | RESOLVED | idle lock; logo honoured; rules unified; chairs/rooms live; tax wired |
+| 10 Docs over-claims | RESOLVED | docs parity sweep; corrigendum; CHANGELOG v1.5.0 |
+| 11 PO receive gaps | RESOLVED BY DESIGN VERIFICATION | movement engine = receiving workflow; ledger proves; partial receive supported natively |
+| 12 Admin unlock / appt conflict nuance | RESOLVED BY POLICY | deny-by-default documented; appointment conflict semantics standardized (Completed frees slot) |
+| 13 Hardening items | RESOLVED/RE-VERIFIED | tests cover payment audit rows, attachment caps, analytics paths; threat model documented |
+| 14 Receipt width/Bengali font | RESOLVED | 80mm paper profile; Bengali-friendly stacks asserted in print lib tests |

@@ -1,8 +1,8 @@
 # Dentiva Pro
 
-**Premium offline-first dental practice management for Windows · v1.4.0**
+**Premium offline-first dental practice management for Windows · v1.5.0**
 
-Dentiva Pro is a local, relational dental-practice workspace for clinics in Bangladesh. v1.4.0 replaces the whole-state store of v1.3.0 with a **relational SQLite engine** (Node's built-in `node:sqlite`, zero native dependencies), a **shared service layer** with server-side validation, RBAC and audit, and a rebuilt **async, paginated renderer** on a light-only Design System 2.0.
+Dentiva Pro is a local, relational dental-practice workspace for clinics in Bangladesh. v1.5.0 builds on the v1.4.0 **relational SQLite engine** (Node's built-in `node:sqlite`, zero native dependencies), a **shared service layer** with server-side validation, RBAC and audit, and a rebuilt **async, paginated renderer** on a light-only Design System 2.0.
 
 The repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records — every record visible in the UI is created by the clinic.
 

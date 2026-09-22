@@ -410,7 +410,7 @@ function patientName(id) { return state.patients.find((p) => p.id === id)?.fullN
 function staffName(id) { return state.staff.find((p) => p.id === id)?.name || state.settings.dentistName || 'Primary dentist'; }
 function currentUser() { if (ui.authenticatedUserId) return state.users?.find((user) => user.id === ui.authenticatedUserId && user.active !== false) || null; if (state.users?.some((user) => user.active !== false && user.pinHash)) return null; return state.users?.find((user) => user.role === 'Administrator' && user.active !== false) || state.users?.find((user) => user.active !== false) || null; }
 function requiresLogin() { return Boolean(state.users?.some((user) => user.active !== false && user.pinHash) && !ui.authenticatedUserId); }
-function can(permission) { return hasPermission(currentUser(), permission); }
+function can(permission) { return !state.users?.length || hasPermission(currentUser(), permission); }
 function requirePermission(permission, message = 'Your account is not allowed to perform this action.') { if (can(permission)) return true; notify(message, 'error'); return false; }
 function permissionForPatientTab(tab) { return { visits: 'clinical.view', 'treatment-plan': 'clinical.view', dental: 'clinical.view', prescriptions: 'prescriptions.view', billing: 'billing.view', statement: 'billing.view', attachments: 'clinical.view', referrals: 'clinical.view', timeline: 'clinical.view' }[tab] || 'patients.view'; }
 function nextCode(kind, settingKey) {

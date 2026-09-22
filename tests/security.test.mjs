@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const main = fs.readFileSync(path.join(root, 'electron/main.cjs'), 'utf8');
+const storage = fs.readFileSync(path.join(root, 'electron/storage.cjs'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'electron/preload.cjs'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -34,14 +35,16 @@ test('PDF IPC blocks active and remote content', () => {
 test('production source has no cloud telemetry or diagnostic HTTP client', () => {
   assert.doesNotMatch(renderer, /fetch\s*\(|axios|firebase|sentry|posthog|segment|mixpanel/i);
   assert.doesNotMatch(renderer, /https:\/\/[^`'" ]+/i);
-  assert.equal(pkg.dependencies && Object.keys(pkg.dependencies).length, 0);
+  assert.deepEqual(Object.keys(pkg.dependencies || {}), ['sql.js']);
+  assert.doesNotMatch(storage, /https?:\/\//i);
 });
 
-test('store writes are atomic and bounded', () => {
-  assert.match(main, /MAX_STORE_BYTES/);
-  assert.match(main, /fsyncSync/);
-  assert.match(main, /renameSync/);
-  assert.match(main, /storeBackupPath/);
+test('SQLite store writes are atomic, bounded and recoverable', () => {
+  assert.match(storage, /MAX_STORE_BYTES/);
+  assert.match(storage, /fsyncSync/);
+  assert.match(storage, /renameSync/);
+  assert.match(storage, /sqlite/);
+  assert.match(main, /createSQLiteStore/);
 });
 
 
@@ -62,4 +65,14 @@ test('restore UI uses named module groups that map to every collection', () => {
   assert.match(renderer, /modules\.push\('finance'\)/);
   assert.match(renderer, /modules\.push\('operations'\)/);
   assert.match(renderer, /buildRestorePlan/);
+});
+
+test('renderer has authenticated account and operation-level authorization boundaries', () => {
+  assert.match(renderer, /data-form=\"user-login\"/);
+  assert.match(renderer, /PBKDF2/);
+  assert.match(renderer, /failedAttempts/);
+  assert.match(renderer, /lastLogin/);
+  assert.match(renderer, /requirePermission\('backup\.restore'\)/);
+  assert.match(renderer, /formPermissions/);
+  assert.match(renderer, /users\.manage/);
 });

@@ -2,7 +2,7 @@
 // Keeping financial, import, relationship and file-safety rules here makes them auditable
 // without a browser and prevents UI code from becoming the source of truth.
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 export const ALLOWED_ATTACHMENT_TYPES = [
   'image/png',
@@ -18,8 +18,60 @@ export const ARRAY_COLLECTIONS = [
   'patients', 'appointments', 'visits', 'prescriptions', 'dentalRecords',
   'treatments', 'invoices', 'payments', 'inventory', 'stockMovements',
   'suppliers', 'staff', 'expenses', 'referrals', 'attachments', 'paymentAdjustments', 'audit',
-  'notifications', 'followUpTasks'
+  'notifications', 'followUpTasks', 'treatmentPlans', 'users'
 ];
+
+export const PERMISSIONS = [
+  'patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'patients.delete',
+  'clinical.view', 'clinical.create', 'clinical.edit',
+  'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.queue',
+  'prescriptions.view', 'prescriptions.create', 'prescriptions.edit', 'prescriptions.print',
+  'billing.view', 'billing.create', 'billing.edit', 'billing.refund', 'billing.void',
+  'payments.view', 'payments.create', 'payments.adjust', 'payments.refund',
+  'inventory.view', 'inventory.purchase', 'inventory.adjust', 'inventory.consume', 'inventory.correct',
+  'accounting.view', 'accounting.create', 'accounting.edit',
+  'reports.view', 'reports.export',
+  'backup.create', 'backup.restore',
+  'settings.view', 'settings.edit', 'audit.view',
+  'staff.view', 'staff.create', 'staff.edit', 'staff.disable',
+  'users.manage'
+];
+
+const roleTemplates = {
+  Administrator: PERMISSIONS,
+  Dentist: [
+    'patients.view', 'patients.create', 'patients.edit', 'clinical.view', 'clinical.create', 'clinical.edit',
+    'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.queue',
+    'prescriptions.view', 'prescriptions.create', 'prescriptions.edit', 'prescriptions.print',
+    'billing.view', 'billing.create', 'billing.edit', 'payments.view', 'reports.view', 'reports.export',
+    'inventory.view', 'backup.create', 'audit.view', 'settings.view'
+  ],
+  Manager: [
+    'patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'clinical.view', 'clinical.create', 'clinical.edit',
+    'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.queue',
+    'prescriptions.view', 'prescriptions.create', 'prescriptions.edit', 'prescriptions.print',
+    'billing.view', 'billing.create', 'billing.edit', 'billing.refund', 'billing.void', 'payments.view', 'payments.create', 'payments.adjust', 'payments.refund',
+    'inventory.view', 'inventory.purchase', 'inventory.adjust', 'inventory.consume', 'inventory.correct',
+    'accounting.view', 'accounting.create', 'accounting.edit', 'reports.view', 'reports.export', 'backup.create', 'backup.restore',
+    'settings.view', 'audit.view', 'staff.view', 'staff.create', 'staff.edit', 'staff.disable'
+  ],
+  Receptionist: ['patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.queue', 'billing.view', 'billing.create', 'payments.view', 'payments.create', 'inventory.view', 'reports.view', 'backup.create', 'settings.view'],
+  'Dental Assistant': ['patients.view', 'clinical.view', 'clinical.create', 'appointments.view', 'appointments.queue', 'prescriptions.view', 'prescriptions.print', 'inventory.view', 'inventory.consume', 'reports.view', 'settings.view'],
+  'Custom Role': []
+};
+
+export function permissionsForRole(role, customPermissions = []) {
+  const template = roleTemplates[role] || [];
+  return [...new Set(role === 'Custom Role' ? customPermissions.filter((permission) => PERMISSIONS.includes(permission)) : template)];
+}
+
+export function hasPermission(user, permission) {
+  return Boolean(user?.active !== false && permissionsForRole(user.role, user.permissions).includes(permission));
+}
+
+export function roleDefinitions() {
+  return Object.fromEntries(Object.entries(roleTemplates).map(([role, permissions]) => [role, [...permissions]]));
+}
 
 export function toNumber(value) {
   const number = Number(value);
@@ -176,7 +228,7 @@ export function validateRelationships(store) {
   const invoices = new Set((store.invoices || []).map((record) => record.id));
   const inventory = new Set((store.inventory || []).map((record) => record.id));
   ARRAY_COLLECTIONS.forEach((key) => errors.push(...recordIds(store[key], key)));
-  const patientLinks = ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'invoices', 'payments', 'paymentAdjustments', 'referrals', 'attachments', 'followUpTasks'];
+  const patientLinks = ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'invoices', 'payments', 'paymentAdjustments', 'referrals', 'attachments', 'followUpTasks', 'treatmentPlans'];
   patientLinks.forEach((collection) => (store[collection] || []).forEach((record) => {
     if (record.patientId && !patients.has(record.patientId)) errors.push(`${collection}:${record.id} references missing patient ${record.patientId}.`);
   }));
@@ -220,10 +272,10 @@ export function validateBackupPayload(payload, expectedCollections = ARRAY_COLLE
 
 const moduleCollections = {
   patients: ['patients'],
-  clinical: ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'followUpTasks'],
+  clinical: ['appointments', 'visits', 'prescriptions', 'dentalRecords', 'followUpTasks', 'treatmentPlans'],
   finance: ['invoices', 'payments', 'paymentAdjustments', 'expenses'],
   operations: ['inventory', 'stockMovements', 'suppliers', 'staff', 'referrals', 'attachments'],
-  settings: ['settings', 'counters', 'dashboard', 'audit']
+  settings: ['settings', 'counters', 'dashboard', 'audit', 'users']
 };
 
 export function buildRestorePlan(local, incoming, { modules = Object.keys(moduleCollections), strategy = 'Keep Existing', patientIds = [] } = {}) {

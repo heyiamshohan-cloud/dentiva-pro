@@ -436,3 +436,54 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .schema-warning .lock-icon.warning { background: var(--amber-soft); color: var(--amber); }
 .schema-actions { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 20px; }
+
+/* v1.2 patient plans, statements and safe CSV import */
+.csv-import-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 14px 0; }
+.csv-import-summary > div { padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--canvas-soft); }
+.csv-import-summary strong, .csv-import-summary span { display: block; }
+.csv-import-summary strong { font: 700 16px 'Segoe UI'; }
+.csv-import-summary span { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.csv-preview { max-height: 250px; margin: 14px 0; border: 1px solid var(--line); border-radius: 8px; }
+.csv-preview .data-table { min-width: 620px; }
+.csv-import-actions { display: flex; align-items: end; justify-content: flex-end; gap: 9px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); }
+.csv-import-actions .field-label { min-width: 220px; margin-right: auto; }
+
+/* v1.2 patient plans and statement surfaces */
+.plan-list { display: grid; gap: 13px; }
+.treatment-plan-card { padding: 17px; }
+.plan-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.plan-card-head h3 { margin: 4px 0 4px; font: 700 14px 'Segoe UI'; }
+.plan-card-head p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.plan-card-head .row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.plan-meta { display: flex; gap: 16px; flex-wrap: wrap; margin: 15px 0 10px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 9px; }
+.plan-stages { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
+.plan-stage { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px; background: #fff; }
+.stage-number { width: 21px; height: 21px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: var(--teal-dark); background: var(--teal-soft); font-size: 9px; font-weight: 700; }
+.plan-stage > div { min-width: 0; flex: 1; }
+.plan-stage strong, .plan-stage small { display: block; }
+.plan-stage strong { font-size: 10px; }
+.plan-stage small { margin-top: 2px; color: var(--muted); font-size: 8px; white-space: normal; }
+.stage-status { border: 0; background: transparent; padding: 0; cursor: pointer; }
+.field-hint { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+
+/* v1.2 local identity and permission management */
+.auth-card { width: min(100%, 470px); }
+.account-list { display: grid; gap: 1px; margin: 18px 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--line); text-align: left; }
+.account-row { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px; background: #fff; }
+.account-row > div { min-width: 0; flex: 1; }
+.account-row strong, .account-row small { display: block; }
+.account-row strong { font-size: 10px; }
+.account-row small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+.account-status { padding: 4px 7px; border-radius: 999px; color: var(--teal-dark); background: var(--teal-soft); font-size: 8px; font-weight: 700; }
+.account-status.inactive { color: var(--red); background: var(--red-soft); }
+.permission-fieldset { margin: 17px 0 0; padding: 13px; border: 1px solid var(--line); border-radius: 9px; }
+.permission-fieldset legend { padding: 0 5px; color: var(--ink-2); font-size: 10px; font-weight: 700; }
+.permission-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; max-height: 230px; overflow: auto; }
+.permission-option { display: flex; align-items: flex-start; gap: 6px; color: var(--ink-2); font-size: 9px; line-height: 1.35; }
+.permission-option input { margin-top: 1px; accent-color: var(--teal); }
+.info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.info-card { display: flex; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas-soft); color: var(--teal); }
+.info-card > div { min-width: 0; }
+.info-card strong { display: block; color: var(--ink-2); font-size: 10px; }
+.info-card p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+@media (max-width: 760px) { .permission-grid, .info-grid { grid-template-columns: 1fr; } }

@@ -11,7 +11,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 
 test('release identity and desktop target are configured', () => {
   assert.equal(pkg.name, 'dentiva-pro');
-  assert.equal(pkg.version, '1.1.0');
+  assert.equal(pkg.version, '1.2.0');
   assert.match(JSON.stringify(pkg.build), /Windows-x64/);
   assert.match(source, /Md\. Shohan Khan|helloiamshohan@gmail\.com/);
 });
@@ -44,6 +44,14 @@ test('safety and offline guardrails exist', () => {
   assert.doesNotMatch(source, /Architecture ready for a local administrator PIN/);
   assert.match(source, /translateDom/);
   assert.match(source, /Professional dental practice management for Bangladesh/);
+  assert.match(source, /data-form=\"user-login\"/);
+  assert.match(source, /users\.manage/);
+  assert.match(source, /function requirePermission/);
+  assert.match(source, /lastLogin/);
+  assert.match(source, /function modalTreatmentPlan/);
+  assert.match(source, /printPatientStatement/);
+  assert.match(source, /parseCsv/);
+  assert.match(source, /cycle-plan-stage/);
   assert.match(source, /validateAttachmentFile/);
   assert.match(source, /Keep Existing/);
   assert.match(source, /Create New Copy/);

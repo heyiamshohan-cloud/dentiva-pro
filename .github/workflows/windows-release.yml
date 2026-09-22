@@ -35,6 +35,23 @@ jobs:
       - name: Run tests and renderer build
         run: npm run check
 
+      - name: Install Chromium for DOM and layout checks
+        run: npx playwright install chromium
+
+      - name: Run required viewport layout checks
+        run: npm run test:visual
+
+      - name: Upload viewport regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dentiva-Pro-${{ github.run_number }}-viewport-regression
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            test-results/**
+            playwright-report/**
+
       - name: Build portable and installer packages
         shell: pwsh
         run: |
@@ -55,6 +72,14 @@ jobs:
           $setupBytes = [System.IO.File]::ReadAllBytes($setup.FullName)
           if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) { throw "Installer is not a Windows PE executable: $($setup.Name)" }
           Write-Host "Verified Windows installer: $($setup.Name) ($($setupBytes.Length) bytes)"
+
+      - name: Run Windows install, launch, restart and uninstall smoke
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $portable = "release\\Dentiva-Pro-$version-Windows-x64.exe"
+          $installer = "release\\Dentiva-Pro-$version-Windows-x64-Setup.exe"
+          ./scripts/windows-smoke.ps1 -PortablePath $portable -InstallerPath $installer
 
       - name: Assemble verified release package
         shell: pwsh

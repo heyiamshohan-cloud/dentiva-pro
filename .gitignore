@@ -6,3 +6,5 @@ release/
 .vscode/
 .idea/
 coverage/
+test-results/
+playwright-report/

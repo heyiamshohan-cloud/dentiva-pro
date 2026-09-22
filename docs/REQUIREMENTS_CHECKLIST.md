@@ -1,54 +1,101 @@
-# Dentiva Pro release checklist
+# Dentiva Pro v1.2.0 requirements checklist and release gate
 
-This is the implementation audit for the 1.1.0 audited release.
+**Status date:** 2026-09-22 (Asia/Dhaka)
+**Branch:** `arena/01a0c66a-dentiva-pro`
+**Rule:** `[x]` means behavior is implemented and evidenced, not merely present in source. `[~]` means partial implementation with an explicit open verification or feature gap. `[ ]` is an open blocker.
 
-## Delivered in the offline workspace
+## Release identity and product boundaries
 
-- [x] Empty first-run store; no demo records
-- [x] Practice setup wizard with Bangladesh defaults and editable clinic identity
-- [x] Light-only responsive visual system with desktop, tablet and phone breakpoints
-- [x] Persistent local data with schema version and local audit collection
-- [x] Optional local administrator PIN lock with hashed PIN, manual lock and unlock screen
-- [x] Dashboard with today-first schedule, queue, follow-up, stock, balance and backup signals
-- [x] Patient directory, search, profile workspace and chronological timeline
-- [x] Visits, symptoms, findings, diagnoses, treatment notes, teeth and follow-up dates
-- [x] Adult and primary FDI dental chart with tooth statuses and notes
-- [x] Treatment catalog and configurable defaults
-- [x] Appointment calendar, chair context, status lifecycle and double-booking warning
-- [x] Today’s queue with serials and status cycling
-- [x] Prescriptions with multiple structured medication fields and print view
-- [x] Patient attachments with safe MIME allowlist, size guard and local backup inclusion
-- [x] Referrals with reason, specialty, response and follow-up notes
-- [x] Invoices, discounts, configurable tax rate, due calculation and payment statuses
-- [x] Multiple payment methods including configurable Bangladesh MFS names
-- [x] Partial payment validation, auditable refund/reversal adjustments and traceable receipt records
-- [x] Inventory, suppliers, purchase/usage/stock-out/expiry/damage/correction movements, reorder thresholds and expiry warnings
-- [x] Staff directory and role concepts
-- [x] Separate accounting workspace with income, expense and net-result calculations
-- [x] Reports with date ranges, preview-ready tables, print and UTF-8 CSV export
-- [x] Structured JSON backup manifest with record counts, schema version and SHA-256 payload hash
-- [x] Import validation preview, module/patient selection, conflict strategies, relationship-safe ID remapping and atomic rollback
-- [x] Print layouts for queue, billing, invoices, receipts, prescriptions, patients, charts and reports
-- [x] English-first terminology with Bengali locale labels for core navigation and common actions
-- [x] Offline service-worker shell for browser deployments and Electron-safe local renderer
-- [x] Hardened Electron shell configuration: context isolation, sandbox and no Node integration
-- [x] Windows x64 portable and per-user NSIS packaging configuration with branded ICO assets
-- [x] A4, Letter and 80 mm receipt print profiles plus hardened desktop PDF export
-- [x] GitHub Actions Windows runner workflow that builds, verifies and uploads the EXE, installer and final application ZIP
-- [x] README, user guide, build guide, changelog and automated smoke checks
+- [x] Version identity is `1.2.0` in `package.json`, lockfile and renderer.
+- [x] v1.0.0 and v1.1.0 remain separate; no prior release artifact is overwritten.
+- [x] Empty first-run store; no demo/test data is seeded.
+- [x] Offline/local operation remains the default; no mandatory cloud or paid API.
+- [x] Light-only premium visual direction and Bangladesh defaults remain present.
+- [x] No AI diagnosis or automated prescribing is introduced.
+- [~] Final v1.2.0 Windows assets, tag and checksums — **OPEN until Windows validation completes**.
 
-## Verified Windows release
+## Data, SQLite and migration
 
-Final status is recorded in `docs/FINAL_AUDIT_REPORT.md` after the Windows x64 workflow completes. Browser/desktop and visual verification limitations are not hidden in the scorecard. The release must remain separate from `v1.0.0` and must include the PE-verified portable EXE, installer, application ZIP and checksum file.
+- [x] Bundled `sql.js` persistence with relational `metadata`/`records` tables.
+- [x] Atomic staged writes, fsync/rename behavior, integrity-checked `.bak` recovery and size guardrail.
+- [x] Managed attachment directory with validated relative paths and renderer hydration.
+- [x] Non-destructive legacy JSON migration and `.migrated` marker.
+- [x] Reset and storage-info APIs.
+- [x] Node regression coverage for persistence, attachments, migration and corrupt-current/backup recovery.
+- [~] Electron-runtime migration, interrupted-write recovery and restart persistence — **OPEN**.
+- [ ] Production dataset measurement at 1,000, 5,000, 10,000 and 25,000 patients — **OPEN**.
 
-- Portable executable: `Dentiva-Pro-1.1.0-Windows-x64.exe`
-- Installer: `Dentiva-Pro-1.1.0-Windows-x64-Setup.exe`
-- Application ZIP: `Dentiva-Pro-1.1.0-Windows-x64.zip`
+## Users, authentication and authorization
 
-The workflow also ran the renderer build and test suite on Windows before packaging.
+- [x] Six role definitions: Administrator, Dentist, Manager, Receptionist, Dental Assistant and Custom Role.
+- [x] Explicit permission vocabulary and role templates in the domain layer.
+- [x] First-run Administrator PIN setup.
+- [x] Salted PBKDF2-SHA-256 PIN hashes; no plaintext credentials persisted.
+- [x] Active/inactive account state, staff association, failed-attempt lock state and last-login timestamps.
+- [x] Sign-in session state and account lockout handling in the renderer.
+- [x] Permission checks at route, search, form and important operation boundaries; button hiding is not the only control.
+- [x] Custom Role explicit permission selection and active Administrator protection.
+- [~] Packaged Electron/Windows end-to-end role matrix, migration, lockout and restart evidence — **OPEN**.
+- [ ] OS-level threat model/encryption boundary review — **OPEN**; SQLite is not encryption.
 
-## Deliberate product boundaries
+## Localization
 
-- The current release is a local single-profile workspace. The Electron store is durable JSON rather than a multi-user database; staff roles are descriptive metadata and do not provide per-user authorization or network sync.
-- Printing uses the native/browser print dialog and Save as PDF rather than shipping a proprietary printer driver.
-- There is no automatic medical diagnosis, automated prescribing, external SMS/WhatsApp gateway or cloud telemetry.
+- [~] English-first UI has an existing Bengali resource map and DOM translation layer.
+- [ ] Professional Bengali review of every user-facing page, dialog, validation, error, success, empty/loading state — **OPEN**.
+- [ ] Bengali print view, PDF, invoice, receipt, prescription, patient summary and report review — **OPEN**.
+- [ ] Native Bengali copy review by a Bangladeshi language reviewer — **OPEN**.
+
+## Clinical and patient workflows
+
+- [x] Patient directory, profile, relational timeline, visits, dental chart, prescriptions, referrals and attachments remain available.
+- [~] Treatment catalog — present and tested for basic CRUD, but treatment plans are not a complete staged workflow.
+- [ ] Treatment plans with status, stages, dates, staff, cost linkage, patient summary and print/PDF — **OPEN**.
+- [ ] Patient financial statement with invoice/payment/refund reconciliation and print/PDF — **OPEN**.
+- [~] Patient advanced filters, pagination and local search — present, but large dataset UI evidence is open.
+- [~] Attachment safety and metadata — implemented; packaged Electron crash/error/recovery testing is open.
+
+## Scheduling and queue
+
+- [x] Appointment calendar, duration and chair/dentist overlap warning.
+- [x] Queue serial and status lifecycle.
+- [~] Appointment intelligence, actionable notifications, wait-time/priority signals and queue print — **OPEN runtime verification/feature refinement**.
+
+## Finance and inventory
+
+- [x] Integer-cent invoice formula and payment/refund source-of-truth helpers.
+- [x] Partial/full/excessive payment validation and separate expense ledger.
+- [x] Configurable Bangladesh payment methods and print-ready receipts.
+- [~] Financial edge-case UI/runtime testing, statement output and restore reconciliation — **OPEN**.
+- [x] Inventory purchase/usage/stock-out/expiry/damage/correction movement model with negative-stock guardrails.
+- [~] Inventory audit actor/reason/restore workflows — **OPEN packaged runtime evidence**.
+
+## Import, export, filters and command tools
+
+- [x] Structured backup manifest, SHA-256 canonical payload hash and relationship validation.
+- [x] Selective module/patient restore, explicit conflict strategies, ID remapping and rollback plan.
+- [~] Backup corruption and restore rollback — covered in Node tests; Electron/Windows evidence is open.
+- [x] UTF-8 CSV exports for supported datasets.
+- [~] Patient CSV import now has column mapping, preview, required-field validation, duplicate Skip/Create New Copy policy and snapshot rollback; broader multi-entity relationship mapping remains **OPEN**.
+- [~] Global local command/search palette — existing search modal is present; permission-scoped and large-result verification is open.
+- [~] Advanced filters and saved-filter behavior — **OPEN** where not behaviorally evidenced.
+- [~] Actionable notification center — existing derived notifications need runtime/role verification.
+
+## Print, visual and Windows automation
+
+- [~] A4, Letter and 80 mm print profiles — source workflow exists; Bengali/PDF/Windows verification is open.
+- [ ] Configurable print/PDF profiles across all required documents — **OPEN**.
+- [ ] DOM/layout or screenshot regression at 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 — **OPEN**.
+- [ ] Windows install, launch, scripted smoke workflow, restart persistence, uninstall/reinstall and release validation — **OPEN**.
+- [~] Electron context isolation, sandbox, navigation/CSP and PDF restrictions — static tests pass; packaged GUI/crash evidence is open.
+
+## Documentation and release gate
+
+- [x] Changelog, README, user guide, build guide and this checklist identify v1.2 work and open evidence honestly.
+- [x] Persistent phase record is maintained in `docs/V1.2_PROGRESS.md`.
+- [~] Final audit report — updated as an explicit release gate; it must be updated again with Windows/visual/performance evidence before release.
+- [ ] Exact new artifacts: portable EXE, NSIS setup EXE, application ZIP and checksum file — **OPEN**.
+- [ ] New `v1.2.0` tag/release — **OPEN**.
+
+## Current release decision
+
+**BLOCKED.** The full local regression suite and web build pass, but the explicit open items above prevent a credible v1.2.0 release. Do not mark them PASS from source inspection alone. Continue from [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md).

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 — 2026-09-22 — release gate in progress
+
+### Persistence and security
+
+- Replaced the fragile desktop JSON persistence path with bundled `sql.js` SQLite tables, atomic staged writes, verified backup recovery, attachment management, a 200 MB guardrail and non-destructive v1.1 JSON migration.
+- Added local practice user accounts with staff association, active/inactive state, failed-attempt lockout, last-login/session state and salted PBKDF2-SHA-256 PIN hashes.
+- Added permission-enforced role templates for Administrator, Dentist, Manager, Receptionist, Dental Assistant and Custom Role. Protected operations check authorization in handlers rather than relying only on button visibility.
+- Added schema v3 collections for users and treatment plans while preserving v1.1 relational history and restore compatibility.
+
+### Verification and release hygiene
+
+- Added SQLite persistence, legacy migration, attachment externalization and corrupt-current/backup-recovery tests.
+- Added role-template and underlying permission regression tests; the local suite currently passes 34 tests and the Vite production build passes.
+- Added stage-based treatment plans, patient financial statement views/print output, queue wait-time signals and a validated patient CSV mapping/import preview with duplicate policy and rollback.
+- Updated the release checklist, audit report, README, user guide and persistent v1.2 phase log. Open runtime, Windows, Bengali, performance, visual and remaining feature-gap blockers are recorded explicitly; no v1.2.0 artifact or tag is claimed yet.
+
 ## 1.1.0 — 2026-09-22
 
 ### Audit and safety hardening

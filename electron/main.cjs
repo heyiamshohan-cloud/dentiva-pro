@@ -1,70 +1,27 @@
 const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
-const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const { createSQLiteStore } = require('./storage.cjs');
 
 const isDev = !app.isPackaged;
-const MAX_STORE_BYTES = 200 * 1024 * 1024;
+const isSmoke = process.env.DENTIVA_SMOKE === '1';
 let mainWindow;
-let storePath;
-let storeBackupPath;
+let durableStore;
 
-function initialiseStorePaths() {
-  const directory = app.getPath('userData');
-  fs.mkdirSync(directory, { recursive: true });
-  storePath = path.join(directory, 'dentiva-pro-store.json');
-  storeBackupPath = `${storePath}.bak`;
-}
-
-function readJsonFile(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    const text = fs.readFileSync(filePath, 'utf8');
-    if (!text.trim()) return null;
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch (error) {
-    console.error('Dentiva Pro store read failed', error.message);
-    return null;
-  }
+if (process.env.DENTIVA_USER_DATA) {
+  app.setPath('userData', path.resolve(process.env.DENTIVA_USER_DATA));
 }
 
 function loadStore() {
-  return readJsonFile(storePath) || readJsonFile(storeBackupPath);
+  return durableStore?.load?.() || null;
 }
 
 function saveStore(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { ok: false, error: 'Store payload must be an object.' };
-  const text = JSON.stringify(payload);
-  if (Buffer.byteLength(text, 'utf8') > MAX_STORE_BYTES) return { ok: false, error: 'Local store exceeds the safe size limit. Export a backup and remove large attachments.' };
-  const temporaryPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    const descriptor = fs.openSync(temporaryPath, 'w');
-    try {
-      fs.writeFileSync(descriptor, text, 'utf8');
-      fs.fsyncSync(descriptor);
-    } finally {
-      fs.closeSync(descriptor);
-    }
-    if (fs.existsSync(storePath) && readJsonFile(storePath)) fs.copyFileSync(storePath, storeBackupPath);
-    fs.rmSync(storePath, { force: true });
-    fs.renameSync(temporaryPath, storePath);
-    return { ok: true, bytes: Buffer.byteLength(text, 'utf8') };
-  } catch (error) {
-    fs.rmSync(temporaryPath, { force: true });
-    console.error('Dentiva Pro store write failed', error.message);
-    return { ok: false, error: 'The local store could not be written. Your last saved copy is preserved.' };
-  }
+  return durableStore?.save?.(payload) || { ok: false, error: 'The local database is not ready.' };
 }
 
 function resetStore() {
-  try {
-    fs.rmSync(storePath, { force: true });
-    fs.rmSync(storeBackupPath, { force: true });
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: 'The local store could not be reset.' };
-  }
+  return durableStore?.reset?.() || { ok: false, error: 'The local database is not ready.' };
 }
 
 function isAllowedNavigation(url) {
@@ -92,9 +49,9 @@ function createWindow() {
     }
   });
 
-  const startUrl = isDev
-    ? (process.env.DENTIVA_DEV_SERVER || 'http://localhost:4173')
-    : pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).toString();
+  const startUrl = isSmoke || !isDev
+    ? pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).toString()
+    : (process.env.DENTIVA_DEV_SERVER || 'http://localhost:4173');
   mainWindow.loadURL(startUrl);
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -116,15 +73,118 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-app.whenReady().then(() => {
-  initialiseStorePaths();
+async function runSmokePhase() {
+  if (!isSmoke || !mainWindow) return;
+  const phase = process.env.DENTIVA_SMOKE_PHASE || 'verify';
+  const script = phase === 'create'
+    ? `(${smokeCreate.toString()})()`
+    : `(${smokeVerify.toString()})()`;
+  try {
+    const result = await mainWindow.webContents.executeJavaScript(script, true);
+    console.log(`DENTIVA_SMOKE_RESULT:${JSON.stringify({ phase, ...result })}`);
+    setTimeout(() => app.exit(result?.ok ? 0 : 1), 150);
+  } catch (error) {
+    console.error('DENTIVA_SMOKE_ERROR', error.message);
+    setTimeout(() => app.exit(1), 150);
+  }
+}
+
+// These smoke scripts run only when DENTIVA_SMOKE=1. They exercise the real renderer
+// through Electron's webContents, not a mocked DOM or a source-only assertion.
+function smokeCreate() {
+  const wait = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
+  const field = (name, value) => {
+    const element = document.querySelector(`[name="${name}"]`);
+    if (!element) throw new Error(`missing field ${name}`);
+    element.value = value;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const submit = async (form = 'form[data-form]') => {
+    const element = document.querySelector(form);
+    if (!element) throw new Error(`missing form ${form}`);
+    element.querySelector('button[type="submit"]')?.click();
+    await wait();
+  };
+  const click = async (selector) => {
+    const element = document.querySelector(selector);
+    if (!element) throw new Error(`missing action ${selector}`);
+    element.click();
+    await wait();
+  };
+  return (async () => {
+    await wait(500);
+    if (document.querySelector('form[data-form="setup"]')) {
+      field('clinicName', 'Windows Smoke Dental');
+      field('dentistName', 'Dr. Smoke Test');
+      field('phone', '01700000000');
+      field('address', '1 Test Road, Dhaka');
+      await submit('form[data-form="setup"]');
+      field('currency', 'BDT');
+      field('language', 'English');
+      field('adminPin', '2468');
+      field('adminPinConfirm', '2468');
+      await submit('form[data-form="setup"]');
+      await click('[data-action="finish-setup"]');
+    }
+    if (document.querySelector('form[data-form="user-login"]')) {
+      field('pin', '2468');
+      await submit('form[data-form="user-login"]');
+    }
+    await click('[data-action="open-patient"]');
+    field('fullName', 'Windows Smoke Patient');
+    field('phone', '01800000000');
+    await submit('form[data-form="patient"]');
+    await click('[data-action="navigate"][data-page="patients"]');
+    const patient = [...document.querySelectorAll('.clickable-row, [data-id]')].some((row) => row.textContent?.includes('Windows Smoke Patient')) || document.body.textContent.includes('Windows Smoke Patient');
+    if (!patient) throw new Error('created patient was not rendered');
+    await click('[data-action="navigate"][data-page="appointments"]');
+    await click('[data-action="open-appointment"]');
+    field('patientId', [...document.querySelectorAll('form[data-form="appointment"] select[name="patientId"] option')].find((option) => option.textContent.includes('Windows Smoke Patient'))?.value || '');
+    field('date', new Date().toISOString().slice(0, 10));
+    field('time', '10:00');
+    field('reason', 'Smoke appointment');
+    await submit('form[data-form="appointment"]');
+    await click('[data-action="navigate"][data-page="backup"]');
+    const backupPage = document.body.textContent.includes('Backup') || document.body.textContent.includes('backup');
+    if (!backupPage) throw new Error('backup page did not render');
+    return { ok: true, patient, backupPage };
+  })();
+}
+
+function smokeVerify() {
+  const wait = (ms = 350) => new Promise((resolve) => setTimeout(resolve, ms));
+  return (async () => {
+    if (document.querySelector('form[data-form="user-login"]')) {
+      const pin = document.querySelector('[name="pin"]');
+      if (!pin) throw new Error('sign-in PIN field is missing during restart verification');
+      pin.value = '2468';
+      pin.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('form[data-form="user-login"] button[type="submit"]')?.click();
+      await wait();
+    }
+    document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
+    await wait();
+    const patientText = document.body.textContent || '';
+    const hasPatient = patientText.includes('Windows Smoke Patient');
+    document.querySelector('[data-action="navigate"][data-page="backup"]')?.click();
+    await wait();
+    const backupText = document.body.textContent || '';
+    const hasBackup = backupText.includes('Backup') || backupText.includes('backup');
+    return { ok: hasPatient && hasBackup, hasPatient, hasBackup };
+  })();
+}
+
+app.whenReady().then(async () => {
+  durableStore = await createSQLiteStore(app.getPath('userData'));
 
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
     isDesktop: true,
-    packaged: app.isPackaged
+    packaged: app.isPackaged,
+    storage: durableStore.info().storage
   }));
   ipcMain.handle('print:pdf', async (_event, options = {}) => {
     if (!mainWindow) throw new Error('Window unavailable');
@@ -159,19 +219,17 @@ app.whenReady().then(() => {
   ipcMain.on('store:load', (event) => { event.returnValue = loadStore(); });
   ipcMain.on('store:save', (event, payload) => { event.returnValue = saveStore(payload); });
   ipcMain.on('store:reset', (event) => { event.returnValue = resetStore(); });
-  ipcMain.on('store:info', (event) => {
-    let bytes = 0;
-    try { bytes = fs.statSync(storePath).size; } catch { /* empty store */ }
-    event.returnValue = { path: storePath, bytes, backupPath: storeBackupPath };
-  });
+  ipcMain.on('store:info', (event) => { event.returnValue = durableStore.info(); });
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const csp = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:*; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none';";
+    const csp = "default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:*; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none';";
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
   });
 
   createWindow();
+  if (isSmoke) mainWindow.webContents.once('did-finish-load', runSmokePhase);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => { if (!isSmoke && process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { try { durableStore?.close?.(); } catch { /* best effort */ } });

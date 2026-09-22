@@ -15,7 +15,10 @@ import {
   validateAttachmentFile,
   validateMoney,
   validateBackupPayload,
-  validateRelationships
+  validateRelationships,
+  PERMISSIONS,
+  hasPermission,
+  permissionsForRole
 } from '../src/core.js';
 
 function makeRecordStore() {
@@ -207,4 +210,19 @@ test('money validation rejects negative, empty and over-precise values', () => {
   assert.equal(validateMoney('1250.501'), false);
   assert.equal(validateMoney('-1'), false);
   assert.equal(validateMoney('', { allowZero: false }), false);
+});
+
+test('role templates enforce operations independently of renderer visibility', () => {
+  const receptionist = { id: 'u1', role: 'Receptionist', active: true };
+  const assistant = { id: 'u2', role: 'Dental Assistant', active: true };
+  const custom = { id: 'u3', role: 'Custom Role', active: true, permissions: ['patients.view', 'reports.view'] };
+  assert.ok(PERMISSIONS.includes('users.manage'));
+  assert.equal(hasPermission(receptionist, 'patients.create'), true);
+  assert.equal(hasPermission(receptionist, 'billing.refund'), false);
+  assert.equal(hasPermission(assistant, 'clinical.create'), true);
+  assert.equal(hasPermission(assistant, 'billing.create'), false);
+  assert.equal(hasPermission(custom, 'patients.view'), true);
+  assert.equal(hasPermission(custom, 'patients.create'), false);
+  assert.equal(hasPermission({ ...custom, active: false }, 'patients.view'), false);
+  assert.equal(permissionsForRole('Custom Role', ['patients.view', 'not-a-permission']).length, 1);
 });

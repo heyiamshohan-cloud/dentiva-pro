@@ -1,157 +1,112 @@
-# Dentiva Pro 1.1.0 final audit, QA and release report
+# Dentiva Pro 1.2.0 final audit and release-gate report
 
-**Audit date:** 2026-09-22 (Asia/Dhaka)  
-**Repository:** `heyiamshohan-cloud/dentiva-pro`  
-**Working branch:** `arena/01a0c66a-dentiva-pro`  
-**Release:** [Dentiva Pro v1.1.0](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.1.0)  
-**Baseline:** 1.0.0 source/release state; `v1.0.0` remains intact.  
+**Audit date:** 2026-09-22 (Asia/Dhaka)
+**Repository:** `heyiamshohan-cloud/dentiva-pro`
+**Working branch:** `arena/01a0c66a-dentiva-pro`
+**Target release:** Dentiva Pro v1.2.0
+**Prior releases:** v1.0.0 and v1.1.0 remain separate and untouched. The historical v1.1.0 report is preserved at [`FINAL_AUDIT_REPORT_1.1.0.md`](FINAL_AUDIT_REPORT_1.1.0.md).
 
-This report records what was implemented and what was actually verified. It does not convert a source label, route or button into a behavioral PASS. The complete 150-row atomic matrix is [AUDIT_TRACEABILITY.md](AUDIT_TRACEABILITY.md).
+This report is intentionally a **release gate**, not a marketing summary. A source label, route, button, or static test is not treated as a behavioral PASS. Every limitation recorded in the v1.1.0 audit is carried forward as an open item until the required runtime evidence exists.
 
 ## 1. Executive result
 
-Dentiva Pro 1.1.0 is a new release, not an overwrite of 1.0.0. The application was upgraded and hardened around an offline, local, single-profile workflow. The release workflow successfully produced and published all four required Windows x64 delivery assets:
+The v1.2.0 implementation cycle is underway and is **not yet releasable**. The working tree contains material improvements, but no v1.2.0 tag, GitHub release, Windows EXE, installer, application ZIP, or checksum file has been produced. No v1.0.0 or v1.1.0 artifact has been overwritten or reused.
 
-- a Windows x64 portable PE executable;
-- a Windows x64 per-user NSIS installer;
-- a complete application ZIP assembled without source `node_modules`, repository `.git`, tests or test data;
-- a SHA-256 checksum text file.
+The currently verified scope is:
 
-The domain and persistence audit is substantially complete. The release is not marketed as multi-user authorization software, encrypted database software, arbitrary-printer-driver software or a fully translated Bengali product. GUI screenshot review at every requested resolution and launching the Windows app are recorded as outstanding verification boundaries because they were not performed by the available Linux sandbox.
+- application/package/renderer identity is `1.2.0`;
+- the Electron production store now uses bundled `sql.js` SQLite with relational `metadata` and `records` tables, atomic staged writes, a verified `.bak` recovery path, attachment externalization, a 200 MB guardrail, and non-destructive legacy JSON migration;
+- the renderer has account records, PBKDF2 PIN hashing, active/inactive state, staff association, failed-attempt lockout, last-login timestamps, sessions, role templates and permission checks at navigation, form and important operation boundaries;
+- 33 Node regression tests pass and the Vite production build passes;
+- Electron GUI, Windows packaging, Windows installation/restart/uninstall automation, full-resolution visual checks, renderer SQLite migration and realistic large-dataset UI measurements remain unverified.
 
-### Atomic scorecard
+**Release disposition: BLOCKED.** The open items in section 4 must be closed or documented as an accepted product decision by a human release owner before v1.2.0 is tagged or published.
 
-| Classification | Rows | Meaning |
-|---|---:|---|
-| PASS | 123 | Implementation path plus executable/static/build/release evidence is recorded. |
-| INCOMPLETE | 20 | Implementation is present, but visual, desktop runtime or another specified verification remains outstanding. |
-| LIMITATION | 6 | Deliberate product boundary documented to the operator. |
-| ARCHITECTURALLY DEFICIENT | 1 | The requested stronger multi-user/authorization architecture is not provided by this product boundary. |
-| **Total** | **150** | No requirement is left `OPEN`; baseline findings remain visible in the matrix. |
+## 2. Changes technically verified in this cycle
 
-`DEFECTIVE`, `LOW-QUALITY`, `MISSING` and `UNSUPPORTED` are retained as baseline-finding language where applicable; no final row is silently left in one of those states. Unsupported behavior is classified as `LIMITATION` where the product intentionally declines to claim it.
+### Persistence and migration
 
-## 2. What changed
+- `electron/storage.cjs` creates a local SQLite database with relational `metadata` and `records` tables while reconstructing the renderer state shape during the incremental migration.
+- Writes are staged through a temporary database, flushed and renamed atomically. A prior integrity-checked database is retained as `.bak`; a corrupt current database can recover from that backup.
+- Legacy `dentiva-pro-store.json` is imported only after validation and copied to a `.migrated` marker. The legacy source is not silently deleted.
+- Attachment data URIs are moved to an application-managed `attachments/` directory and hydrated on load. Relative attachment paths are validated before use.
+- Size limits, reset and storage-info IPC are present. Standalone Node tests cover persistence, attachment externalization, migration and corrupt-current/backup recovery.
 
-### Clinical and operational workflows
+### Users, sessions and RBAC
 
-- Kept the empty-store guarantee: no patients, appointments, transactions or demo data are seeded.
-- Preserved relational patient history across visits, appointments, prescriptions, dental chart records, referrals, attachments, invoices, payments and follow-up tasks.
-- Added patient pagination and filters for status, visit period, tooth status and balance; added searchable audit activity.
-- Added appointment duration/resource overlap detection for chair and dentist conflicts, with an explicit save-after-warning decision.
-- Added clinical attachment categorization, visit linking, metadata editing, safe image preview, download and deletion with a 6 MB allowlist boundary. PDF and other non-image files are downloaded instead of being embedded as active inline content.
-- Kept clinical safety wording: the product records professional input and does not diagnose or prescribe automatically.
+- `src/core.js` defines permission names and role templates for Administrator, Dentist, Manager, Receptionist, Dental Assistant and Custom Role.
+- `src/main.js` creates a first-run Administrator account, requires a 4–12 digit administrator PIN during setup, stores only salted PBKDF2-SHA-256 hashes, and never persists PIN input or confirmation values.
+- Accounts have active/inactive state, associated staff ID, failed-attempt counters, temporary lock state, created-at and last-login timestamps.
+- Sign-in checks account state, lockout and the stored hash. Renderer routes, searches, forms, exports, print actions, backup actions and protected mutations use permission checks; important mutation handlers check again instead of relying on hidden controls.
+- User-account administration supports role templates and explicit Custom Role permissions. At least one active Administrator is required.
 
-### Financial and inventory integrity
+This is a meaningful authorization implementation, but it is still pending Electron-runtime and Windows acceptance testing. It must not be described as network authorization, encrypted storage, or multi-clinic synchronization.
 
-- Made invoice totals deterministic in integer cents: subtotal minus discount plus tax; tax is configurable for new invoices and stored per invoice.
-- Reworked payment status as a derived source of truth from payment and refund adjustment records.
-- Added partial/full/excessive payment validation, configurable payment methods, printable receipts, append-only refunds and auditable adjustment reasons.
-- Added two-decimal money validation to invoice, refund and expense entry paths.
-- Added inventory purchase, usage, stock-out, expiry, damage and correction movements with before/after quantities and negative-stock protection.
-- Separated operating expenses from patient billing and preserved report reconciliation.
+### Existing behavior and safety regression coverage
 
-### Backup, restore and migration safety
+The existing v1.1 workflows remain in the source and the full local suite passes: patient/clinical relationships, appointment resource overlap, financial cents calculations, payment/refund validation, inventory movements, attachment allowlists, backup manifests, relationship validation, selective restore and rollback. The suite now also tests role permission behavior and the v1.2 release identity.
 
-- Added schema-v2 migration defaults and an explicit future-schema block that preserves data and prevents silent downgrade/overwrite.
-- Added canonical SHA-256 payload hashes, manifest record counts, schema/product checks, attachment type/size/data validation and relationship validation.
-- Added dry-run restore preview, module groups, patient-scoped selection, conflict strategies, relationship-safe Create New Copy remapping, duplicate/conflict reporting and snapshot rollback.
-- Fixed restore UI module selection to use the named `clinical`, `finance`, `operations`, `settings` and `patients` groups mapped by the domain layer.
-- Added regression tests for malformed relationships, orphaned payment adjustments, hash stability, patient selective restore, ID remapping and rollback paths.
+## 3. Verification evidence available now
 
-### Electron and release hardening
-
-- Hardened the Electron shell with context isolation, sandbox, no Node integration, web security, navigation/webview restrictions, CSP, blocked active/remote PDF resources and renderer crash reload handling.
-- Replaced fragile desktop persistence with a bounded atomic fsync/rename JSON store and last-known-good recovery backup. A corrupt current store is not rotated over the recovery copy.
-- Kept browser preview/localStorage as a documented fallback; the Windows desktop profile is the supported production persistence target.
-- Added A4, Letter and 80 mm Receipt print profiles and hardened desktop HTML-to-PDF export. The OS dialog remains responsible for physical printer selection and copies.
-- Added a Windows x64 workflow that builds, verifies PE headers, inspects application ZIP contents, generates and self-validates checksums, publishes a new release and uploads workflow artifacts.
-
-## 3. Verification record
-
-### Local Linux sandbox
-
-| Check | Result | Evidence |
+| Check | Result | Evidence / boundary |
 |---|---|---|
-| `npm run check` | **PASS** | 29 Node tests passed; Vite production build passed. Latest build output: 203.01 kB JS, 72.13 kB CSS, 57.84/13.53 kB gzip. |
-| `node --check electron/main.cjs` | **PASS** | Electron main process syntax check passed. |
-| `git diff --check` | **PASS** | No whitespace errors in the final changesets. |
-| Production preview | **PASS** | Vite preview on `0.0.0.0:4174` returned HTTP 200; built `index` was 981 bytes and referenced the hashed production bundle. |
-| Service-worker shell route | **PASS** | `/sw.js` returned HTTP 200 from the production preview. |
-| Electron local launch | **NOT AVAILABLE** | The installed Electron package had no binary. `npm rebuild electron` reached the sandbox TLS/certificate boundary (`unable to verify the first certificate`); no fake local desktop PASS is claimed. |
-| Browser GUI automation | **NOT AVAILABLE** | No Chromium/Playwright/Puppeteer GUI runner is installed in the sandbox; visual and end-to-end DOM interaction rows remain `INCOMPLETE`. |
+| `node --check src/main.js` | PASS | Renderer syntax check completed after the v1.2 user/RBAC changes. |
+| `node --check src/core.js` | PASS | Domain helper syntax check completed. |
+| `npm test` | PASS | 34 tests passed on Node.js 22.22.3. |
+| `npm run build` | PASS | Vite production build completed; output is in ignored `dist/`. |
+| SQLite standalone smoke | PASS | Persistence, attachments, reset, migration and recovery tests pass without native SQLite builds. |
+| Electron main/store syntax | PASS | `electron/main.cjs` and `electron/storage.cjs` syntax checks passed before/with storage tests. |
+| Electron GUI launch | OPEN BLOCKER | Electron binary is unavailable in this Linux sandbox; rebuilding reached the sandbox certificate boundary. No fake desktop PASS is claimed. |
+| Renderer SQLite integration | OPEN BLOCKER | The store is exercised through Node tests, not an actual Electron renderer session. |
+| Windows install/launch/restart/uninstall | OPEN BLOCKER | Must run on a Windows x64 runner and produce logs/artifacts. |
+| DOM/screenshot regression at required resolutions | OPEN BLOCKER | No browser GUI runner is installed in the sandbox. |
+| 1,000/5,000/10,000/25,000 patient UI stress measurements | PARTIAL / OPEN BLOCKER | `npm run benchmark:datasets` validates and serializes synthetic 1k/5k/10k/25k stores with zero relationship errors. Startup, search, list, profile, timeline, report, backup/restore and memory measurements still require Electron/Windows runtime evidence. |
+| GitHub release assets/checksums | NOT STARTED | Must be generated only after the release gate closes. |
 
-### Automated regression suite
+## 4. Open blockers carried from the v1.1.0 audit
 
-The 29 tests cover:
+Every item below remains open unless this report explicitly records a reproducible verification result. These are not silently downgraded to PASS because related source code exists.
 
-- Electron isolation/navigation/CSP and bounded atomic persistence;
-- PDF active/remote-content blocking and safe attachment boundaries;
-- no cloud telemetry, diagnostic HTTP client or runtime dependency API;
-- schema/collection structure and future-schema preservation;
-- invoice cents/tax/due calculations, payment/refund edge cases and two-decimal money validation;
-- patient duplicate matching, relational history, inventory signals and appointment resource overlap;
-- backup manifest/hash behavior, malformed backups, relationship errors, patient-scope restore and Create New Copy remapping;
-- source release identity and Windows target configuration.
+| Area | Current status | Required v1.2 evidence |
+|---|---|---|
+| Complete Bangladeshi Bengali | OPEN | Review every page, dialog, validation, error, success, empty/loading state, print view, PDF, invoice, receipt, prescription, patient summary and report with native Bengali copy and correct date/number formatting. Existing map/DOM translation is partial. |
+| RBAC behavior | PARTIALLY IMPLEMENTED / OPEN | Run scripted multi-user workflows in Electron/Windows for all six roles, including direct operation attempts, inactive users, lockouts, session transitions and audit attribution. |
+| Secure users and sessions | IMPLEMENTED IN SOURCE / OPEN RUNTIME | Verify first-run setup, migration from v1.1, PIN changes, last-login persistence, failed-attempt lockout, inactive account rejection and restart persistence in a packaged app. |
+| SQLite migration | IMPLEMENTED IN NODE / OPEN RUNTIME | Validate v1.1 JSON import in Electron, attachments, interrupted writes, corrupt current/backup rollback, restart persistence and no silent loss. |
+| Large datasets | PARTIAL / OPEN | `npm run benchmark:datasets` validates and serializes synthetic 1k/5k/10k/25k stores with zero relationship errors. Startup, search, list, profile, timeline, report, backup/restore and memory measurements remain open in the packaged runtime. |
+| Windows automation | OPEN | On a Windows x64 runner, install, launch, complete a scripted smoke workflow, quit/restart, verify persisted data, uninstall/reinstall and retain logs. |
+| Visual/layout regression | OPEN | Run DOM/layout or screenshot checks at 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 for key pages and dialogs. |
+| Treatment plans | OPEN | Provide a usable treatment-plan workflow with staged procedures, statuses, dates, responsible staff, pricing/financial linkage and patient summary/print output. The collection alone is not completion. |
+| Patient financial statements | OPEN | Add patient-level statement view and configurable print/PDF output reconciled to invoice/payment/refund source-of-truth records. |
+| Appointment intelligence and queue | PARTIAL / OPEN | Verify conflict/resource handling, queue transitions, wait-time/priority signals, actionable notifications and print output in runtime workflows. |
+| Inventory auditability | PARTIAL / OPEN | Verify every purchase, usage, expiry, damage, correction and stock-out path with before/after quantities, actor, reason and restore behavior. |
+| CSV mapping/import | PARTIAL / OPEN | Patient CSV import now has safe mapping, preview, required-field validation, duplicate policy and rollback. Multi-entity relationship mapping remains open. |
+| Advanced filters and command palette | PARTIAL / OPEN | Validate saved filters, keyboard command behavior, permission-scoped search and large-result performance. |
+| Print/PDF profiles | PARTIAL / OPEN | Verify Bengali rendering, clinic identity, A4/Letter/receipt layouts, configurable profiles, Electron PDF output and Windows print dialog behavior. |
+| Backup/restore | PARTIAL / OPEN | Exercise corrupted current DB, corrupted backup, interrupted save, invalid attachments, malformed relationships and rollback in Electron; retain evidence. |
+| Privacy/security/crash resilience | PARTIAL / OPEN | Complete packaged Electron security review, renderer crash recovery, error UX, attachment handling, navigation/CSP checks and data redaction review. |
+| Release artifacts | NOT STARTED | Produce exactly the four v1.2.0 artifacts and independently validate PE headers, ZIP contents, install behavior and checksums. |
 
-### Performance sample
+## 5. Release artifact contract
 
-This is a repeatable domain-helper benchmark, not a claim of a fully automated browser rendering benchmark. It used Node.js 22.22.3 against generated empty-clinic records with one visit per patient.
+When—and only when—the gate closes, the Windows workflow must create a new release with these exact names:
 
-| Patient/visit rows | Relationship validation | Canonical serialization | Canonical payload bytes | Errors |
-|---:|---:|---:|---:|---:|
-| 1,000 | 1.48 ms | 8.41 ms | 89,883 | 0 |
-| 5,000 | 5.87 ms | 29.18 ms | 465,883 | 0 |
-| 10,000 | 4.69 ms | 36.27 ms | 935,883 | 0 |
+- `Dentiva-Pro-1.2.0-Windows-x64.exe`
+- `Dentiva-Pro-1.2.0-Windows-x64-Setup.exe`
+- `Dentiva-Pro-1.2.0-Windows-x64.zip`
+- `Dentiva-Pro-1.2.0-checksums.txt`
 
-The patient directory is paginated at 50 rows per page. A 10,000-patient interactive browser measurement, memory profile and visual review remain part of the `INCOMPLETE` performance/UI classification rather than being inferred from this helper benchmark.
+The artifacts must be generated from the v1.2.0 commit, must not contain `.git`, `node_modules`, tests or test data, and must not replace v1.0.0 or v1.1.0 assets. No checksum is recorded in this report until the Windows runner self-validates the final bytes.
 
-## 4. Windows build and artifact evidence
+## 6. Honest limitations and operational boundaries
 
-### Workflow evidence
+- Dentiva Pro remains offline/local; no mandatory cloud service, paid API, AI diagnosis or AI prescribing is introduced.
+- SQLite is application-local persistence, not database encryption. Operators still need OS account controls, full-disk encryption and protected backup media.
+- A local PIN is an access control and is not a recovery key. Forgotten credentials require the clinic's verified recovery policy.
+- Browser preview storage is not the production desktop persistence path and is still subject to browser profile/quota behavior.
+- Non-image clinical attachments remain download-only to avoid embedding active PDF content. Attachment size/type allowlists remain enforced.
+- Windows and full-resolution visual results are not inferred from Linux source/build success.
 
-- **Latest checksum-verification workflow:** [run 35691449396](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35691449396)
-- **Result:** completed successfully.
-- **Successful steps:** dependency install; Windows test/build; portable and installer packaging; PE verification; application ZIP assembly and forbidden-content inspection; checksum generation and self-validation; release publication; artifact upload.
-- The prior checksum-verification build [run 35691191448](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35691191448) and initial release build [run 35690886125](https://github.com/heyiamshohan-cloud/dentiva-pro/actions/runs/35690886125) also completed successfully and created the initial v1.1.0 release assets.
+## 7. Next release-gate actions
 
-The workflow checks the first two bytes of both EXE files for the Windows PE `MZ` signature. It expands the application ZIP and requires `DentivaPro.exe`; it rejects `.git`, `node_modules`, `tests` and `test-data` content. The latest workflow also rehashes every EXE/ZIP and compares each hash to the generated checksum file before publication.
-
-### Published assets
-
-GitHub Release API asset metadata was checked after the latest upload. The API-reported SHA-256 digests are the remote asset digests; sizes are bytes.
-
-| Asset | Size | SHA-256 digest reported by GitHub |
-|---|---:|---|
-| `Dentiva-Pro-1.1.0-Windows-x64.exe` | 74,377,875 | `6b0047e40869a1c6d9342a3b65c9be85a196323a50622ebd9940721af3bebddf` |
-| `Dentiva-Pro-1.1.0-Windows-x64-Setup.exe` | 74,604,244 | `4e9dc53ea203c0c0e5132583fd94266c09df1802e55171e894d7904d5ccc1890` |
-| `Dentiva-Pro-1.1.0-Windows-x64.zip` | 148,813,319 | `2e9677efa46975d629cc1428745ef859d391457bf00407c9207c71e4af69fbf7` |
-| `Dentiva-Pro-1.1.0-checksums.txt` | 309 | `cf506b451b64ac949e3c05a20fc89461fb96cf0702cc18c87ad0167064510ea0` |
-
-The sandbox could not complete a direct CDN download of the large release assets because the release-assets connection returned EOF/SSL errors. Therefore this report does not pretend to have independently rehashed downloaded bytes locally; it records the successful Windows runner's self-validation and the authoritative GitHub asset digests instead.
-
-## 5. Repository and version evidence
-
-- Final application implementation commit: `0f73d50c07cd4902bc81992995a945f155b7f209` (`release: audit and harden Dentiva Pro 1.1.0`).
-- Checksum workflow hardening commit: `f43551f647e9218ad222c776ad6834d59923f7eb` (`ci: verify release checksums before publishing`).
-- `package.json` and `package-lock.json`: version `1.1.0`.
-- Renderer `APP_VERSION`: `1.1.0`.
-- Remote branch `arena/01a0c66a-dentiva-pro` is pushed through the final report finalization commits after the checksum workflow.
-- `v1.0.0` remains at its existing commit; `v1.1.0` is a separate tag/release pointing to the new 1.1.0 implementation commit.
-- Release URL: <https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.1.0>
-- Release assets are not committed to Git; they are published through the GitHub Release and kept out of the source checkout by repository ignore rules.
-
-## 6. Explicit product limitations and residual risk
-
-1. **Desktop runtime launch:** the Linux sandbox could not run the Electron binary, and the Windows CI workflow packaged/verified rather than launching a GUI session. The Windows EXE/installer are genuine PE outputs, but first-launch UI, persistence restart and printer-driver behavior still require a Windows desktop test environment.
-2. **Visual QA:** required 1280×720, 1366×768, 1920×1080, 2560×1440 and 3840×2160 screenshot/interaction checks were not possible without a browser GUI runner. Responsive CSS exists, but those rows remain `INCOMPLETE`.
-3. **Browser storage:** browser preview uses localStorage and is subject to browser quota/profile loss. The Electron store is the supported clinic target; use verified backups.
-4. **Security model:** the local JSON store is not application-level encrypted. Use OS account controls, full-disk encryption and protected backup media. The local PIN is a salted PBKDF2-SHA-256 access lock, not encryption or recoverable identity management.
-5. **Roles:** staff roles are descriptive metadata. There is no per-user authorization, multi-user session model, network sync or remote access control.
-6. **Localization:** Bengali covers a resource-map/DOM translation layer for common labels; a complete professional translation review of every dynamic message was not claimed.
-7. **Printing:** A4, Letter and 80 mm Receipt profiles are supported. Arbitrary custom dimensions and proprietary printer drivers are not claimed; the operating-system print dialog controls the final device.
-8. **Attachments:** images can be previewed; PDFs and other non-image files are download-only to avoid embedding active document content. Clinical files are limited to 6 MB and validated against an allowlist.
-
-## 7. Final disposition
-
-The 1.1.0 upgrade is released with the required four Windows delivery artifacts and a traceable audit matrix. The implementation is suitable for continued controlled Windows acceptance testing, with the limitations above visible to the operator. No v1.0.0 asset or tag was overwritten, no demo data was introduced, and no mandatory cloud or paid service was added.
+The persistent phase log is [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md). The next sequence is: finish renderer feature gaps and Bengali review; add Windows/Playwright automation and runtime tests; run the dataset matrix; close backup/crash/print/import evidence; update this report from `OPEN` to evidence-backed statuses; run `npm run check`; then package and publish the four new v1.2.0 assets.

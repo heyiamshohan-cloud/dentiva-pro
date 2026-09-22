@@ -32,6 +32,14 @@ npm run dist:win
 
 The build target is `release/Dentiva-Pro-1.0.0-Windows-x64.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, icon, asar packaging, non-admin execution and no publish target.
 
+For a portable source + built-renderer delivery package that does not include `node_modules`, use:
+
+```bash
+npm run package:release
+```
+
+This creates `release/Dentiva-Pro-1.0.0-source.zip`.
+
 ## Release hygiene
 
 Do not commit `node_modules`, `dist`, `release`, local backups, screenshots containing patient data or logs containing sensitive data. Use the structured in-app backup for clinic data, not source control.

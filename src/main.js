@@ -813,7 +813,14 @@ function handleClick(event) {
 }
 function handleInput(event) {
   const input = event.target;
-  if (input.dataset.input === 'global-search' || input.dataset.input === 'modal-search') { ui.search = input.value; if (ui.modal?.type === 'search') render(); else { if (ui.page === 'patients' || ui.page === 'clinical') render(); } }
+  if (input.dataset.input === 'global-search' || input.dataset.input === 'modal-search') {
+    ui.search = input.value;
+    if (ui.modal?.type === 'search' || ui.page === 'patients' || ui.page === 'clinical') {
+      const selector = `[data-input="${input.dataset.input}"]`;
+      render();
+      window.setTimeout(() => { const next = document.querySelector(selector); if (next) { next.focus(); next.setSelectionRange(ui.search.length, ui.search.length); } }, 0);
+    }
+  }
   if (input.dataset.input === 'tooth-note' && ui.dentalTooth) ui.toothNote = input.value;
 }
 function handleChange(event) {

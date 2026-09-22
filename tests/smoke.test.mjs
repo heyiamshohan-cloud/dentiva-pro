@@ -38,6 +38,9 @@ test('financial source-of-truth formula is present and deterministic', () => {
 test('safety and offline guardrails exist', () => {
   assert.match(source, /No cloud required|offline-first/i);
   assert.match(source, /applicationLock/);
+  assert.match(source, /async function hashPin/);
+  assert.match(source, /data-form=\"unlock\"/);
+  assert.doesNotMatch(source, /Architecture ready for a local administrator PIN/);
   assert.match(source, /translateDom/);
   assert.match(source, /Professional dental practice management for Bangladesh/);
   assert.match(source, /validateAttachmentFile/);

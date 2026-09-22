@@ -8,6 +8,7 @@ This is the implementation audit for the 1.0.0 source release.
 - [x] Practice setup wizard with Bangladesh defaults and editable clinic identity
 - [x] Light-only responsive visual system with desktop, tablet and phone breakpoints
 - [x] Persistent local data with schema version and local audit collection
+- [x] Optional local administrator PIN lock with hashed PIN, manual lock and unlock screen
 - [x] Dashboard with today-first schedule, queue, follow-up, stock, balance and backup signals
 - [x] Patient directory, search, profile workspace and chronological timeline
 - [x] Visits, symptoms, findings, diagnoses, treatment notes, teeth and follow-up dates

@@ -19,7 +19,7 @@ This repository starts with an empty store by design. There are no sample patien
 - Staff and roles architecture, operating expenses and finance reporting
 - Reports with date ranges, print preview and UTF-8 CSV export
 - Structured backup manifest, validation preview, selective restore and conflict strategies
-- Local audit history, integrity checks, light mode, responsive layout and accessibility-friendly focus states
+- Local audit history, integrity checks, optional local administrator PIN lock, light mode, responsive layout and accessibility-friendly focus states
 - English-first UI with a Bengali locale setting and Bangladesh defaults (BDT, Asia/Dhaka)
 - About section crediting Md. Shohan Khan
 
@@ -58,7 +58,7 @@ The targets are a self-contained Windows x64 portable executable and a per-user 
 
 ## Data handling
 
-Dentiva Pro creates no records until the clinic creates them. Use **Backup & Restore → Export full backup** to create a structured, versioned JSON package with record counts and relationship-preserving arrays. Import always shows a preview and conflict strategy before modifying local records. Use system-level encryption and access control for the machine and backup media.
+Dentiva Pro creates no records until the clinic creates them. Use **Backup & Restore → Export full backup** to create a structured, versioned JSON package with record counts and relationship-preserving arrays. Import always shows a preview and conflict strategy before modifying local records. Use the optional local administrator PIN lock plus system-level encryption and access control for the machine and backup media. The PIN is stored only as a local SHA-256 digest; Dentiva Pro cannot recover a forgotten PIN.
 
 ## Printing and reports
 

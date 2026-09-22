@@ -28,9 +28,10 @@ function walk(suites) {
 }
 walk(results?.suites);
 
-const failed = flat.filter((t) => t.status && t.status !== 'passed' && t.status !== 'skipped');
-const passed = flat.filter((t) => t.status === 'passed').length;
-log(`::notice title=Dentiva visual summary::${passed} passed, ${failed.length} failed, ${flat.length - passed - failed.length} other (of ${flat.length} executed)`);
+const failed = flat.filter((t) => ['unexpected', 'timedOut', 'interrupted'].includes(t.status));
+const passed = flat.filter((t) => t.status === 'expected' || t.status === 'passed').length;
+const flaky = flat.filter((t) => t.status === 'flaky').length;
+log(`::notice title=Dentiva visual summary::${passed} passed, ${failed.length} failed, ${flaky} flaky, ${flat.length - passed - failed.length - flaky} other (of ${flat.length} executed)`);
 
 for (const t of failed.slice(0, 20)) {
   const err = (t.error || '').replace(/\s+/g, ' ').slice(0, 700);

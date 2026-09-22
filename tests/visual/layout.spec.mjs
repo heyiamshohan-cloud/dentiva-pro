@@ -119,10 +119,10 @@ test.describe('v1.4.0 workspace layout', () => {
     await expect(page.locator('[data-action="lock-workspace"]')).toHaveAttribute('aria-label', 'Lock workspace');
     await expect(page.locator('input[data-input="global-search"]')).toHaveAttribute('aria-label', 'Search your workspace');
 
-    // Opening a modal keeps dialog semantics; Done returns to the shell
+    // Opening a modal keeps dialog semantics; the footer "Done" returns to the shell
     await page.locator('[data-action="open-notifications"]').click();
     await expect(page.locator('.modal-overlay .modal-window[role="dialog"]')).toBeVisible();
-    await page.locator('.modal-overlay [data-action="close-modal"]').click();
+    await page.locator('.modal-overlay .modal-footer [data-action="close-modal"]').click();
     await expect(page.locator('.modal-overlay')).toHaveCount(0);
     await expect(page.locator('#main-content .page-header')).toBeVisible();
   });

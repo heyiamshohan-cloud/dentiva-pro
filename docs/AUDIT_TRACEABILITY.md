@@ -144,15 +144,15 @@ This is the persistent atomic matrix for the 150 baseline rows. A row is `PASS` 
 | 125 | Premium widgets | Metric cards/signals exist | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | INCOMPLETE |
 | 126 | Notifications | Notification center exists; generation incomplete | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | PASS |
 | 127 | Animation | Limited CSS transitions | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | PASS |
-| 128 | Print preview | Browser print preview exists | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | PASS |
-| 129 | A4 | CSS print; Electron PDF A4 handler unused | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | PASS |
-| 130 | Thermal/receipt printing | No size selector | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | PASS |
+| 128 | Print preview | Browser print preview exists | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | INCOMPLETE |
+| 129 | A4 | CSS print; Electron PDF A4 handler unused | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | INCOMPLETE |
+| 130 | Thermal/receipt printing | No size selector | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | INCOMPLETE |
 | 131 | Custom print sizing | Missing | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | LIMITATION |
-| 132 | PDF | Browser Save as PDF only | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | LIMITATION |
-| 133 | Windows executable | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; Windows runner evidence pending until workflow completion | INCOMPLETE |
-| 134 | Installer | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; Windows runner evidence pending until workflow completion | INCOMPLETE |
-| 135 | ZIP | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; Windows runner evidence pending until workflow completion | INCOMPLETE |
-| 136 | SHA-256 | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; Windows runner evidence pending until workflow completion | INCOMPLETE |
+| 132 | PDF | Browser Save as PDF only | `src/main.js`, `src/styles.css`, `electron/main.cjs`; production preview smoke, print/PDF source audit; visual/runtime caveats recorded in final report | INCOMPLETE |
+| 133 | Windows executable | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; workflow `35690886125` passed and v1.1.0 assets/digests were verified via GitHub API | PASS |
+| 134 | Installer | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; workflow `35690886125` passed and v1.1.0 assets/digests were verified via GitHub API | PASS |
+| 135 | ZIP | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; workflow `35690886125` passed and v1.1.0 assets/digests were verified via GitHub API | PASS |
+| 136 | SHA-256 | Existing workflow | `.github/workflows/windows-release.yml` PE/ZIP/checksum gates; workflow `35690886125` passed and v1.1.0 assets/digests were verified via GitHub API | PASS |
 | 137 | Offline operation | Renderer has service worker/local state | `src/main.js`, `electron/main.cjs`, `package.json`, `README.md`; source/dependency/security checks; repository/release evidence | PASS |
 | 138 | No paid APIs | No external API | `src/main.js`, `electron/main.cjs`, `package.json`, `README.md`; source/dependency/security checks; repository/release evidence | PASS |
 | 139 | No mandatory cloud | Local architecture | `src/main.js`, `electron/main.cjs`, `package.json`, `README.md`; source/dependency/security checks; repository/release evidence | PASS |
@@ -188,5 +188,5 @@ Implemented advanced features include custom report ranges, patient clinical/fin
 - [x] Electron boundary/CSP/PDF active-content safeguards implemented and statically tested.
 - [x] User guide, README, changelog and release workflow updated.
 - [x] `npm run check` passed in this Linux sandbox (tests + Vite build).
-- [ ] Windows x64 workflow artifact, installer, application ZIP and checksum file verified.
-- [ ] Final repository commit, branch push, tag and GitHub release evidence recorded.
+- [x] Windows x64 workflow artifact, installer, application ZIP and checksum file verified by workflow 35690886125 and release asset metadata.
+- [x] Final implementation commit 0f73d50, branch push, v1.1.0 tag and GitHub release evidence recorded; factual report update remains.

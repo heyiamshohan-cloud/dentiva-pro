@@ -87,8 +87,17 @@ jobs:
           $forbidden = Get-ChildItem $inspect -Recurse -Force | Where-Object { $_.Name -in @('.git', 'node_modules', 'tests', 'test-data') -or $_.FullName -match '\\(node_modules|tests|test-data)\\' }
           if ($forbidden) { throw "Application ZIP contains development or test content: $($forbidden[0].FullName)" }
           Remove-Item $inspect -Recurse -Force
-          Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') } | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "release\Dentiva-Pro-$version-checksums.txt"
-          Get-FileHash $zip -Algorithm SHA256 | Format-List
+          $checksumPath = "release\Dentiva-Pro-$version-checksums.txt"
+          Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') } | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content $checksumPath
+          $checksumLines = Get-Content $checksumPath
+          foreach ($artifact in (Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') })) {
+            $actual = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+            $line = $checksumLines | Where-Object { $_ -match [regex]::Escape($artifact.Name) } | Select-Object -First 1
+            if (!$line -or $line.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)[0].ToUpperInvariant() -ne $actual) { throw "Checksum validation failed for $($artifact.Name)" }
+            Write-Host "Verified SHA-256: $($artifact.Name) $actual"
+          }
+          $required = @($portable, $setup.FullName, $zip, $checksumPath)
+          foreach ($path in $required) { if (!(Test-Path $path)) { throw "Required release asset missing: $path" } }
 
       - name: Publish GitHub release assets
         shell: pwsh

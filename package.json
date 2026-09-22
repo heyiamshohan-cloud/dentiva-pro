@@ -20,7 +20,6 @@
   "dependencies": {},
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "@vitejs/plugin-legacy": "^6.0.0",
     "electron": "^44.4.3",
     "electron-builder": "^26.15.3",
     "vite": "^6.0.5"

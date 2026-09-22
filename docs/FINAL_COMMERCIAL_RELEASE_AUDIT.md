@@ -52,3 +52,7 @@
 No unresolved CRITICAL or HIGH defects at release commit. Two closed this phase: expenses-page permission block (v1.4.0 ship-blocker), custom-field silent-drop.
 
 **Verdict: v1.5.0 is release-ready.**
+
+## E. Dependency & license review (added at close-out)
+
+**PASS.** Runtime npm dependencies: **zero**. Full installed-tree census (311 packages): MIT×198, ISC×22, BSD-3×10, Apache-2.0×9, BSD-2×7, BlueOak×6, WTFPL×2, Python-2.0×1, 0BSD×1, MIT-or-CC0×1 — **no copyleft anywhere**. Electron/Chromium/Node attribution ships with binaries via electron-builder's default layout (`LICENSE.electron.txt`, `LICENSES.chromium.html`); product `LICENSE.txt` is copied into the ZIP by CI. Dead dependency `@vitejs/plugin-legacy` + ~130 transitive babel packages removed from the lockfile post-release (never entered binaries). Commercial redistribution: permissible; notice-retention obligations satisfied automatically. Full record: `docs/LICENSING.md`.

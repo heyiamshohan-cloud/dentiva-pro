@@ -1,0 +1,76 @@
+name: Dentiva Pro Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/01a0c66a-dentiva-pro
+
+permissions:
+  contents: read
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'true'
+
+jobs:
+  windows-x64:
+    name: Build Windows x64 application
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests and renderer build
+        run: npm run check
+
+      - name: Build portable and installer packages
+        run: npm run dist:win
+
+      - name: Assemble verified release package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./package.json').version"
+          $stage = "release\Dentiva-Pro-$version-Windows-x64"
+          $zip = "release\Dentiva-Pro-$version-Windows-x64.zip"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          $portable = "release\Dentiva-Pro-$version-Windows-x64.exe"
+          if (!(Test-Path $portable)) { throw "Portable Windows executable was not created: $portable" }
+          Copy-Item $portable "$stage\DentivaPro.exe"
+          $setup = Get-ChildItem release -Filter "*Setup.exe" | Select-Object -First 1
+          if ($setup) { Copy-Item $setup.FullName "$stage\$($setup.Name)" }
+          Copy-Item README.md "$stage\README.txt"
+          Copy-Item CHANGELOG.md "$stage\CHANGELOG.txt"
+          Copy-Item LICENSE.txt "$stage\LICENSE.txt"
+          New-Item -ItemType Directory -Path "$stage\Documentation" | Out-Null
+          Copy-Item docs\USER_GUIDE.md "$stage\Documentation\USER_GUIDE.md"
+          Copy-Item docs\BUILD.md "$stage\Documentation\BUILD.md"
+          Get-ChildItem $stage -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "$stage\checksums.txt"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
+          if (!(Test-Path $zip)) { throw "Release ZIP was not created" }
+          Get-FileHash $zip -Algorithm SHA256 | Format-List
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dentiva-Pro-${{ github.run_number }}-Windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            release/Dentiva-Pro-*-Windows-x64.exe
+            release/Dentiva-Pro-*-Windows-x64-Setup.exe
+            release/Dentiva-Pro-*-Windows-x64.zip

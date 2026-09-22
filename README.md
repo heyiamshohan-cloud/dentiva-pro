@@ -54,7 +54,7 @@ Run the configured desktop target on a machine with the Electron binary cache:
 npm run dist:win
 ```
 
-The target artifact is a self-contained Windows x64 portable executable under `release/`. See [`docs/BUILD.md`](docs/BUILD.md) for release hygiene.
+The targets are a self-contained Windows x64 portable executable and an optional per-user NSIS installer under `release/`. See [`docs/BUILD.md`](docs/BUILD.md) for release hygiene.
 
 ## Data handling
 

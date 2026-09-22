@@ -10,4 +10,4 @@
 - Added reports, UTF-8 CSV export, print layouts, browser Save as PDF workflow and data-health checks.
 - Added selective backup restore preview with conflict strategies.
 - Added English-first light visual system and Bengali locale setting.
-- Added Electron desktop shell and Windows x64 portable packaging configuration.
+- Added Electron desktop shell, multi-size Windows icon, Windows x64 portable/NSIS packaging configuration and a Windows runner release workflow.

@@ -30,7 +30,7 @@ The output is written to `dist/` and is intentionally ignored by Git.
 npm run dist:win
 ```
 
-The build target is `release/Dentiva-Pro-1.0.0-Windows-x64.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, icon, asar packaging, non-admin execution and no publish target.
+The build targets are `release/Dentiva-Pro-1.0.0-Windows-x64.exe` and `release/Dentiva-Pro-1.0.0-Windows-x64-Setup.exe` when run on a machine with access to the Electron binary cache. The package is configured with an application ID, multi-size ICO icon, asar packaging, non-admin execution and no publish target.
 
 For a portable source + built-renderer delivery package that does not include `node_modules`, use:
 

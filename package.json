@@ -1,7 +1,7 @@
 {
   "name": "dentiva-pro",
   "version": "1.0.0",
-  "description": "Dentiva Pro \u2014 offline-first dental practice management for Windows",
+  "description": "Dentiva Pro — offline-first dental practice management for Windows",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "start:desktop": "npm run build && electron .",
-    "dist:win": "npm run build && electron-builder --win portable",
+    "dist:win": "npm run build && electron-builder --win",
     "check": "npm run test && npm run build",
     "test": "node --test tests/*.test.mjs",
     "package:release": "npm run build && ./scripts/package-release.sh"
@@ -43,14 +43,29 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "icon": "public/icon.png",
+      "icon": "public/icon.ico",
       "requestedExecutionLevel": "asInvoker"
     },
     "portable": {
       "artifactName": "Dentiva-Pro-${version}-Windows-x64.exe"
     },
-    "publish": null
+    "publish": null,
+    "nsis": {
+      "artifactName": "Dentiva-Pro-${version}-Windows-x64-Setup.exe",
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Dentiva Pro"
+    }
   }
 }

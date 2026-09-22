@@ -31,7 +31,8 @@ This is the implementation audit for the 1.0.0 source release.
 - [x] English-first terminology with Bengali locale labels for core navigation and common actions
 - [x] Offline service-worker shell for browser deployments and Electron-safe local renderer
 - [x] Hardened Electron shell configuration: context isolation, sandbox and no Node integration
-- [x] Windows x64 portable packaging configuration and branded icon assets
+- [x] Windows x64 portable and per-user NSIS packaging configuration with branded ICO assets
+- [x] GitHub Actions Windows runner workflow that builds, verifies and uploads the EXE, installer and final application ZIP
 - [x] README, user guide, build guide, changelog and automated smoke checks
 
 ## Environment-dependent release step

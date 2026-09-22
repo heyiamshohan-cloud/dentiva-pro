@@ -1,0 +1,169 @@
+name: Dentiva Pro Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/01a0c8bf-dentiva-pro
+
+permissions:
+  contents: write
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'true'
+
+jobs:
+  windows-x64:
+    name: Build Windows x64 application
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests and renderer build
+        run: npm run check
+
+      - name: Install Chromium for DOM and layout checks
+        run: npx playwright install chromium
+
+      - name: Run required viewport layout checks
+        run: npm run test:visual
+
+      - name: Surface visual failure diagnostics
+        if: always()
+        run: node scripts/visual-diagnostics.mjs
+
+      - name: Upload viewport regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dentiva-Pro-${{ github.run_number }}-viewport-regression
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            test-results/**
+            playwright-report/**
+
+      - name: Build portable and installer packages
+        shell: pwsh
+        run: |
+          & npm run dist:win 2>&1 | Tee-Object -FilePath release-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Windows PE artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = Get-ChildItem release -Filter 'Dentiva-Pro-*-Windows-x64.exe' | Where-Object { $_.Name -notlike '*Setup*' } | Select-Object -First 1
+          if (!$portable) { throw 'Portable Windows executable was not found.' }
+          $bytes = [System.IO.File]::ReadAllBytes($portable.FullName)
+          if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Portable artifact is not a Windows PE executable: $($portable.Name)" }
+          Write-Host "Verified Windows PE executable: $($portable.Name) ($($bytes.Length) bytes)"
+          $setup = Get-ChildItem release -Filter '*Setup.exe' | Select-Object -First 1
+          if (!$setup) { throw 'NSIS installer was not found.' }
+          $setupBytes = [System.IO.File]::ReadAllBytes($setup.FullName)
+          if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) { throw "Installer is not a Windows PE executable: $($setup.Name)" }
+          Write-Host "Verified Windows installer: $($setup.Name) ($($setupBytes.Length) bytes)"
+
+      - name: Run Windows portable launch and restart persistence smoke
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $portable = "release\\Dentiva-Pro-$version-Windows-x64.exe"
+          $installer = "release\\Dentiva-Pro-$version-Windows-x64-Setup.exe"
+          ./scripts/windows-smoke.ps1 -PortablePath $portable -InstallerPath $installer -PortableOnly
+
+      - name: Upload Windows portable smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dentiva-Pro-${{ github.run_number }}-windows-portable-smoke-evidence
+          if-no-files-found: warn
+          retention-days: 30
+          path: windows-smoke-evidence/**
+
+      - name: Assemble verified release package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./package.json').version"
+          $stage = "release\Dentiva-Pro-$version-Windows-x64"
+          $zip = "release\Dentiva-Pro-$version-Windows-x64.zip"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          $portable = "release\Dentiva-Pro-$version-Windows-x64.exe"
+          if (!(Test-Path $portable)) { throw "Portable Windows executable was not created: $portable" }
+          Copy-Item $portable "$stage\DentivaPro.exe"
+          $setup = Get-ChildItem release -Filter "*Setup.exe" | Select-Object -First 1
+          if ($setup) { Copy-Item $setup.FullName "$stage\$($setup.Name)" }
+          Copy-Item README.md "$stage\README.txt"
+          Copy-Item CHANGELOG.md "$stage\CHANGELOG.txt"
+          Copy-Item LICENSE.txt "$stage\LICENSE.txt"
+          New-Item -ItemType Directory -Path "$stage\Documentation" | Out-Null
+          Copy-Item docs\USER_GUIDE.md "$stage\Documentation\USER_GUIDE.md"
+          Copy-Item docs\BUILD.md "$stage\Documentation\BUILD.md"
+          Get-ChildItem $stage -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "$stage\checksums.txt"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
+          if (!(Test-Path $zip)) { throw "Release ZIP was not created" }
+          $inspect = Join-Path $env:TEMP "dentiva-pro-zip-inspect-$version"
+          if (Test-Path $inspect) { Remove-Item $inspect -Recurse -Force }
+          Expand-Archive -Path $zip -DestinationPath $inspect
+          if (!(Test-Path "$inspect\DentivaPro.exe")) { throw "Application ZIP is missing DentivaPro.exe" }
+          $forbidden = Get-ChildItem $inspect -Recurse -Force | Where-Object { $_.Name -in @('.git', 'node_modules', 'tests', 'test-data') -or $_.FullName -match '\\(node_modules|tests|test-data)\\' }
+          if ($forbidden) { throw "Application ZIP contains development or test content: $($forbidden[0].FullName)" }
+          Remove-Item $inspect -Recurse -Force
+          $checksumPath = "release\Dentiva-Pro-$version-checksums.txt"
+          Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') } | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content $checksumPath
+          $checksumLines = Get-Content $checksumPath
+          foreach ($artifact in (Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') })) {
+            $actual = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+            $line = $checksumLines | Where-Object { $_ -match [regex]::Escape($artifact.Name) } | Select-Object -First 1
+            if (!$line -or $line.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)[0].ToUpperInvariant() -ne $actual) { throw "Checksum validation failed for $($artifact.Name)" }
+            Write-Host "Verified SHA-256: $($artifact.Name) $actual"
+          }
+          $required = @($portable, $setup.FullName, $zip, $checksumPath)
+          foreach ($path in $required) { if (!(Test-Path $path)) { throw "Required release asset missing: $path" } }
+
+      - name: Publish GitHub release assets
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-release]'))
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          $assets = @(
+            "release\\Dentiva-Pro-$version-Windows-x64.exe",
+            "release\\Dentiva-Pro-$version-Windows-x64-Setup.exe",
+            "release\\Dentiva-Pro-$version-Windows-x64.zip",
+            "release\\Dentiva-Pro-$version-checksums.txt"
+          )
+          gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists. Refusing to overwrite a prior release or its assets." }
+          gh release create $tag @assets --target $env:GITHUB_SHA --title "Dentiva Pro $version" --notes-file CHANGELOG.md
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dentiva-Pro-${{ github.run_number }}-Windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            release/Dentiva-Pro-*-Windows-x64.exe
+            release/Dentiva-Pro-*-Windows-x64-Setup.exe
+            release/Dentiva-Pro-*-Windows-x64.zip
+            release/Dentiva-Pro-*-checksums.txt

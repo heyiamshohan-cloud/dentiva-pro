@@ -6,7 +6,7 @@ Dentiva Pro is a local dental-practice workspace for clinics in Bangladesh. The 
 
 The repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records.
 
-> **Release status:** v1.3.0 is the current release candidate on `arena/01a0c66a-dentiva-pro`. v1.0.0, v1.1.0 and v1.2.0 remain preserved. The Windows workflow must still complete the portable, visual, packaging, PE, ZIP and checksum gates before a v1.3.0 release is called published. The installed-app launch/restart/uninstall smoke is intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. See [`docs/FINAL_AUDIT_REPORT_1.3.0.md`](docs/FINAL_AUDIT_REPORT_1.3.0.md) and [`docs/V1.3_PROGRESS.md`](docs/V1.3_PROGRESS.md).
+> **Release status:** v1.3.0 is the verified release candidate on `arena/01a0c66a-dentiva-pro`. Windows CI run `35707666589` passed tests/build, six viewport checks, portable/NSIS packaging, PE, ZIP, checksum and portable persistence gates. An explicit publication workflow still must create the new tag/release; v1.0.0, v1.1.0 and v1.2.0 remain preserved. The installed-app launch/restart/uninstall smoke is intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. See [`docs/FINAL_AUDIT_REPORT_1.3.0.md`](docs/FINAL_AUDIT_REPORT_1.3.0.md) and [`docs/V1.3_PROGRESS.md`](docs/V1.3_PROGRESS.md).
 
 ## Flagship modules
 

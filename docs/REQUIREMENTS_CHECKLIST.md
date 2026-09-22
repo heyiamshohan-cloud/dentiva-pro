@@ -13,7 +13,7 @@
 - [x] Offline/local operation remains the default; no mandatory cloud, telemetry, paid API or external patient-data service.
 - [x] Light-only premium visual direction and Bangladesh defaults remain in place.
 - [x] No automated diagnosis, treatment recommendation or prescribing is introduced.
-- [~] v1.3 Windows artifacts, checksums, tag and GitHub release — blocked until Windows CI completes; no release is claimed in source-only evidence.
+- [~] Windows CI artifact, checksum and packaging gates passed on run `35707666589`; `v1.3.0` tag/GitHub release publication remains pending the explicit workflow-dispatch step.
 
 ## Design system, navigation and command center
 
@@ -22,7 +22,7 @@
 - [x] Dashboard provides schedule, queue, follow-up, signal, metric and shortcut command-center surfaces.
 - [x] Dashboard widget visibility, order and reset-to-default are configurable and persisted locally.
 - [x] Command palette supports commands, permission-scoped navigation and local record search.
-- [~] Six-viewport visual/layout regression — `npm run test:visual` was attempted locally but Playwright Chromium was unavailable; Windows CI must run and publish evidence.
+- [x] Six-viewport visual/layout regression — Windows CI run `35707666589` installed Chromium and passed the required 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 projects; local Chromium remains unavailable.
 - [~] Subjective premium visual review — human review remains required even if automated layout checks pass.
 
 ## Clinical and patient workflows
@@ -107,11 +107,11 @@
 - [x] Synthetic dataset benchmark passes at 1,000, 5,000, 10,000 and 25,000 records with zero relationship errors; synthetic records are never written to the app store.
 - [x] Proprietary license/creator metadata, icon configuration, artifact names and build date remain explicit.
 - [x] Resolved dependency audit is clean after the Electron 44.4.3/electron-builder 26.15.3 upgrade; license inventory is documented in `docs/THIRD_PARTY_LICENSES.md`.
-- [~] Playwright visual checks and Windows packaging/artifact checks — pending Windows workflow run.
+- [x] Playwright visual checks and Windows packaging/artifact checks — Windows CI run `35707666589` passed visual, packaging, PE, portable smoke, ZIP and checksum gates; direct archive download is unavailable from this sandbox.
 - [~] Commercial license/dependency review — technical inventory is complete; final legal owner review of packaged Electron/Chromium notices remains required before broad distribution.
 
 ## Current release decision
 
-**NOT YET PUBLISHED in this working-tree evidence.** The implementation and local deterministic gates pass, but the release remains blocked until Windows CI verifies the required artifacts and visual/package gates, and the remaining native Bengali/document/security human review is reported honestly.
+**NOT YET PUBLISHED in this working-tree evidence.** Local deterministic gates and Windows CI artifact/visual/package gates pass on run `35707666589`. The explicit publication workflow, remaining native Bengali/document/security human review and final commercial owner review are still reported separately and honestly.
 
 **The Windows installed-app launch/restart/uninstall smoke was intentionally excluded from automated release gating and remains for manual user verification.** It is not a release blocker and is not a claimed PASS.

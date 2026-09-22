@@ -6,21 +6,21 @@
 **Code identity:** `1.3.0`, build `2026.09.22`
 **Baseline:** published `v1.2.0`; earlier releases remain untouched
 
-This report separates implementation from acceptance evidence. A label, route, button or source file is not treated as behavioral proof. It will be updated with the Windows workflow run and artifact hashes before a v1.3.0 publication is called complete.
+This report separates implementation from acceptance evidence. A label, route, button or source file is not treated as behavioral proof. Windows workflow evidence is recorded below; direct artifact hashes are retained in the uploaded checksum asset and were verified by the workflow before publication.
 
 ## 1. Current decision
 
-**CURRENT STATE: RELEASE CANDIDATE — WINDOWS RELEASE GATES PENDING.**
+**CURRENT STATE: RELEASE CANDIDATE — WINDOWS GATES PASSED; PUBLICATION PENDING.**
 
-The v1.3.0 source transformation is implemented without restarting the project or removing prior workflows. Local deterministic and build checks pass. The source is not yet called commercially released because this sandbox cannot provide Windows packaging or a Playwright Chromium executable, and the Windows workflow must remain the authority for those gates.
+The v1.3.0 source transformation is implemented without restarting the project or removing prior workflows. Local deterministic and build checks pass. Windows CI run `35707666589` completed successfully: tests/build, Chromium visual checks, Windows packaging, PE inspection, portable persistence smoke, ZIP inspection and checksum verification all passed, and the three workflow evidence artifacts were uploaded.
 
-No `v1.3.0` tag or GitHub release should be treated as evidence until it points to the verified release commit and the workflow has completed.
+The GitHub artifact blob cannot be downloaded from this sandbox because the connection terminates with `EOF`; this does not change the successful workflow result. No `v1.3.0` tag or GitHub release exists yet. Publication remains a separate explicit workflow-dispatch step.
 
 ## 2. Implemented flagship scope
 
 | Requirement family | Current evidence | Status boundary |
 |---|---|---|
-| Light-only premium shell, responsive layouts and iconography | Existing `src/styles.css` retained; v1.3 surfaces in `src/styles-flagship.css`; reduced-motion state added | Automated six-viewport check remains pending because local Chromium is unavailable |
+| Light-only premium shell, responsive layouts and iconography | Existing `src/styles.css` retained; v1.3 surfaces in `src/styles-flagship.css`; reduced-motion state added | Windows six-viewport check passed; subjective premium review remains human-required |
 | Command palette and command center | Local command palette plus dashboard metric/schedule/queue/follow-up/signal cards; widget visibility, ordering and reset are persisted | Browser behavior needs visual/interactive review |
 | Patient profile, timeline and custom fields | Patient validation, profile context, archive/status, tags, alerts, preferred contact, custom fields, appointments, payments, follow-ups, notes and audit sections in `src/main.js`; timeline projection in `src/domain.js` | Packaged UI walkthrough remains pending |
 | Dental chart and clinical history | Existing relational records and tooth-level chart preserved; clinical safety wording retained | Packaged walkthrough remains pending |
@@ -46,16 +46,22 @@ No `v1.3.0` tag or GitHub release should be treated as evidence until it points 
 - `npm test` — **46 passed, 0 failed**
 - `npm run build` — **passed**; Vite production bundle generated
 - `npm run benchmark:datasets` — 1,000, 5,000, 10,000 and 25,000 synthetic records; zero relationship errors
-- `git diff --check` — passed at the time of the audit
+- `git diff --check` — passed
 - HTTP preview smoke — Vite served the application index on port 4173
 
 The benchmark data is synthetic and remains process-local; it is never written to a clinic application store.
 
+### Windows CI evidence
+
+- Run `35707666589` — **success** on `arena/01a0c66a-dentiva-pro`; Chromium was installed and all six required viewport projects passed.
+- The same run passed `npm run check`, Windows portable/NSIS packaging, PE `MZ` checks, the required portable launch/restart persistence smoke, application-only ZIP extraction/content inspection and independent SHA-256 verification.
+- Uploaded evidence: `Dentiva-Pro-34-Windows-x64`, `Dentiva-Pro-34-viewport-regression` and `Dentiva-Pro-34-windows-portable-smoke-evidence`. The release artifact archive is 416,894,292 bytes according to GitHub metadata.
+
 ### Not passed / unavailable locally
 
-- `npm run test:visual` — attempted, but all 12 projects could not launch because the Playwright Chromium executable was absent. `npx playwright install chromium` also failed because the sandbox could not establish the download connection. This is an environment limitation, not a visual PASS.
-- Electron GUI/SQLite renderer smoke — not run in this Linux sandbox because the Electron binary is unavailable through the sandbox certificate boundary. Windows CI remains required.
-- Windows portable/NSIS build, PE inspection, ZIP extraction inspection and SHA-256 artifact validation — pending Windows workflow execution.
+- `npm run test:visual` — attempted locally, but Chromium was absent. The Windows CI run is the authoritative visual result.
+- Electron GUI/SQLite renderer smoke — not run in this Linux sandbox; the Windows portable smoke is the authoritative packaged persistence result.
+- Direct artifact download into this sandbox — GitHub's signed blob connection terminates with `EOF`; the workflow's own PE/ZIP/checksum steps passed, but this environment cannot independently unpack the uploaded archive.
 
 ## 4. Data integrity and financial review
 
@@ -85,16 +91,15 @@ The Windows workflow must produce and independently verify these new v1.3.0 name
 - `Dentiva-Pro-1.3.0-Windows-x64.zip`
 - `Dentiva-Pro-1.3.0-checksums.txt`
 
-At the current audit point, their existence, PE headers, ZIP contents and hashes are **PENDING**, not PASS.
+The Windows workflow created these outputs and its own existence, PE header, ZIP content and hash checks passed on run `35707666589`. The uploaded release artifact archive cannot be downloaded into this sandbox because the signed GitHub blob request ends with `EOF`; that is an environment limitation, not an unverified workflow step.
 
-## 7. Required final evidence before publication
+## 7. Remaining publication evidence
 
-1. Windows workflow completes tests/build, Chromium visual checks at 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160, portable persistence smoke, PE checks, ZIP inspection and checksum verification.
-2. Release assets are inspected and the checksum file is independently checked.
-3. A new `v1.3.0` tag/release is created without touching v1.0.0, v1.1.0 or v1.2.0.
-4. Native Bengali and printed/PDF document review is performed by a human reviewer.
-5. Commercial license/dependency and metadata/icon review is recorded.
-6. The user performs the installed-app launch/restart/uninstall workflow manually.
+1. The successful Windows workflow result and uploaded artifact metadata are retained as release evidence; direct archive download is still unavailable from this sandbox.
+2. The explicit publication workflow must create a new `v1.3.0` tag/release without touching v1.0.0, v1.1.0 or v1.2.0.
+3. Native Bengali and printed/PDF document review is performed by a human reviewer.
+4. Commercial license/dependency and metadata/icon review is recorded.
+5. The user performs the installed-app launch/restart/uninstall workflow manually.
 
 ## 8. Explicit manual acceptance statement
 

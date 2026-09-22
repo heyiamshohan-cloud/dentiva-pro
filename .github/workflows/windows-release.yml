@@ -162,3 +162,4 @@ jobs:
             release/Dentiva-Pro-*-Windows-x64.exe
             release/Dentiva-Pro-*-Windows-x64-Setup.exe
             release/Dentiva-Pro-*-Windows-x64.zip
+            release/Dentiva-Pro-*-checksums.txt

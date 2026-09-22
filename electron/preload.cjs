@@ -10,7 +10,7 @@ const ALLOWED_CHANNELS = [
   'attachment:read',
   'backup:create', 'backup:restore', 'backup:list', 'backup:delete', 'backup:validate', 'backup:prune', 'backup:restore-json', 'backup:pick-folder', 'backup:pick-file',
   'diagnostics:run', 'workspace:info', 'workspace:export',
-  'app:info', 'print:pdf', 'print:html-pdf'
+  'app:info', 'print:html'
 ];
 
 function invoke(channel, args) {

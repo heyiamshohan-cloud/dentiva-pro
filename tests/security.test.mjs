@@ -28,11 +28,17 @@ test('Electron renderer boundary remains hardened (ESM main, sandboxed preload)'
   assert.match(html, /Content-Security-Policy/);
 });
 
-test('PDF IPC blocks active and remote content', () => {
-  assert.match(main, /script\\b|script\\\\b/);
-  assert.match(main, /javascript:/);
+test('print IPC blocks active and remote content', () => {
+  const printLib = fs.readFileSync(new URL('../electron/lib/print.mjs', import.meta.url), 'utf8');
+  assert.match(printLib, /script\\b|script\\\\b/);
+  assert.match(printLib, /javascript:/);
+  assert.match(printLib, /iframe\\b|<object\\b|<embed\\b/);
+  assert.ok(printLib.includes('https?:'), 'blocks remote image sources');
   assert.match(main, /javascript:\s*false/);
-  assert.match(main, /print:html-pdf/);
+  assert.match(main, /validatePrintHtml/);
+  assert.match(main, /'print:html'/);
+  assert.match(main, /webContents\.print\(/);
+  assert.doesNotMatch(main, /print:html-pdf/);
 });
 
 test('production source has no cloud telemetry or diagnostic HTTP client', () => {

@@ -260,6 +260,11 @@ export const OPS = {
       if (next.defaultDuration !== undefined) next.defaultDuration = Math.min(480, Math.max(5, Math.round(toNumber(next.defaultDuration) || 30)));
       if (next.attachmentMaxMb !== undefined) next.attachmentMaxMb = Math.min(4096, Math.max(1, toNumber(next.attachmentMaxMb) || 256));
       if (next.sessionTimeoutMinutes !== undefined) next.sessionTimeoutMinutes = Math.min(480, Math.max(0, Math.round(toNumber(next.sessionTimeoutMinutes))));
+      if (next.autoLockMinutes !== undefined) next.autoLockMinutes = Math.min(480, Math.max(0, Math.round(toNumber(next.autoLockMinutes))));
+      if (next.backupIntervalHours !== undefined) next.backupIntervalHours = Math.min(720, Math.max(1, Math.round(toNumber(next.backupIntervalHours) || 24)));
+      if (next.backupRetention !== undefined) next.backupRetention = Math.min(365, Math.max(1, Math.round(toNumber(next.backupRetention) || 10)));
+      if (next.backupDirectory !== undefined) next.backupDirectory = str(next.backupDirectory).slice(0, 400);
+      if (next.documentTemplate && typeof next.documentTemplate === 'object') next.documentTemplate = { footer: str(next.documentTemplate.footer).slice(0, 500), showLogo: next.documentTemplate.showLogo !== false, showClinicContact: next.documentTemplate.showClinicContact !== false };
       repo.setMeta('settings', next);
       return { ok: true, settings: next, audit: [{ action: 'Settings updated', entity: 'Settings', entityId: '', summary: changed.slice(0, 12).join(', ') || 'Settings reviewed' }] };
     }

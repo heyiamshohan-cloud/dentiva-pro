@@ -12,8 +12,9 @@
 //     refuses active or remote content
 //   - no telemetry, no network client of any kind — the app is offline-first
 
-import { app, BrowserWindow, ipcMain, Menu, session } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, dialog } from 'electron';
 import path from 'node:path';
+import { promises as fsp } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { migrateWorkspace } from './lib/migrate.mjs';
 import { Workspace } from './lib/db.mjs';
@@ -21,6 +22,7 @@ import { SqlRepo } from './lib/repo-sql.mjs';
 import { SessionManager } from './lib/auth.mjs';
 import { registerIpc } from './lib/ipc.mjs';
 import { DB_LAYOUT_VERSION } from './lib/schema.mjs';
+import { validatePrintHtml, buildIsolatedHtml, pageSizeForPrint, pageSizeForPdf, normalizePageSize, safePdfFilename } from './lib/print.mjs';
 import { diagnoseWorkspace } from './lib/diagnostics.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -293,39 +295,56 @@ app.whenReady().then(async () => {
     migration: { status: migrationResult?.status || 'unknown', errors: migrationResult?.errors || [] }
   }));
 
-  ipcMain.handle('print:pdf', async (_event, options = {}) => {
-    if (!mainWindow) throw new Error('Window unavailable');
-    const pageSize = ['A4', 'Letter', 'Legal', 'A3', 'A5', 'Receipt'].includes(options.pageSize) ? options.pageSize : 'A4';
-    const pdfOptions = { printBackground: true, landscape: Boolean(options.landscape), margins: { marginType: 'default' } };
-    if (pageSize === 'Receipt') pdfOptions.pageSize = { width: 80000, height: 180000 };
-    else pdfOptions.pageSize = pageSize;
-    const data = await mainWindow.webContents.printToPDF(pdfOptions);
-    return data.toString('base64');
-  });
-
-  ipcMain.handle('print:html-pdf', async (_event, payload = {}) => {
+  ipcMain.handle('print:html', async (_event, payload = {}) => {
     const html = typeof payload.html === 'string' ? payload.html : '';
-    if (!html || html.length > 30 * 1024 * 1024) throw new Error('PDF document is empty or too large.');
-    // Active and remote content is refused outright — the isolated print window
-    // additionally runs with javascript: false.
-    if (/<\s*\/?\s*script\b|<iframe\b|<object\b|<embed\b|javascript:|src\s*=\s*['"]https?:/i.test(html)) {
-      throw new Error('PDF document contains a blocked active or remote resource.');
-    }
-    const pageSize = ['A4', 'Letter', 'Legal', 'A3', 'A5', 'Receipt'].includes(payload.options?.pageSize) ? payload.options?.pageSize : 'A4';
-    const isolatedHtml = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:;"><style>html,body{background:#fff;color:#111}body{margin:24px;font-family:Arial,sans-serif}</style></head><body>${html}</body></html>`;
-    const pdfWindow = new BrowserWindow({
+    const check = validatePrintHtml(html);
+    if (!check.ok) throw new Error(check.error);
+    const mode = payload.options?.mode === 'pdf' ? 'pdf' : 'print';
+    const title = typeof payload.options?.title === 'string' && payload.options.title.trim() ? payload.options.title.trim() : 'Dentiva Pro document';
+    const pageSize = normalizePageSize(payload.options?.pageSize);
+    const landscape = Boolean(payload.options?.landscape);
+    const printWindow = new BrowserWindow({
       show: false,
       backgroundColor: '#ffffff',
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, javascript: false }
     });
     try {
-      await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(isolatedHtml)}`);
-      const pdfOptions = { printBackground: true, landscape: Boolean(payload.options?.landscape), margins: { marginType: 'default' } };
-      pdfOptions.pageSize = pageSize === 'Receipt' ? { width: 80000, height: 180000 } : pageSize;
-      const data = await pdfWindow.webContents.printToPDF(pdfOptions);
-      return data.toString('base64');
+      await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildIsolatedHtml(html))}`);
+      if (mode === 'print') {
+        // Native system print dialog (full printer/paper/copies control). The
+        // window stays hidden; the OS supplies preview and page selection.
+        return await new Promise((resolve) => {
+          try {
+            printWindow.webContents.print(
+              { silent: false, printBackground: true, color: true, landscape, margins: { marginType: 'default' }, pageSize: pageSizeForPrint(pageSize) },
+              (success, failureReason) => {
+                if (success) return resolve({ ok: true, printed: true, pageSize });
+                const reason = String(failureReason || '');
+                if (reason.toLowerCase().includes('cancel')) return resolve({ ok: true, cancelled: true });
+                return resolve({ ok: false, error: reason || 'The printer did not accept the job.' });
+              }
+            );
+          } catch (error) {
+            resolve({ ok: false, error: error?.message || 'Printing failed.' });
+          }
+        });
+      }
+      // mode === 'pdf' — render PDF then let the user pick the save location.
+      const pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: { marginType: 'default' }, pageSize: pageSizeForPdf(pageSize) });
+      const picked = await dialog.showSaveDialog(mainWindow, {
+        title: `Save ${title}`,
+        defaultPath: safePdfFilename(title),
+        filters: [{ name: 'PDF document', extensions: ['pdf'] }]
+      });
+      if (picked.canceled || !picked.filePath) return { ok: true, cancelled: true };
+      let target = String(picked.filePath);
+      if (!target.toLowerCase().endsWith('.pdf')) target += '.pdf';
+      await fsp.writeFile(target, pdf);
+      return { ok: true, saved: true, path: target, bytes: pdf.length };
+    } catch (error) {
+      return { ok: false, error: error?.message || 'Document export failed.' };
     } finally {
-      if (!pdfWindow.isDestroyed()) pdfWindow.destroy();
+      try { if (!printWindow.isDestroyed()) printWindow.destroy(); } catch { /* window already gone */ }
     }
   });
 

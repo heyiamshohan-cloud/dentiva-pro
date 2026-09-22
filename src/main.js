@@ -99,7 +99,7 @@ const BENGALI_DICT = {
   'Active': 'সক্রিয়', 'Inactive': 'নিষ্ক্রিয়', 'Scheduled': 'নির্ধারিত', 'Checked In': 'চেক-ইন', 'Waiting': 'অপেক্ষমাণ',
   'In Treatment': 'চিকিৎসাধীন', 'Completed': 'সম্পন্ন', 'Cancelled': 'বাতিল', 'No Show': 'অনুপস্থিত', 'Paid': 'পরিশোধিত',
   'Partially Paid': 'আংশিক পরিশোধ', 'Unpaid': 'অপরিশোধিত', 'Low stock': 'স্টক কম', 'In stock': 'স্টকে আছে', 'Expired': 'মেয়াদোত্তীর্ণ',
-  'No records in this range': 'এই সময়সীমায় কোনো রেকর্ড নেই', 'No patients found': 'কোনো রোগী পাওয়া যায়নি', 'No notifications': 'কোনো নোটিফিকেশন নেই', 'Queue wait': 'সিরিয়ালে অপেক্ষা', 'Clinical follow-ups': 'ক্লিনিক্যাল ফলো-আপ', 'Stock and expiry': 'স্টক ও মেয়াদ', 'Outstanding balances': 'বকেয়া ব্যালান্স', 'Backup reminders': 'ব্যাকআপ অনুস্মারক', 'Notification categories': 'নোটিফিকেশনের বিভাগ', 'Document footer': 'ডকুমেন্ট ফুটার', 'Show clinic logo in documents': 'ডকুমেন্টে ক্লিনিকের লোগো দেখান', 'Show clinic contact in documents': 'ডকুমেন্টে ক্লিনিকের যোগাযোগ দেখান',
+  'No records in this range': 'এই সময়সীমায় কোনো রেকর্ড নেই', 'No patients found': 'কোনো রোগী পাওয়া যায়নি', 'No notifications': 'কোনো নোটিফিকেশন নেই', 'Queue wait': 'সিরিয়ালে অপেক্ষা', 'Clinical follow-ups': 'ক্লিনিক্যাল ফলো-আপ', 'Stock and expiry': 'স্টক ও মেয়াদ', 'Outstanding balances': 'বকেয়া ব্যালান্স', 'Backup reminders': 'ব্যাকআপ অনুস্মারক', 'Notification categories': 'নোটিফিকেশনের বিভাগ', 'Document footer': 'ডকুমেন্ট ফুটার', 'Show clinic logo in documents': 'ডকুমেন্টে ক্লিনিকের লোগো দেখান', 'Show clinic contact in documents': 'ডকুমেন্টে ক্লিনিকের যোগাযোগ দেখান', 'Print preview': 'প্রিন্ট প্রিভিউ', 'Send to printer': 'প্রিন্টারে পাঠান', 'Save as PDF': 'পিডিএফ হিসেবে সংরক্ষণ করুন', 'Paper size': 'কাগজের মাপ', '80 mm receipt': '৮০ মিমি রসিদ', 'Print cancelled': 'প্রিন্ট বাতিল হয়েছে', 'Document sent to the printer.': 'ডকুমেন্ট প্রিন্টারে পাঠানো হয়েছে।', 'Nothing prints silently.': 'নীরবে কিছুই প্রিন্ট হয় না।', 'Preview the document, choose the paper size, then print or save as PDF.': 'ডকুমেন্টটি দেখুন, কাগজের মাপ বেছে নিন, তারপর প্রিন্ট বা পিডিএফ সংরক্ষণ করুন।', 'Appointment slip': 'অ্যাপয়েন্টমেন্ট স্লিপ', 'Treatment estimate': 'চিকিৎসার আনুমানিক খরচ', 'Print slip': 'স্লিপ প্রিন্ট', 'Print estimate': 'অনুমান প্রিন্ট',
   'Professional Dental Practice': 'পেশাদার ডেন্টাল প্র্যাকটিস', 'Practice workspace': 'প্র্যাকটিস ওয়ার্কস্পেস', 'Setup required': 'সেটআপ প্রয়োজন',
   'General': 'সাধারণ', 'Clinic & doctor': 'ক্লিনিক ও ডাক্তার', 'Appointments': 'অ্যাপয়েন্টমেন্ট', 'Billing & payments': 'বিলিং ও পরিশোধ', 'Printing': 'প্রিন্টিং', 'Security': 'নিরাপত্তা', 'Notifications': 'নোটিফিকেশন',
   'Good morning': 'সুপ্রভাত', 'Good afternoon': 'শুভ অপরাহ্ণ', 'Good evening': 'শুভ সন্ধ্যা', 'A clear view of your practice, without the noise.': 'অপ্রয়োজনীয় জটিলতা ছাড়া আপনার প্র্যাকটিসের পরিষ্কার চিত্র।',
@@ -765,7 +765,7 @@ async function renderPatientPlans(id, patient) {
     <div><strong>${esc(plan.title)}</strong><small>${statusBadge(plan.status)} · ${currency(centsToMoney(plan.estimatedTotalCents ?? plan.estimatedTotal))}${plan.startDate ? ` · starts ${date(plan.startDate)}` : ''}</small>
     ${(plan.stages || []).length ? `<ul class="stage-list">${plan.stages.map((stage) => `<li data-action="cycle-plan-stage" data-plan="${attr(plan.id)}" data-stage="${attr(stage.id)}" title="Click to advance stage status"><span class="stage-dot ${stage.status}"></span><span class="stage-title">${esc(stage.title)}</span><small>${esc(stage.status)}${stage.plannedDate ? ` · ${date(stage.plannedDate)}` : ''}${stage.estimatedCost ? ` · ${currency(stage.estimatedCost)}` : ''}</small></li>`).join('')}</ul>` : ''}
     </div>
-    <div class="row-actions">${button('Convert to visit', 'convert-treatment-plan', 'arrow', 'link', `data-id="${attr(plan.id)}"`)}${button('Edit', 'open-treatment-plan', 'edit', 'link', `data-id="${attr(plan.id)}"`)}</div>
+    <div class="row-actions">${button('Print estimate', 'print-estimate', 'printer', 'link', `data-id="${attr(plan.id)}"`)}${button('Convert to visit', 'convert-treatment-plan', 'arrow', 'link', `data-id="${attr(plan.id)}"`)}${button('Edit', 'open-treatment-plan', 'edit', 'link', `data-id="${attr(plan.id)}"`)}</div>
   </div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('layers', 17)}<h2>Treatment plans</h2></div>${button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
     ${rows || emptyState('layers', 'No treatment plans yet', 'Clinician-authored plans for this patient appear here.', button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
@@ -1234,6 +1234,8 @@ async function renderSettings() {
           <label class="field-label">Rooms (comma separated)<input type="text" name="rooms" value="${attr((s.rooms || []).join(', '))}"></label>
           ${field('Low stock threshold', 'lowStockThreshold', s.lowStockThreshold || 5, 'number', 'min="0"')}
           ${field('Document footer (printed documents)', 'documentFooter', (s.documentTemplate || {}).footer || '', 'textarea', 'rows="2"')}
+          <label class="check-label"><input type="checkbox" name="showLogo" ${(s.documentTemplate || {}).showLogo !== false ? 'checked' : ''}> Show clinic logo in documents</label>
+          <label class="check-label"><input type="checkbox" name="showClinicContact" ${(s.documentTemplate || {}).showClinicContact !== false ? 'checked' : ''}> Show clinic contact in documents</label>
         </div>
       </section>
       <section class="card"><div class="card-title"><div class="card-title-text">${icon('backup', 17)}<h2>Backup behaviour</h2></div></div>
@@ -1316,7 +1318,7 @@ function modal() {
     referral: modalReferral, followup: modalFollowup, attachment: modalAttachment, 'attachment-preview': modalAttachmentPreview,
     'user-account': modalUserAccount, security: modalSecurity, 'csv-import': modalCsvImport, search: modalSearch,
     'saved-filters': modalSavedFilters, 'dashboard-customizer': modalDashboardCustomizer, 'audit-log': modalAuditLog,
-    notifications: modalNotifications, merge: modalPatientMerge
+    notifications: modalNotifications, merge: modalPatientMerge, 'print-preview': modalPrintPreview
   };
   const builder = builders[type] || (() => '');
   return `<div class="modal-overlay" data-modal-window><div class="modal-window" role="dialog" aria-modal="true">${builder(data)}</div></div>`;
@@ -1478,6 +1480,7 @@ function modalAppointmentDetail(data = {}) {
       ${['Checked In', 'Waiting', 'In Treatment', 'Completed', 'No Show'].map((status) => `<button class="chip-button ${a.status === status ? 'selected' : ''}" data-action="queue-status" data-id="${attr(a.id)}" data-status="${attr(status)}">${esc(status)}</button>`).join('')}
       ${can('appointments.cancel') ? `<button class="chip-button danger" data-action="cancel-appointment" data-id="${attr(a.id)}">Cancel</button>` : ''}
       ${can('appointments.edit') ? `<button class="chip-button" data-action="open-appointment" data-id="${attr(a.id)}">Edit</button>` : ''}
+      <button class="chip-button" data-action="print-appointment" data-id="${attr(a.id)}">Print slip</button>
     </div>
     <div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
 }
@@ -2118,6 +2121,18 @@ async function handleSubmit(event) {
     payload.taxEnabled = payload.taxEnabled === 'on' || payload.taxEnabled === 'true';
     payload.backupEnabled = payload.backupEnabled === 'on' || payload.backupEnabled === 'true';
     payload.notifications = payload.notifications === 'on' || payload.notifications === 'true';
+    if (payload.backupIntervalHours !== undefined) payload.backupIntervalHours = Number(payload.backupIntervalHours || 24);
+    if (payload.backupRetention !== undefined) payload.backupRetention = Number(payload.backupRetention || 10);
+    if (payload.sessionTimeoutMinutes !== undefined) payload.sessionTimeoutMinutes = Number(payload.sessionTimeoutMinutes || 30);
+    if (payload.autoLockMinutes !== undefined) payload.autoLockMinutes = Number(payload.autoLockMinutes || 0);
+    payload.documentTemplate = {
+      ...(appState.settings.documentTemplate || {}),
+      footer: String(payload.documentFooter ?? (appState.settings.documentTemplate || {}).footer ?? ''),
+      showLogo: payload.showLogo === 'on' || payload.showLogo === 'true',
+      showClinicContact: payload.showClinicContact === 'on' || payload.showClinicContact === 'true'
+    };
+    delete payload.showLogo;
+    delete payload.showClinicContact;
     const result = await op('settings.update', payload);
     if (result) { appState.settings = result.settings; notify('Settings saved.'); if (ui.page !== 'settings') render(); }
     return;
@@ -2236,7 +2251,11 @@ async function handleClick(event) {
     case 'cal-step': ui.calendarDate = shiftDate(ui.calendarDate, Number(target.dataset.step) || 1); return render();
     case 'print-queue': return printQueue();
     case 'print-billing': return printBilling();
-    case 'print-report': return notify('Reports print via the print dialog — use your OS print button.', 'info');
+    case 'print-report': return printReportDocument();
+    case 'print-send': return executePrint('print');
+    case 'print-save-pdf': return executePrint('pdf');
+    case 'print-appointment': { const appt = (await q('record', { collection: 'appointments', id })).record; return printAppointmentSlip(appt); }
+    case 'print-estimate': { const plan = (await q('record', { collection: 'treatmentPlans', id })).record; return printEstimate(plan); }
 
     case 'open-visit': {
       const visit = id ? (await q('record', { collection: 'visits', id })).record : {};
@@ -2725,6 +2744,7 @@ async function handleChange(event) {
     case 'reports-range-to': ui.rangeTo = target.value; return render();
     case 'analytics-range': ui.analyticsRange = target.value; return render();
     case 'report-type': ui.reportType = target.value; return render();
+    case 'print-page-size': if (ui.modal?.type === 'print-preview') { ui.modal.data.pageSize = target.value; return render(); } return;
     case 'patient-status-filter': ui.patientStatusFilter = target.value; listState.patients.page = 1; return render();
     case 'patient-balance-filter': ui.patientBalanceFilter = target.value; listState.patients.page = 1; return render();
     case 'invoice-status-filter': listState.invoices.filters = { ...listState.invoices.filters, status: target.value || undefined }; listState.invoices.page = 1; return render();
@@ -2809,48 +2829,115 @@ function updateInvoiceTotals() {
 /* ------------------------------------------------------------------ */
 /* Printing (isolated window; no active content)                       */
 /* ------------------------------------------------------------------ */
-function printDocumentMarkup(title, content) {
-  const footer = (appState.settings.documentTemplate || {}).footer || '';
-  const brand = appState.settings.clinicName || 'Dentiva Pro';
-  const contact = [appState.settings.phone, appState.settings.address].filter(Boolean).join(' · ');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
-    html,body{margin:0;padding:32px;font-family:Arial,Helvetica,sans-serif;color:#111;background:#fff}
-    .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0c6b70;padding-bottom:12px;margin-bottom:20px}
-    .print-brand{font-size:20px;font-weight:800;color:#0c6b70}.print-brand small{display:block;font-size:11px;color:#555;font-weight:400}
-    .summary{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}.summary div{background:#f4f7f7;padding:8px 14px;border-radius:8px}.summary .muted{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#5c6f6f}
-    .print-table{width:100%;border-collapse:collapse;margin:10px 0}.print-table th,.print-table td{text-align:left;padding:8px 10px;border-bottom:1px solid #dfe7e7;font-size:13px}.print-table th{background:#f4f7f7;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
-    .print-footer{margin-top:28px;padding-top:12px;border-top:1px solid #dfe7e7;font-size:11px;color:#5c6f6f}
-    h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 8px}
+function printPageCssSize(pageSize) {
+  return { A4: 'A4 portrait', A5: 'A5 portrait', Letter: 'letter portrait', Legal: 'legal portrait', Receipt80: '80mm 200mm' }[pageSize] || 'A4 portrait';
+}
+function normalizePrintPageSize(value) {
+  const v = String(value || '');
+  return ['A4', 'A5', 'Letter', 'Legal', 'Receipt80'].includes(v) ? v : 'A4';
+}
+function buildPrintDocument(title, content, pageSize = 'A4') {
+  const size = normalizePrintPageSize(pageSize);
+  const receipt = size === 'Receipt80';
+  const doc = appState.settings.documentTemplate || {};
+  const showLogo = doc.showLogo !== false;
+  const showContact = doc.showClinicContact !== false;
+  const footer = doc.footer || '';
+  const s = appState.settings;
+  const lang = (s.language || 'English') === 'Bengali' ? 'bn' : 'en';
+  const logo = showLogo ? safeLogoSource(s.logo) : '';
+  const brand = s.clinicName || 'Dentiva Pro';
+  const contactParts = showContact
+    ? [s.chamberName, [s.address, s.city, s.district].filter(Boolean).join(', '), [s.phone, s.secondaryPhone].filter(Boolean).join(' / '), s.email].filter(Boolean)
+    : [];
+  const prescriberLine = [s.dentistName, s.professionalTitle].filter(Boolean).join(', ');
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    html,body{margin:0;padding:${receipt ? '4mm' : '12mm'};color:#111;background:#fff;font-size:${receipt ? '11px' : '13px'};line-height:1.45;
+      font-family:'SolaimanLipi','Nirmala UI','Noto Sans Bengali','Hind Siliguri',Arial,Helvetica,sans-serif}
+    .print-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #0c6b70;padding-bottom:10px;margin-bottom:14px}
+    .print-brand{display:flex;gap:10px;align-items:flex-start}
+    .print-logo{max-height:${receipt ? '34px' : '48px'};max-width:120px;object-fit:contain}
+    .print-brand-name{font-size:${receipt ? '14px' : '18px'};font-weight:800;color:#0c6b70}
+    .print-brand small{display:block;font-size:${receipt ? '9px' : '10.5px'};color:#555;font-weight:400}
+    .print-doc-title{text-align:right}.print-doc-title h1{font-size:${receipt ? '13px' : '19px'};margin:0 0 2px;color:#111}
+    .print-doc-title small{color:#666;font-size:${receipt ? '9px' : '10.5px'}}
+    .summary{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}.summary div{background:#f4f7f7;padding:5px 10px;border-radius:6px}
+    .summary .muted{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#5c6f6f}
+    .print-table{width:100%;border-collapse:collapse;margin:8px 0;page-break-inside:auto}
+    .print-table thead{display:table-header-group}
+    .print-table tr{page-break-inside:avoid}
+    .print-table th,.print-table td{text-align:left;padding:${receipt ? '4px 5px' : '6px 8px'};border-bottom:1px solid #dfe7e7;font-size:inherit;vertical-align:top}
+    .print-table th{background:#f4f7f7;text-transform:uppercase;font-size:9px;letter-spacing:.05em}
+    .print-footer{margin-top:18px;padding-top:8px;border-top:1px solid #dfe7e7;font-size:${receipt ? '9px' : '10.5px'};color:#5c6f6f;page-break-inside:avoid}
+    h2{font-size:${receipt ? '11px' : '13.5px'};margin:12px 0 6px}
+    p{margin:4px 0}
+    @page{size:${printPageCssSize(size)};margin:${receipt ? '4mm' : '10mm'}}
     @media print{body{padding:0}}
   </style></head><body>
-  <div class="print-header"><div class="print-brand">${esc(brand)}<small>${esc(contact)}</small></div><div style="text-align:right"><h1>${esc(title)}</h1><small>${dateFull(today())}</small></div></div>
+  <div class="print-header">
+    <div class="print-brand">${logo ? `<img class="print-logo" src="${logo}" alt="">` : ''}<div><div class="print-brand-name">${esc(brand)}</div>${prescriberLine ? `<small>${esc(prescriberLine)}</small>` : ''}${contactParts.map((part) => `<small>${esc(part)}</small>`).join('')}</div></div>
+    <div class="print-doc-title"><h1>${esc(title)}</h1><small>${dateFull(today())}</small></div>
+  </div>
   ${content}
   ${footer ? `<div class="print-footer">${esc(footer)}</div>` : ''}
   </body></html>`;
 }
-async function printHtml(title, content, pageSize = appState.settings.printPageSize || 'A4') {
-  const result = await api.printHtmlPdf(printDocumentMarkup(title, content), { pageSize });
-  if (result?.ok === false) notify(result.error, 'error');
+function defaultPrintPageSize() { return normalizePrintPageSize(appState.settings.printPageSize === 'Receipt80' ? 'A4' : appState.settings.printPageSize || 'A4'); }
+function openPrintPreview(title, content, pageSize) {
+  openModal('print-preview', { title, content, pageSize: normalizePrintPageSize(pageSize || defaultPrintPageSize()) });
+}
+async function executePrint(mode) {
+  const data = ui.modal?.data;
+  if (!data || ui.modal?.type !== 'print-preview') return;
+  const markup = buildPrintDocument(data.title, data.content, data.pageSize);
+  let result;
+  try {
+    result = await api.printHtml(markup, { mode, pageSize: data.pageSize, title: data.title });
+  } catch (error) {
+    return notify(`${mode === 'pdf' ? 'PDF export' : 'Printing'} failed: ${error?.message || 'unknown error'}`, 'error');
+  }
+  if (!result) return notify('No response from the print service.', 'error');
+  if (result.ok === false) return notify(result.error || 'The document could not be produced.', 'error');
+  if (result.cancelled) return notify(mode === 'pdf' ? 'PDF save cancelled — nothing was written.' : 'Print cancelled — nothing was sent to the printer.', 'info');
+  if (result.saved) { notify(`PDF saved: ${result.path}`); return closeModal(); }
+  if (result.printed) { notify('Document sent to the printer.'); return closeModal(); }
+  if (result.fallback) { notify('Opened the browser print window — complete printing in the browser dialog.', 'info'); return closeModal(); }
+  notify('The print service returned an unexpected result.', 'error');
+}
+function modalPrintPreview(data = {}) {
+  const markup = buildPrintDocument(data.title || 'Document', data.content || '', data.pageSize || 'A4');
+  return `${modalHead('PRINT DOCUMENT', data.title || 'Document', 'Preview the document, choose the paper size, then print or save as PDF. Nothing prints silently.')}
+    <div class="print-preview-toolbar">
+      <label class="field-label inline">Paper size
+        <select name="print-page-size" data-change="print-page-size">${[['A4', 'A4'], ['A5', 'A5'], ['Letter', 'Letter'], ['Legal', 'Legal'], ['Receipt80', '80 mm receipt']].map(([value, label]) => `<option value="${value}" ${value === data.pageSize ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
+      </label>
+    </div>
+    <iframe class="print-preview-frame" sandbox="" title="Print preview" srcdoc="${attr(markup)}"></iframe>
+    <div class="modal-footer">
+      <button class="btn btn-link" data-action="close-modal">Close</button>
+      <button class="btn btn-secondary" data-action="print-save-pdf">${icon('file', 15)}<span>Save as PDF</span></button>
+      <button class="btn btn-primary" data-action="print-send">${icon('printer', 15)}<span>Print…</span></button>
+    </div>`;
 }
 function documentSummary(rows) { return `<div class="summary">${rows.map(([label, value]) => `<div><span class="muted">${esc(label)}</span><strong>${value}</strong></div>`).join('')}</div>`; }
 
 async function printInvoice(inv) {
-  return printHtml(`Invoice ${inv.invoiceNumber || ''}`, documentSummary([['Patient', esc(patientName(inv.patientId))], ['Invoice date', dateFull(inv.date)], ['Status', esc(inv.status)]]) +
+  return openPrintPreview(`Invoice ${inv.invoiceNumber || ''}`, documentSummary([['Patient', esc(patientName(inv.patientId))], ['Invoice date', dateFull(inv.date)], ['Status', esc(inv.status)]]) +
     `<table class="print-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${(inv.items || []).map((item) => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${currency(item.unitPrice)}</td><td>${currency(item.total)}</td></tr>`).join('')}</tbody></table>` +
     `<div class="summary" style="justify-content:flex-end"><div><span class="muted">Subtotal</span><strong>${currency(inv.subtotal)}</strong></div><div><span class="muted">Discount</span><strong>${currency(inv.discount)}</strong></div><div><span class="muted">Tax</span><strong>${currency(inv.tax)}</strong></div><div><span class="muted">Total</span><strong>${currency(inv.total)}</strong></div></div>`);
 }
 async function printPayment(payment) {
   const refunded = Number(payment.refundedAmount) || 0;
-  return printHtml(`Money receipt ${payment.receiptNumber || ''}`, documentSummary([['Receipt', esc(payment.receiptNumber || '—')], ['Patient', esc(patientName(payment.patientId))], ['Date', dateFull(payment.date)]]) +
-    `<h2>Received</h2><p style="font-size:24px;font-weight:700">${currency(Math.max(0, (Number(payment.amount) || 0) - refunded))}</p>${refunded ? `<p>Refunded / reversed: ${currency(refunded)}</p>` : ''}<p>Payment method: <b>${esc(payment.method || '—')}</b><br>Reference: ${esc(payment.reference || '—')}<br>Status: ${esc(payment.status || 'Recorded')}</p>`);
+  return openPrintPreview(`Money receipt ${payment.receiptNumber || ''}`, documentSummary([['Receipt', esc(payment.receiptNumber || '—')], ['Patient', esc(patientName(payment.patientId))], ['Date', dateFull(payment.date)]]) +
+    `<h2>Received</h2><p style="font-size:24px;font-weight:700">${currency(Math.max(0, (Number(payment.amount) || 0) - refunded))}</p>${refunded ? `<p>Refunded / reversed: ${currency(refunded)}</p>` : ''}<p>Payment method: <b>${esc(payment.method || '—')}</b><br>Reference: ${esc(payment.reference || '—')}<br>Status: ${esc(payment.status || 'Recorded')}</p>`, 'Receipt80');
 }
 async function printPrescription(rx) {
-  return printHtml(`Prescription ${rx.prescriptionCode || ''}`, documentSummary([['Patient', esc(patientName(rx.patientId))], ['Date', dateFull(rx.date)], ['Prescriber', esc(rx.doctor || appState.settings.dentistName || '')]]) +
+  return openPrintPreview(`Prescription ${rx.prescriptionCode || ''}`, documentSummary([['Patient', esc(patientName(rx.patientId))], ['Date', dateFull(rx.date)], ['Prescriber', esc(rx.doctor || appState.settings.dentistName || '')]]) +
     `<table class="print-table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead><tbody>${(rx.medications || []).map((m) => `<tr><td>${esc(m.medicine)}<br>${esc(m.strength || '')}</td><td>${esc(m.dosage || '—')}</td><td>${esc(m.frequency || '—')}</td><td>${esc(m.duration || '—')}</td><td>${esc(m.instructions || '')}</td></tr>`).join('')}</tbody></table><p style="margin-top:40px">${esc(rx.notes || '')}</p>`);
 }
 async function printPatient(patient) {
   const visits = (await q('list', { collection: 'visits', page: 1, pageSize: 100, filters: { patientId: patient.id }, sort: 'date-desc' })).rows || [];
-  return printHtml(`Patient summary — ${patient.fullName}`, documentSummary([['Patient code', esc(patient.patientCode || '—')], ['Phone', esc(patient.phone || '—')], ['Registration', dateFull(patient.registrationDate)]]) +
+  return openPrintPreview(`Patient summary — ${patient.fullName}`, documentSummary([['Patient code', esc(patient.patientCode || '—')], ['Phone', esc(patient.phone || '—')], ['Registration', dateFull(patient.registrationDate)]]) +
     `<h2>Patient details</h2><table class="print-table"><tbody><tr><th>Date of birth</th><td>${patient.dateOfBirth ? dateFull(patient.dateOfBirth) : '—'}</td><th>Gender</th><td>${esc(patient.gender || '—')}</td></tr><tr><th>Allergies</th><td>${esc(patient.allergies || 'None recorded')}</td><th>Blood group</th><td>${esc(patient.bloodGroup || '—')}</td></tr><tr><th>Address</th><td colspan="3">${esc([patient.address, patient.city, patient.district].filter(Boolean).join(', ') || '—')}</td></tr></tbody></table>` +
     `<h2>Visit history</h2>${visits.length ? `<table class="print-table"><thead><tr><th>Date</th><th>Reason</th><th>Diagnosis</th><th>Treatment</th></tr></thead><tbody>${visits.map((v) => `<tr><td>${dateFull(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${esc(v.treatmentPerformed || '—')}</td></tr>`).join('')}</tbody></table>` : '<p>No visits recorded.</p>'}`);
 }
@@ -2858,13 +2945,13 @@ async function printPatientStatement(patient) {
   const statement = await q('patientStatement', { patientId: patient.id });
   const entries = statement.rows || [];
   const balance = statement.balanceCents || 0;
-  return printHtml(`Financial statement — ${patient.fullName}`, documentSummary([['Patient', esc(patient.fullName)], ['Patient code', esc(patient.patientCode || '—')], ['Balance', currency(centsToMoney(balance))]]) +
+  return openPrintPreview(`Financial statement — ${patient.fullName}`, documentSummary([['Patient', esc(patient.fullName)], ['Patient code', esc(patient.patientCode || '—')], ['Balance', currency(centsToMoney(balance))]]) +
     (entries.length ? `<table class="print-table"><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${entries.map((entry) => `<tr><td>${dateFull(entry.date)}</td><td>${esc(entry.type)}</td><td>${esc(entry.reference)}</td><td>${entry.debit > 0 ? currency(centsToMoney(entry.debitCents ?? entry.debit)) : ''}</td><td>${entry.credit > 0 ? currency(centsToMoney(entry.creditCents ?? entry.credit)) : ''}</td><td>${currency(centsToMoney(entry.balanceCents ?? entry.balance))}</td></tr>`).join('')}</tbody></table>` : '<p>No financial activity recorded.</p>'));
 }
 async function printQueue() {
   const day = await q('appointmentDay', { date: today() });
   const queue = (day.appointments || []).filter((a) => a.status !== 'Cancelled').sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-  return printHtml('Today’s Queue', documentSummary([['Date', dateFull(today())], ['Appointments', queue.length]]) +
+  return openPrintPreview('Today’s Queue', documentSummary([['Date', dateFull(today())], ['Appointments', queue.length]]) +
     (queue.length ? `<table class="print-table"><thead><tr><th>Serial</th><th>Time</th><th>Patient</th><th>Reason</th><th>Chair</th><th>Status</th></tr></thead><tbody>${queue.map((a, i) => `<tr><td>${esc(a.serial || `Q-${String(i + 1).padStart(3, '0')}`)}</td><td>${time(a.time)}</td><td>${esc(patientName(a.patientId))}</td><td>${esc(a.reason || '—')}</td><td>${esc(a.chair || 'Chair 1')}</td><td>${esc(a.status || 'Scheduled')}</td></tr>`).join('')}</tbody></table>` : '<p>No appointments scheduled today.</p>'));
 }
 async function printBilling() {
@@ -2873,11 +2960,11 @@ async function printBilling() {
   const billed = invoices.reduce((sum, i) => sum + (i.totalCents ?? 0), 0);
   const collected = payments.reduce((sum, p) => sum + Math.max(0, (p.amountCents ?? 0) - (p.refundedCents ?? 0)), 0);
   const outstanding = invoices.reduce((sum, i) => sum + (i.dueCents ?? 0), 0);
-  return printHtml('Billing statement', documentSummary([['Total billed', currency(centsToMoney(billed))], ['Collected', currency(centsToMoney(collected))], ['Outstanding', currency(centsToMoney(outstanding))]]) +
+  return openPrintPreview('Billing statement', documentSummary([['Total billed', currency(centsToMoney(billed))], ['Collected', currency(centsToMoney(collected))], ['Outstanding', currency(centsToMoney(outstanding))]]) +
     (invoices.length ? `<table class="print-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${invoices.map((i) => `<tr><td>${esc(i.invoiceNumber)}</td><td>${esc(patientName(i.patientId))}</td><td>${dateFull(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td>${currency(centsToMoney(i.paidCents ?? i.paid))}</td><td>${currency(centsToMoney(i.dueCents ?? i.due))}</td></tr>`).join('')}</tbody></table>` : '<p>No invoices created.</p>'));
 }
 async function printVisit(visit) {
-  return printHtml(`Visit ${visit.visitCode || ''} — ${patientName(visit.patientId)}`, documentSummary([['Patient', esc(patientName(visit.patientId))], ['Date', dateFull(visit.date)], ['Dentist', esc(staffName(visit.dentistId))]]) +
+  return openPrintPreview(`Visit ${visit.visitCode || ''} — ${patientName(visit.patientId)}`, documentSummary([['Patient', esc(patientName(visit.patientId))], ['Date', dateFull(visit.date)], ['Dentist', esc(staffName(visit.dentistId))]]) +
     `<table class="print-table"><tbody><tr><th>Reason</th><td>${esc(visit.reason || '—')}</td></tr><tr><th>Chief complaint</th><td>${esc(visit.chiefComplaint || '—')}</td></tr><tr><th>Findings</th><td>${esc(visit.findings || '—')}</td></tr><tr><th>Diagnosis</th><td>${esc(visit.diagnosis || '—')}</td></tr><tr><th>Treatment performed</th><td>${esc(visit.treatmentPerformed || '—')}</td></tr><tr><th>Notes</th><td>${esc(visit.notes || '—')}</td></tr></tbody></table>`);
 }
 async function printDentalChart(patient) {
@@ -2888,12 +2975,54 @@ async function printDentalChart(patient) {
     teeth[`${record.dentition || 'adult'}:${record.tooth}`] = record;
   }
   const rows = [['adult', 32, 'Permanent'], ['primary', 16, 'Primary']].map(([dentition, count, label]) => `<h2>${label} dentition</h2><table class="print-table"><tbody><tr>${Array.from({ length: count }, (_, i) => i + 1).map((tooth) => `<td style="text-align:center"><b>${tooth}</b><br><small>${esc(teeth[`${dentition}:${tooth}`]?.status || '')}</small>${teeth[`${dentition}:${tooth}`]?.note ? `<br><small>${esc(String(teeth[`${dentition}:${tooth}`].note).slice(0, 40))}</small>` : ''}</td>`).join('')}</tr></tbody></table>`).join('');
-  return printHtml(`Dental chart — ${patient.fullName}`, documentSummary([['Patient', esc(patient.fullName)], ['Patient code', esc(patient.patientCode || '—')], ['Date', dateFull(today())]]) + rows);
+  return openPrintPreview(`Dental chart — ${patient.fullName}`, documentSummary([['Patient', esc(patient.fullName)], ['Patient code', esc(patient.patientCode || '—')], ['Date', dateFull(today())]]) + rows);
 }
 async function printExpense(expense) {
-  return printHtml('Expense record', documentSummary([['Date', dateFull(expense.date)], ['Category', esc(expense.category || 'Other')], ['Amount', currency(expense.amount)]]) +
+  return openPrintPreview('Expense record', documentSummary([['Date', dateFull(expense.date)], ['Category', esc(expense.category || 'Other')], ['Amount', currency(expense.amount)]]) +
     `<table class="print-table"><tbody><tr><th>Description</th><td>${esc(expense.description)}</td></tr><tr><th>Payment method</th><td>${esc(expense.method || '—')}</td></tr><tr><th>Reference</th><td>${esc(expense.reference || '—')}</td></tr><tr><th>Notes</th><td>${esc(expense.notes || '—')}</td></tr></tbody></table>`);
 }
+async function printAppointmentSlip(a) {
+  return openPrintPreview(`Appointment slip ${a.appointmentCode || ''}`, documentSummary([
+    ['Patient', esc(patientName(a.patientId))], ['Date', dateFull(a.date)], ['Time', time(a.time)], ['Serial', esc(a.serial || '—')]
+  ]) + `<table class="print-table"><tbody><tr><th>Appointment</th><td>${esc(a.appointmentCode || '—')}</td></tr><tr><th>Dentist</th><td>${esc(staffName(a.dentistId))}</td></tr><tr><th>Chair / Room</th><td>${esc(a.chair || '—')} · ${esc(a.room || '—')}</td></tr><tr><th>Reason</th><td>${esc(a.reason || '—')}</td></tr><tr><th>Status</th><td>${esc(a.status || 'Scheduled')}</td></tr></tbody></table><p>Please arrive 10 minutes early and bring this slip.</p>`, 'Receipt80');
+}
+async function printEstimate(plan) {
+  const stages = plan.stages || [];
+  const total = plan.estimatedTotalCents ?? 0;
+  const stageCost = (stage) => {
+    const raw = Number(stage.estimatedCost) || 0;
+    return currency(centsToMoney(raw > 0 && raw < 1000 ? Math.round(raw * 100) : raw));
+  };
+  return openPrintPreview(`Treatment estimate — ${patientName(plan.patientId)}`, documentSummary([
+    ['Plan', esc(plan.title || '—')], ['Patient', esc(patientName(plan.patientId))], ['Estimated total', currency(centsToMoney(total))]
+  ]) + (stages.length
+    ? `<table class="print-table"><thead><tr><th>Stage</th><th>Planned date</th><th>Status</th><th>Estimated cost</th></tr></thead><tbody>${stages.map((stage, i) => `<tr><td>Stage ${i + 1} — ${esc(stage.title)}</td><td>${stage.plannedDate ? dateFull(stage.plannedDate) : '—'}</td><td>${esc(stage.status || 'Planned')}</td><td>${stageCost(stage)}</td></tr>`).join('')}</tbody></table>`
+    : '<p>No priced stages recorded.</p>')
+  + `<div class="summary" style="justify-content:flex-end"><div><span class="muted">Estimated total</span><strong>${currency(centsToMoney(total))}</strong></div></div><p><small>This is an estimate prepared for planning. It is not an invoice; final charges are billed after treatment.</small></p>`);
+}
+async function printReportDocument() {
+  const type = ui.reportType || 'revenue';
+  const rangeKey = ui.reportsRange === 'custom' ? 'custom' : ui.reportsRange;
+  const report = await q('report', { type, rangeKey, from: ui.rangeFrom || undefined, to: ui.rangeTo || undefined, page: 1, pageSize: 500 });
+  if (!report) return notify('The report could not be loaded for printing.', 'error');
+  const kpis = report.kpis || {};
+  const rows = (report.rows?.rows) || [];
+  const label = { revenue: 'Revenue', patients: 'Patients', visits: 'Visits', appointments: 'Appointments', outstanding: 'Outstanding', inventory: 'Inventory', expenses: 'Expenses' }[type] || 'Report';
+  const table = (headers, bodyHtml) => rows.length ? `<table class="print-table"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${bodyHtml}</tbody></table>` : '<p>No records in this range.</p>';
+  const tr = (cells) => `<tr>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
+  let kpiPairs = [];
+  let body = '';
+  if (type === 'revenue') { kpiPairs = [['Collected', currency(kpis.collectedCents)], ['Billed', currency(kpis.billedCents)], ['Expenses', currency(kpis.expensesCents)]]; body = table(['Receipt', 'Patient', 'Date', 'Method', 'Amount'], rows.map((r) => tr([esc(r.receiptNumber || '—'), esc(patientName(r.patientId)), dateFull(r.date), esc(r.method || '—'), money(r)])).join('')); }
+  else if (type === 'patients') { kpiPairs = [['Registered', number(kpis.registered ?? 0)], ['With phone', number(kpis.withPhone ?? 0)], ['Upcoming visits', number(kpis.upcoming ?? 0)]]; body = table(['Patient', 'Phone', 'Registered', 'Balance'], rows.map((r) => tr([esc(r.fullName), esc(r.phone || '—'), dateFull(r.registrationDate), currency(centsToMoney(r.balanceCents || 0))])).join('')); }
+  else if (type === 'visits') { kpiPairs = [['Visits', number(kpis.visits ?? 0)], ['Unique patients', number(kpis.uniquePatients ?? 0)], ['With follow-up', number(kpis.withFollowUp ?? 0)]]; body = table(['Visit', 'Patient', 'Date', 'Reason', 'Diagnosis'], rows.map((r) => tr([esc(r.visitCode || '—'), esc(patientName(r.patientId)), dateFull(r.date), esc(r.reason || '—'), esc(r.diagnosis || '—')])).join('')); }
+  else if (type === 'appointments') { kpiPairs = [['Appointments', number(kpis.appointments ?? 0)], ['Completed', number(kpis.completed ?? 0)], ['No shows', number(kpis.noShows ?? 0)]]; body = table(['Code', 'Patient', 'Date', 'Time', 'Reason', 'Status'], rows.map((r) => tr([esc(r.appointmentCode || '—'), esc(patientName(r.patientId)), dateFull(r.date), time(r.time), esc(r.reason || '—'), esc(r.status || 'Scheduled')])).join('')); }
+  else if (type === 'outstanding') { kpiPairs = [['Outstanding', currency(kpis.dueCents ?? 0)], ['Open invoices', number(kpis.openInvoices ?? 0)]]; body = table(['Invoice', 'Patient', 'Date', 'Total', 'Due'], rows.map((r) => tr([esc(r.invoiceNumber || '—'), esc(patientName(r.patientId)), dateFull(r.date), currency(centsToMoney(r.totalCents ?? r.total)), currency(centsToMoney(r.dueCents ?? r.due))])).join('')); }
+  else if (type === 'inventory') { kpiPairs = [['Items tracked', number(kpis.itemsTracked ?? 0)], ['Low stock', number(kpis.lowStock ?? 0)], ['Stock value', currency(kpis.stockValueCents ?? 0)]]; body = table(['Item', 'Category', 'On hand', 'Value'], rows.map((r) => tr([esc(r.name), esc(r.category || 'Other'), `${number(r.currentStock)} ${esc(r.unit || '')}`, currency(centsToMoney(r.purchasePriceCents ?? 0) * Number(r.currentStock || 0))])).join('')); }
+  else { kpiPairs = [['Total', currency(kpis.totalCents ?? 0)], ['Transactions', number(kpis.transactions ?? 0)]]; body = table(['Date', 'Description', 'Category', 'Method', 'Amount'], rows.map((r) => tr([dateFull(r.date), esc(r.description), esc(r.category || 'Other'), esc(r.method || '—'), money(r)])).join('')); }
+  const rangeText = rangeKey === 'custom' && ui.rangeFrom ? `${ui.rangeFrom} – ${ui.rangeTo || ui.rangeFrom}` : String(rangeKey);
+  return openPrintPreview(`${label} report (${rangeText})`, documentSummary(kpiPairs) + body + `<p><small>${rows.length} row(s); every figure traces to the underlying records for ${esc(rangeText)}.</small></p>`);
+}
+
 async function openInvoiceDetail(invoice) {
   const [payments, adjustments] = await Promise.all([
     q('list', { collection: 'payments', page: 1, pageSize: 100, filters: { invoiceId: invoice.id }, sort: 'date-desc' }),

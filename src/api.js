@@ -140,11 +140,8 @@ class DesktopApi {
   async exportWorkspace() {
     return this.bridge.invoke('workspace:export');
   }
-  async printPdf(options = {}) {
-    return this.bridge.invoke('print:pdf', options);
-  }
-  async printHtmlPdf(html, options = {}) {
-    return this.bridge.invoke('print:html-pdf', { html, options });
+  async printHtml(html, options = {}) {
+    return this.bridge.invoke('print:html', { html, options });
   }
 }
 
@@ -479,13 +476,7 @@ class LocalApi {
     return result;
   }
 
-  async printPdf(options = {}) {
-    // Development fallback: native print of the current document.
-    try { window.print(); } catch { /* no-op */ }
-    return { ok: true, fallback: 'print' };
-  }
-
-  async printHtmlPdf(html, options = {}) {
+  async printHtml(html, options = {}) {
     const win = window.open('', '_blank', 'width=900,height=1100');
     if (!win) return { ok: false, error: 'Pop-up blocked; allow pop-ups for the dev server to print.' };
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Dentiva Pro print</title></head><body>${html}</body></html>`);

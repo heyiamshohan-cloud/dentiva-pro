@@ -41,6 +41,10 @@ jobs:
       - name: Run required viewport layout checks
         run: npm run test:visual
 
+      - name: Surface visual failure diagnostics
+        if: always()
+        run: node scripts/visual-diagnostics.mjs
+
       - name: Upload viewport regression evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import './diagnostics.mjs';
 
 const ADMIN_PIN = '2468';
 

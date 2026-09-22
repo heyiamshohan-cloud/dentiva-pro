@@ -11,7 +11,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 
 test('release identity and desktop target are configured', () => {
   assert.equal(pkg.name, 'dentiva-pro');
-  assert.equal(pkg.version, '1.4.0');
+  assert.equal(pkg.version, '1.5.0');
   assert.equal(pkg.main, 'electron/main.mjs');
   assert.match(JSON.stringify(pkg.build), /Windows-x64/);
   assert.match(source, /Md\. Shohan Khan|helloiamshohan@gmail\.com/);

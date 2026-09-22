@@ -239,7 +239,7 @@ export const OPS = {
         'receiptPrefix', 'visitPrefix', 'staffPrefix', 'itemPrefix', 'defaultDuration', 'taxEnabled', 'taxRate',
         'autoLockMinutes', 'sessionTimeoutMinutes', 'notifications', 'paymentMethods', 'expenseCategories',
         'inventoryCategories', 'chairs', 'rooms', 'backupEnabled', 'backupIntervalHours', 'backupRetention',
-        'backupDirectory', 'lowStockThreshold', 'attachmentMaxMb', 'accent', 'density', 'printPageSize',
+        'backupDirectory', 'lowStockThreshold', 'attachmentMaxMb', 'accent', 'density', 'printPageSize', 'documentFooter',
         'paperProfile', 'customPatientFields', 'medicationTemplates', 'documentTemplate'
       ];
       const next = { ...current };
@@ -250,6 +250,7 @@ export const OPS = {
         next[key] = payload[key];
         changed.push(key);
       }
+      if (next.documentFooter !== undefined) next.documentTemplate = { ...(next.documentTemplate && typeof next.documentTemplate === 'object' ? next.documentTemplate : {}), footer: str(next.documentFooter) };
       if (Array.isArray(next.paymentMethods)) next.paymentMethods = [...new Set(next.paymentMethods.map(str).filter(Boolean))].slice(0, 30);
       if (Array.isArray(next.expenseCategories)) next.expenseCategories = [...new Set(next.expenseCategories.map(str).filter(Boolean))].slice(0, 40);
       if (Array.isArray(next.inventoryCategories)) next.inventoryCategories = [...new Set(next.inventoryCategories.map(str).filter(Boolean))].slice(0, 40);
@@ -1546,6 +1547,43 @@ export const OPS = {
       if (found.error) return { ok: false, error: found.error };
       repo.update('notifications', { ...found.record, dismissed: true });
       return { ok: true, audit: [{ action: 'Notification dismissed', entity: 'Notification', entityId: found.record.id, summary: found.record.title }] };
+    }
+  },
+
+  'medicationCatalog.save': {
+    permission: 'clinical.create',
+    run(repo, payload, ctx) {
+      const name = str(payload.name);
+      if (!name) return { ok: false, error: 'Enter the medicine name.' };
+      const existing = repo.all('medicationCatalog').find((item) => item.name.toLowerCase() === name.toLowerCase());
+      const record = {
+        id: existing?.id || makeId('medication'),
+        name,
+        strength: str(payload.strength),
+        dosage: str(payload.dosage),
+        frequency: str(payload.frequency),
+        duration: str(payload.duration),
+        route: str(payload.route) || 'Oral',
+        active: existing?.active !== false,
+        favorite: existing?.favorite === true,
+        createdAt: existing?.createdAt || ctx.now(),
+        updatedAt: ctx.now()
+      };
+      repo.insert('medicationCatalog', record);
+      return { ok: true, record, audit: [{ action: existing ? 'Medication updated' : 'Medication saved', entity: 'Medication catalog', entityId: record.id, summary: record.name }] }
+    }
+  },
+
+  'dental.removeCurrent': {
+    permission: 'clinical.edit',
+    run(repo, payload, ctx) {
+      const patient = repo.get('patients', payload.patientId);
+      if (!patient) return { ok: false, error: 'Choose a patient first.' };
+      const tooth = Number(payload.tooth);
+      const dentition = payload.dentition === 'primary' ? 'primary' : 'adult';
+      const removed = repo.supersedeDental(patient.id, tooth, dentition);
+      if (!removed) return { ok: false, error: 'There is no current record for this tooth.' };
+      return { ok: true, audit: [{ action: 'Dental chart record cleared', entity: 'Dental record', entityId: patient.id, summary: `Tooth ${tooth} (${dentition}) · history preserved` }] }
     }
   },
 

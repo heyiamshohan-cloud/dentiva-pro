@@ -133,6 +133,28 @@ export class Workspace {
     }
   }
 
+  /** Read a v5 relational database (e.g. a recovered backup) back into a plain state object. */
+  static readV5State(dbPath) {
+    const probe = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const state = {};
+      for (const row of probe.prepare('SELECT key, value FROM meta').all()) {
+        try { state[row.key] = JSON.parse(row.value); } catch { state[row.key] = row.value; }
+      }
+      for (const [collection, table] of Object.entries(COLLECTION_TABLES)) {
+        try {
+          const rows = probe.prepare(`SELECT * FROM ${table}`).all();
+          state[collection] = rows.map((row) => rowToRecord(row)).filter(Boolean);
+        } catch {
+          state[collection] = [];
+        }
+      }
+      return state;
+    } finally {
+      probe.close();
+    }
+  }
+
   static readLegacyJson(jsonPath) {
     if (!fs.existsSync(jsonPath)) return null;
     try {

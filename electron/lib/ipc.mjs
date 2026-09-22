@@ -10,11 +10,11 @@
 // Channels are allowlisted in the preload; anything else is rejected here as
 // well. Results are plain JSON — no functions, no handles, no secrets.
 
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 import { runOp } from '../../src/ops.js';
 import { runQuery } from '../../src/queries.js';
 import { hashPin } from './auth.mjs';
-import { createBackup, restoreBackup, validateBackup, listBackups, deleteBackup, pruneBackups } from './backup.mjs';
+import { createBackup, restoreBackup, validateBackup, listBackups, deleteBackup, pruneBackups, parseBackupJson, restoreJsonBackup } from './backup.mjs';
 import { diagnoseWorkspace } from './diagnostics.mjs';
 import { APP_VERSION } from '../../src/migrate-state.js';
 
@@ -23,7 +23,8 @@ const PRIVILEGED_CHANNELS = new Set([
   'auth:bootstrap', 'auth:login', 'auth:logout', 'auth:session',
   'attachment:read',
   'backup:create', 'backup:restore', 'backup:list', 'backup:delete', 'backup:validate', 'backup:prune',
-  'diagnostics:run', 'workspace:info'
+  'diagnostics:run', 'workspace:info',
+  'backup:restore-json', 'backup:pick-folder', 'backup:pick-file', 'workspace:export'
 ]);
 
 const fail = (code, message) => ({ ok: false, code, error: message });
@@ -77,6 +78,7 @@ export function registerIpc({ repo, ws, sessions }) {
       unsupportedSchema: Boolean(repo.getMeta('unsupportedSchema', false)),
       migrationError: repo.getMeta('migrationError', '') || '',
       counts: repo.recordCounts ? repo.recordCounts() : storage.recordCounts,
+      userDirectory: repo.usersList().slice(0, 50),
       storage: {
         bytes: storage.bytes,
         attachmentBytes: storage.attachmentBytes,
@@ -182,6 +184,52 @@ export function registerIpc({ repo, ws, sessions }) {
       };
     },
 
+    'backup:restore-json': async (_event, { text, options } = {}) => {
+      const context = ctx();
+      const gate = requirePermission(context, 'backup.restore');
+      if (!gate.ok) return gate;
+      const body = typeof text === 'string' ? text : '';
+      if (!body || body.length > 512 * 1024 * 1024) return fail('bad-request', 'The backup file is empty or too large.');
+      try {
+        const parsed = parseBackupJson(body);
+        const opts = options && typeof options === 'object' ? options : {};
+        const result = restoreJsonBackup(ws, parsed, {
+          modules: Array.isArray(opts.modules) ? opts.modules : null,
+          strategy: ['Keep Existing', 'Replace', 'Create New Copy'].includes(opts.strategy) ? opts.strategy : 'Replace',
+          patientIds: Array.isArray(opts.patientIds) ? opts.patientIds : null
+        });
+        return { ok: true, ...result, session: sessions.publicSession() };
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    },
+
+    'backup:pick-folder': async (event) => {
+      const context = ctx();
+      const gate = requirePermission(context, 'backup.restore');
+      if (!gate.ok) return gate;
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showOpenDialog(window, { title: 'Choose a Dentiva backup folder', properties: ['openDirectory'] });
+      if (result.canceled || !result.filePaths.length) return { ok: true, canceled: true, path: '' };
+      return { ok: true, canceled: false, path: result.filePaths[0] };
+    },
+
+    'backup:pick-file': async (event) => {
+      const context = ctx();
+      const gate = requirePermission(context, 'backup.restore');
+      if (!gate.ok) return gate;
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showOpenDialog(window, {
+        title: 'Choose a Dentiva JSON backup',
+        properties: ['openFile'],
+        filters: [{ name: 'Dentiva backup', extensions: ['json'] }]
+      });
+      if (result.canceled || !result.filePaths.length) return { ok: true, canceled: true, path: '', text: '' };
+      const fs = await import('node:fs/promises');
+      const text = await fs.readFile(result.filePaths[0], 'utf8');
+      return { ok: true, canceled: false, path: result.filePaths[0], text };
+    },
+
     'backup:delete': (_event, { name } = {}) => {
       const context = ctx();
       const gate = requirePermission(context, 'backup.restore');
@@ -201,6 +249,16 @@ export function registerIpc({ repo, ws, sessions }) {
       const gate = requirePermission(context, 'diagnostics.view');
       if (!gate.ok) return gate;
       return diagnoseWorkspace(ws);
+    },
+
+    'workspace:export': async (event) => {
+      const context = ctx();
+      if (!context) return fail('auth-required', 'Sign in to continue.');
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const picked = await dialog.showOpenDialog(window, { title: 'Choose where to export the preserved workspace', properties: ['openDirectory'] });
+      if (picked.canceled || !picked.filePaths.length) return { ok: true, canceled: true };
+      const result = createBackup(ws, { label: 'preserved-export', directory: picked.filePaths[0], createdBy: context?.userName || '' });
+      return result.ok ? { ok: true, path: result.path } : { ok: false, error: result.error };
     },
 
     'workspace:info': () => {

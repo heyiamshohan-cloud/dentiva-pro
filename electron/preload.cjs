@@ -8,8 +8,8 @@ const ALLOWED_CHANNELS = [
   'auth:bootstrap', 'auth:login', 'auth:logout', 'auth:session',
   'ops:invoke', 'query:run',
   'attachment:read',
-  'backup:create', 'backup:restore', 'backup:list', 'backup:delete', 'backup:validate', 'backup:prune',
-  'diagnostics:run', 'workspace:info',
+  'backup:create', 'backup:restore', 'backup:list', 'backup:delete', 'backup:validate', 'backup:prune', 'backup:restore-json', 'backup:pick-folder', 'backup:pick-file',
+  'diagnostics:run', 'workspace:info', 'workspace:export',
   'app:info', 'print:pdf', 'print:html-pdf'
 ];
 

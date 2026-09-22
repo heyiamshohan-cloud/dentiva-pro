@@ -109,11 +109,12 @@ test('inventory movements expose low stock and expiry inputs', () => {
   assert.equal(stock.filter((item) => item.expiryDate < '2026-09-22').length, 1);
 });
 
-test('attachments reject unsafe types and oversized files', () => {
+test('attachments reject unsafe types; large clinical files are allowed (no artificial 6MB cap)', () => {
   assert.equal(validateAttachmentFile({ type: 'application/pdf', size: 1024, data: 'data:application/pdf;base64,AA==' }).allowed, true);
   assert.equal(validateAttachmentFile({ type: 'application/pdf', size: 1024, data: 'javascript:alert(1)' }).allowed, false);
   assert.equal(validateAttachmentFile({ type: 'application/x-msdownload', size: 1024 }).allowed, false);
-  assert.equal(validateAttachmentFile({ type: 'image/png', size: 7 * 1024 * 1024 }).allowed, false);
+  assert.equal(validateAttachmentFile({ type: 'image/png', size: 7 * 1024 * 1024 }).allowed, true);
+  assert.equal(validateAttachmentFile({ type: 'image/png', size: 512 * 1024 * 1024 }).allowed, false);
 });
 
 test('backup manifest preserves modules, schema and record counts', () => {

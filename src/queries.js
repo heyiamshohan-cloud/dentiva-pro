@@ -47,7 +47,7 @@ export const COLLECTION_PERMISSION = {
 };
 
 export const QUERY_PERMISSION = {
-  bootstrap: null, list: null, settings: null, users: 'settings.view', workspace: null,
+  bootstrap: null, list: null, settings: null, users: 'settings.view', workspace: null, directory: null, record: null,
   patientAggregate: 'patients.view', patientStatement: 'patients.view', patientDuplicates: 'patients.view',
   dentalHistory: 'patients.view', invoiceDetail: 'billing.view', appointmentDay: 'appointments.view',
   appointmentsBetween: 'appointments.view', dashboard: null, analytics: 'reports.view',
@@ -332,6 +332,44 @@ export const QUERIES = {
   },
 
   /* Global search — capped per collection. */
+  /* Single-record fetch for detail dialogs; enforces the collection's own
+   * viewing permission so one generic channel cannot bypass RBAC. */
+  async record(repo, params = {}, ctx = null) {
+    const collection = String(params.collection || '');
+    const id = String(params.id || '');
+    if (!id) return { ok: false, error: 'No record chosen.' };
+    const required = COLLECTION_PERMISSION[collection];
+    if (required === undefined) return { ok: false, error: 'Unknown collection.' };
+    if (required) {
+      const permissions = (ctx && ctx.permissions) || [];
+      const candidates = Array.isArray(required) ? required : [required];
+      if (!candidates.some((entry) => permissions.includes(entry))) {
+        return { ok: false, error: 'You do not have permission to view this data.', code: 'permission-denied' };
+      }
+    }
+    const found = repo.get(collection, id);
+    if (!found) return { ok: false, error: 'That record no longer exists.', code: 'not-found' };
+    return { ok: true, record: found, collection };
+  },
+
+  /* Lightweight lookup directory for the renderer: display names and form
+   * options without hydrating full records. Capped, indexed, permission-neutral
+   * (names are already visible in every list the user may open). */
+  async directory(repo) {
+    const [patients, staff, treatments, medications] = await Promise.all([
+      repo.listCollection('patients', { page: 1, pageSize: 2000, sort: 'name' }),
+      repo.listCollection('staff', { page: 1, pageSize: 2000, sort: 'name' }),
+      repo.listCollection('treatments', { page: 1, pageSize: 2000, sort: 'name' }),
+      repo.listCollection('medicationCatalog', { page: 1, pageSize: 500, sort: 'name' })
+    ]);
+    return {
+      patients: (patients.rows || []).map((patient) => ({ id: patient.id, fullName: patient.fullName, patientCode: patient.patientCode, phone: patient.phone })),
+      staff: (staff.rows || []).map((member) => ({ id: member.id, name: member.name, role: member.role })),
+      treatments: (treatments.rows || []).map((item) => ({ id: item.id, name: item.name, code: item.code, defaultPrice: item.defaultPrice, duration: item.duration, toothRequired: Boolean(item.toothRequired) })),
+      medicationCatalog: (medications.rows || []).map((item) => ({ id: item.id, name: item.name, strength: item.strength, dosage: item.dosage, frequency: item.frequency, duration: item.duration, active: item.active }))
+    };
+  },
+
   async globalSearch(repo, params = {}) {
     const query = String(params.query || '').trim();
     if (query.length < 2) return { query, results: {} };

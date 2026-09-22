@@ -309,7 +309,7 @@ export class SqlRepo {
   usersList({ includeSecrets = false } = {}) {
     const rows = includeSecrets
       ? this.ws.query('SELECT id, name, role, staff_id, active, permissions, pin_hash, pin_salt, kdf, failed_attempts, locked_until, last_login, created_at, updated_at FROM users ORDER BY created_at ASC')
-      : this.ws.query('SELECT payload FROM users ORDER BY created_at ASC');
+      : this.ws.query('SELECT payload, pin_hash FROM users ORDER BY created_at ASC');
     return rows.map((row) => (includeSecrets
       ? {
         id: row.id, name: row.name, role: row.role, staffId: row.staff_id || '', active: row.active !== 0,
@@ -318,12 +318,12 @@ export class SqlRepo {
         lastLogin: row.last_login || '', createdAt: row.created_at, updatedAt: row.updated_at,
         hasPin: Boolean(row.pin_hash)
       }
-      : { ...rowToRecord(row), hasPin: undefined }));
+      : { ...rowToRecord(row), hasPin: Boolean(row.pin_hash) }));
   }
 
   userGet(id, { includeSecrets = false } = {}) {
     if (includeSecrets) return this.usersList({ includeSecrets: true }).find((user) => user.id === id) || null;
-    return this.get('users', id);
+    return this.usersList({ includeSecrets: false }).find((user) => user.id === id) || null;
   }
 
   /** Update authentication secrets/state. Secret columns live only in the table —

@@ -128,6 +128,18 @@ class DesktopApi {
   async appInfo() {
     return this.bridge.invoke('app:info');
   }
+  async pickFolder() {
+    return this.bridge.invoke('backup:pick-folder');
+  }
+  async pickFile() {
+    return this.bridge.invoke('backup:pick-file');
+  }
+  async restoreJson(text, options = {}) {
+    return this.bridge.invoke('backup:restore-json', { text, options });
+  }
+  async exportWorkspace() {
+    return this.bridge.invoke('workspace:export');
+  }
   async printPdf(options = {}) {
     return this.bridge.invoke('print:pdf', options);
   }
@@ -415,6 +427,54 @@ class LocalApi {
 
   async appInfo() {
     return { version: APP_VERSION, platform: 'browser', arch: 'wasm', isDesktop: false, packaged: false, storage: 'Local storage' };
+  }
+
+  async pickFolder() {
+    return { ok: true, canceled: true, path: '' }; // native folder picker needs the desktop shell
+  }
+  async pickFile() {
+    if (typeof document === 'undefined') return { ok: true, canceled: true, path: '', text: '' };
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json,application/json';
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return resolve({ ok: true, canceled: true, path: '', text: '' });
+        const reader = new FileReader();
+        reader.onload = () => resolve({ ok: true, canceled: false, path: file.name, text: String(reader.result) });
+        reader.onerror = () => resolve({ ok: false, error: 'Could not read the file.' });
+        reader.readAsText(file);
+      };
+      input.click();
+    });
+  }
+  async restoreJson(text, options = {}) {
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch { return { ok: false, error: 'The backup file is not valid JSON.' }; }
+    const root = parsed && typeof parsed === 'object' ? parsed : null;
+    const rawState = root?.state && typeof root.state === 'object' ? root.state : root;
+    if (!rawState || typeof rawState !== 'object') return { ok: false, error: 'The backup does not contain a state payload.' };
+    const incoming = migrateStateLike(rawState);
+    const modules = Array.isArray(options.modules) ? options.modules : null;
+    if (modules && modules.length) {
+      const { buildRestorePlan, applyRestorePlan, ARRAY_COLLECTIONS } = await import('./core.js');
+      const current = { ...this.repo.state };
+      for (const key of ARRAY_COLLECTIONS) if (!Array.isArray(current[key])) current[key] = [];
+      const plan = buildRestorePlan(current, incoming, { modules, strategy: options.strategy || 'Replace', patientIds: Array.isArray(options.patientIds) ? options.patientIds : null });
+      const applied = applyRestorePlan(current, plan);
+      this.repo.state = applied.state || applied;
+    } else {
+      this.repo.state = incoming;
+    }
+    if (root?.attachments && typeof root.attachments === 'object') this.repo.attachments = root.attachments;
+    this.repo.save();
+    this.session = null;
+    return { ok: true, mode: modules && modules.length ? 'modules' : 'full', recordCounts: this.repo.counts() };
+  }
+  async exportWorkspace() {
+    const result = await this.createBackup('preserved-export');
+    return result;
   }
 
   async printPdf(options = {}) {

@@ -30,7 +30,8 @@ test('Bengali locale covers the release-critical document and workflow surfaces'
     'Validate and restore selection', 'Create a secure user account', 'Effective permissions'
   ]) assert.match(renderer, new RegExp(`['\\"]${label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}['\\"]\\s*:`), `Bengali translation missing: ${label}`);
   assert.match(renderer, /function translateDom/);
-  assert.match(renderer, /Intl\.DateTimeFormat\(state\.settings\.language === 'Bengali' \? 'bn-BD'/);
+  assert.match(renderer, /'bn-BD'/);
+  assert.match(renderer, /new Intl\.NumberFormat\(appState\.settings\.language === 'Bengali' \? 'bn-BD' : 'en-BD'/);
 });
 
 test('release workflow retains the exact current-version artifact contract', () => {

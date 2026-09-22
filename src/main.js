@@ -1,295 +1,28 @@
-/* Dentiva Pro — offline-first practice workspace
- * The application deliberately starts with an empty, local data store. Every record visible in the UI is created by the clinic.
- */
-import './styles.css';
-import './styles-flagship.css';
-import { ARRAY_COLLECTIONS, CURRENT_SCHEMA_VERSION, PERMISSIONS, applyRestorePlan, buildBackupManifest, buildRestorePlan, appointmentsOverlap, calculateInvoice, canAcceptPayment, canonicalJson, hasPermission, paymentStatusFor, permissionsForRole, sanitizeFilename, validateAttachmentFile, validateBackupPayload, validateMoney, validatePayment, validateRelationships } from './core.js';
-import { DASHBOARD_PERIODS, analyticsSnapshot, buildTimelineEvents, deriveOperationalNotifications, normaliseTags, periodBounds, statementEntries, validatePatientInput, validateTreatmentPlanInput } from './domain.js';
+// Dentiva Pro v1.4.0 — renderer (async, paginated, light Design System 2.0).
+//
+// The renderer is a pure presentation client. All data crosses the validated
+// boundary in src/api.js (desktop: IPC → main process; browser dev: LocalRepo
+// in-page). Nothing here owns storage, hashing or authorization — it renders
+// what the service layer returns and hides what the session may not see
+// (the backend still enforces every rule).
+//
+// Offline-first by design: no network, no cloud, no telemetry. This machine
+// is the only copy; backups are explicit.
 
+import './styles.css';
+import { createApi } from './api.js';
+import { hasPermission, validateAttachmentFile, buildRestorePlan, calculateInvoice, moneyToCents, centsToMoney } from './core.js';
+import { deriveOperationalNotifications, periodBounds } from './domain.js';
+
+const api = createApi();
 const app = document.querySelector('#app');
-const STORAGE_KEY = 'dentiva-pro.store.v2';
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const localDateKey = (value = new Date()) => { const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value])); return `${parts.year}-${parts.month}-${parts.day}`; };
 const now = () => new Date().toISOString();
-const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-const deepClone = (value) => JSON.parse(JSON.stringify(value));
-async function sha256Hex(value) { const bytes = new TextEncoder().encode(value); const digest = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join(''); }
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
 const attr = esc;
 const safeLogoSource = (value) => /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(String(value || '')) ? String(value) : '';
-const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
-
-const DEFAULT_STATE = {
-  schemaVersion: CURRENT_SCHEMA_VERSION,
-  appVersion: APP_VERSION,
-  createdAt: now(),
-  updatedAt: now(),
-  setupComplete: false,
-  settings: {
-    clinicName: '',
-    dentistName: '',
-    professionalTitle: 'Dr.',
-    phone: '',
-    secondaryPhone: '',
-    email: '',
-    address: '',
-    city: '',
-    district: '',
-    country: 'Bangladesh',
-    chamberName: '',
-    logo: '',
-    language: 'English',
-    currency: 'BDT',
-    timezone: 'Asia/Dhaka',
-    dateFormat: 'dd MMM yyyy',
-    timeFormat: '12-hour',
-    invoicePrefix: 'INV',
-    patientPrefix: 'PT',
-    appointmentPrefix: 'APT',
-    serialPrefix: 'Q',
-    defaultDuration: 30,
-    taxEnabled: false,
-    taxRate: 0,
-    autoLockMinutes: 30,
-    notifications: true,
-    applicationLock: false,
-    pinHash: '',
-    pinSalt: '',
-    paymentMethods: ['Cash', 'Bank', 'Card', 'bKash', 'Nagad', 'Rocket', 'Upay'],
-    expenseCategories: ['Clinic rent', 'Electricity', 'Internet', 'Water', 'Staff salary', 'Cleaning', 'Maintenance', 'Equipment', 'Supplies', 'Marketing', 'Transport', 'Other'],
-    inventoryCategories: ['Medicine', 'Dental material', 'Consumable', 'Accessory', 'Equipment consumable', 'Other'],
-    backupEnabled: false,
-    backupIntervalHours: 24,
-    backupRetention: 5,
-    lowStockThreshold: 5,
-    accent: 'teal',
-    density: 'comfortable',
-    printPageSize: 'A4',
-    paperProfile: 'A4',
-    sessionTimeoutMinutes: 30,
-    rooms: ['Room 1'],
-    customPatientFields: [],
-    medicationTemplates: [],
-    documentTemplate: { showLogo: true, showClinicContact: true, footer: 'Thank you for choosing our practice.' }
-  },
-  counters: { patient: 1, appointment: 1, invoice: 1, visit: 1, prescription: 1, receipt: 1, serial: 1, staff: 1 },
-  patients: [],
-  appointments: [],
-  visits: [],
-  prescriptions: [],
-  dentalRecords: [],
-  treatments: [],
-  invoices: [],
-  payments: [],
-  inventory: [],
-  stockMovements: [],
-  suppliers: [],
-  staff: [],
-  expenses: [],
-  referrals: [],
-  attachments: [],
-  paymentAdjustments: [],
-  audit: [],
-  notifications: [],
-  notificationRead: {},
-  followUpTasks: [],
-  treatmentPlans: [],
-  users: [],
-  medicationCatalog: [],
-  notificationRules: [{ id: 'rule_queue', kind: 'queue', enabled: true }, { id: 'rule_clinical', kind: 'clinical', enabled: true }, { id: 'rule_inventory', kind: 'inventory', enabled: true }, { id: 'rule_warning', kind: 'warning', enabled: true }, { id: 'rule_backup', kind: 'backup', enabled: true }],
-  rooms: [{ id: 'room_default', name: 'Room 1', active: true }],
-  savedFilters: [],
-  savedReports: [],
-  dashboard: ['schedule', 'queue', 'followups', 'signals'],
-  lastBackupAt: null
-};
-
-const arrayKeys = [...ARRAY_COLLECTIONS];
-
-const initialCalendarDate = new Date();
-let ui = {
-  toast: null,
-  locked: false,
-  page: 'dashboard',
-  range: 'today',
-  analyticsRange: 'month',
-  reportsRange: 'month',
-  reportType: 'revenue',
-  dentition: 'adult',
-  calendarMonth: initialCalendarDate.getMonth(),
-  calendarYear: initialCalendarDate.getFullYear(),
-  search: '',
-  patientPage: 1,
-  patientBalanceFilter: 'all',
-  patientStatusFilter: 'All statuses',
-  sidebarCollapsed: false,
-  mobileNav: false,
-  unlockFailures: 0,
-  unlockBlockedUntil: 0
-};
-
-function migrateState(saved) {
-  const base = deepClone(DEFAULT_STATE);
-  const source = saved && typeof saved === 'object' ? saved : {};
-  const version = Number(source.schemaVersion || 1);
-  if (version > CURRENT_SCHEMA_VERSION) {
-    const preserved = {
-      ...base,
-      ...source,
-      schemaVersion: version,
-      appVersion: APP_VERSION,
-      settings: { ...base.settings, ...(source.settings || {}) },
-      counters: { ...base.counters, ...(source.counters || {}) },
-      dashboard: Array.isArray(source.dashboard) ? source.dashboard : base.dashboard,
-      unsupportedSchema: true,
-      migrationError: `This workspace uses schema v${version}; Dentiva Pro ${APP_VERSION} supports up to schema v${CURRENT_SCHEMA_VERSION}.`
-    };
-    arrayKeys.forEach((key) => { preserved[key] = Array.isArray(source[key]) ? source[key] : (base[key] || []); });
-    return preserved;
-  }
-  const merged = {
-    ...base,
-    ...source,
-    schemaVersion: CURRENT_SCHEMA_VERSION,
-    appVersion: APP_VERSION,
-    settings: { ...base.settings, ...(source.settings || {}) },
-    counters: { ...base.counters, ...(source.counters || {}) },
-    dashboard: Array.isArray(source.dashboard) ? source.dashboard : base.dashboard
-  };
-  arrayKeys.forEach((key) => { merged[key] = Array.isArray(source[key]) ? source[key] : (base[key] || []); });
-  if (version < 2) {
-    merged.followUpTasks = Array.isArray(source.followUpTasks) ? source.followUpTasks : [];
-    merged.savedFilters = [];
-    merged.savedReports = [];
-    merged.settings.paymentMethods = merged.settings.paymentMethods || base.settings.paymentMethods;
-    merged.settings.expenseCategories = merged.settings.expenseCategories || base.settings.expenseCategories;
-    merged.settings.inventoryCategories = merged.settings.inventoryCategories || base.settings.inventoryCategories;
-  }
-  merged.notifications = Array.isArray(merged.notifications) ? merged.notifications : [];
-  merged.notificationRead = merged.notificationRead && typeof merged.notificationRead === 'object' ? merged.notificationRead : {};
-  merged.audit = Array.isArray(merged.audit) ? merged.audit : [];
-  merged.medicationCatalog = Array.isArray(merged.medicationCatalog) ? merged.medicationCatalog : [];
-  merged.notificationRules = Array.isArray(merged.notificationRules) ? merged.notificationRules : [];
-  const configuredRooms = Array.isArray(merged.settings?.rooms) && merged.settings.rooms.length ? merged.settings.rooms : ['Room 1'];
-  const configuredFields = Array.isArray(merged.settings?.customPatientFields) ? merged.settings.customPatientFields : [];
-  merged.settings = { ...base.settings, ...(merged.settings || {}), rooms: configuredRooms, customPatientFields: configuredFields.map((definition) => { const label = typeof definition === 'string' ? definition : String(definition?.label || definition?.key || 'Custom field'); const key = typeof definition === 'object' && definition.key ? definition.key : label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || uid('field'); return { ...(typeof definition === 'object' ? definition : {}), key, label, type: definition?.type || 'text' }; }).slice(0, 20), medicationTemplates: Array.isArray(merged.settings?.medicationTemplates) ? merged.settings.medicationTemplates : [], documentTemplate: { ...base.settings.documentTemplate, ...(merged.settings?.documentTemplate || {}) } };
-  const roomRecords = Array.isArray(saved?.rooms) ? merged.rooms : [];
-  merged.rooms = (roomRecords.length ? roomRecords : merged.settings.rooms).map((room, index) => { const name = typeof room === 'string' ? room : String(room?.name || room?.label || `Room ${index + 1}`); const id = typeof room === 'object' && room.id ? room.id : `room_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || index + 1}`; return { ...(typeof room === 'object' ? room : {}), id, name, active: room?.active !== false }; });
-  merged.patients = merged.patients.map((patient) => ({ ...patient, archived: Boolean(patient.archived || patient.status === 'Archived') }));
-  return merged;
-}
-
-const Store = {
-  load() {
-    try {
-      const desktopPayload = globalThis.dentivaDesktop?.storeLoad?.();
-      if (desktopPayload) return migrateState(desktopPayload);
-      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('dentiva-pro.store.v1');
-      return migrateState(raw ? JSON.parse(raw) : null);
-    } catch (error) {
-      console.error('Dentiva Pro store recovery', error);
-      return deepClone(DEFAULT_STATE);
-    }
-  },
-  save(value) {
-    try {
-      if (value.unsupportedSchema) throw new Error(value.migrationError || 'This workspace uses a newer schema and cannot be overwritten.');
-      value.updatedAt = now();
-      value.schemaVersion = CURRENT_SCHEMA_VERSION;
-      value.appVersion = APP_VERSION;
-      const payload = deepClone(value);
-      if (globalThis.dentivaDesktop?.storeSave) {
-        const result = globalThis.dentivaDesktop.storeSave(payload);
-        if (!result?.ok) throw new Error(result?.error || 'Desktop store rejected the payload.');
-      } else {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      }
-      return true;
-    } catch (error) {
-      console.error('Dentiva Pro store save', error);
-      if (ui?.toast !== undefined) notify(error.message.includes('size') ? error.message : 'The local store could not be saved. Export a backup and try again.', 'error');
-      return false;
-    }
-  },
-  reset() {
-    if (globalThis.dentivaDesktop?.storeReset) globalThis.dentivaDesktop.storeReset();
-    else { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem('dentiva-pro.store.v1'); }
-    state = deepClone(DEFAULT_STATE);
-    ui = { ...ui, page: 'dashboard', modal: null, patientId: null, restoreCandidate: null, locked: false };
-    render();
-  }
-};
-
-let state = Store.load();
-function ensureUserDirectory() {
-  state.users = Array.isArray(state.users) ? state.users : [];
-  if (!state.users.length && (state.setupComplete || state.settings.dentistName)) {
-    state.users.push({
-      id: 'user_admin',
-      name: state.settings.dentistName || 'Practice administrator',
-      staffId: '',
-      role: 'Administrator',
-      permissions: permissionsForRole('Administrator'),
-      pinHash: state.settings.pinHash || '',
-      pinSalt: state.settings.pinSalt || '',
-      active: true,
-      lockedUntil: 0,
-      failedAttempts: 0,
-      createdAt: now(),
-      lastLogin: null
-    });
-    Store.save(state);
-  }
-}
-ensureUserDirectory();
-if (state.settings.applicationLock && (!state.settings.pinHash || !state.settings.pinSalt)) {
-  state.settings.applicationLock = false;
-  state.settings.pinHash = '';
-  state.settings.pinSalt = '';
-  Store.save(state);
-}
-ui = {
-  page: 'dashboard',
-  patientId: null,
-  patientTab: 'overview',
-  patientPage: 1,
-  search: '',
-  range: 'today',
-  rangeFrom: '',
-  rangeTo: '',
-  modal: null,
-  toast: null,
-  locked: false,
-  unlockFailures: 0,
-  unlockBlockedUntil: 0,
-  activityTimer: null,
-  sidebarCollapsed: false,
-  mobileNav: false,
-  authenticatedUserId: state.users?.some((user) => user.active !== false && user.pinHash) ? null : state.users?.find((user) => user.active !== false)?.id || null,
-  loginFailures: 0,
-  loginBlockedUntil: 0,
-  restoreCandidate: null,
-  dentalPatientId: '',
-  dentalTooth: null,
-  dentalFilter: 'all',
-  patientDateFrom: '',
-  patientDateTo: '',
-  patientToothStatus: '',
-  patientBalanceFilter: 'all',
-  reportsRange: 'month',
-  analyticsRange: 'month',
-  reportFrom: '',
-  reportTo: '',
-  reportType: 'revenue',
-  calendarMonth: new Date().getMonth(),
-  calendarYear: new Date().getFullYear(),
-  appointmentView: 'month',
-  appointmentDate: today()
-};
-if (state.settings.applicationLock && state.settings.pinHash && state.settings.pinSalt) ui.locked = true;
-
 const ICONS = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -347,12 +80,10 @@ const ICONS = {
   warning: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4M12 17h.01"/>',
   leaf: '<path d="M20.5 3.5C12 3.2 5.6 6.1 4.4 11.3 3.2 16.5 7.5 20 12 20c5.3 0 8.7-4.1 8.5-16.5Z"/><path d="M4.5 19.5C8 15 12 12 18 9"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
-};
-function icon(name, size = 18, className = '') {
-  return `<svg class="icon ${className}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.circle}</svg>`;
 }
 
-const BENGALI = {
+const BENGALI_DICT = {
+
   'Dashboard': 'ড্যাশবোর্ড', 'Patients': 'রোগী', 'Appointments': 'অ্যাপয়েন্টমেন্ট', "Today's Queue": 'আজকের সিরিয়াল',
   'Clinical Records': 'ক্লিনিক্যাল রেকর্ড', 'Prescriptions': 'প্রেসক্রিপশন', 'Dental Chart': 'ডেন্টাল চার্ট', 'Treatment Catalog': 'চিকিৎসা তালিকা', 'Accounting': 'হিসাবরক্ষণ',
   'Billing': 'বিলিং', 'Payments': 'পরিশোধ', 'Inventory': 'ইনভেন্টরি', 'Suppliers': 'সরবরাহকারী', 'Staff': 'স্টাফ',
@@ -393,20 +124,22 @@ const BENGALI = {
   'Help centre': 'সহায়তা কেন্দ্র', 'About Dentiva Pro': 'Dentiva Pro পরিচিতি', 'Professional dental practice management for Bangladesh.': 'বাংলাদেশের জন্য পেশাদার ডেন্টাল প্র্যাকটিস ম্যানেজমেন্ট।', 'Privacy': 'গোপনীয়তা', 'Local data promise': 'স্থানীয় ডেটার প্রতিশ্রুতি', 'Your practice data stays yours.': 'আপনার প্র্যাকটিসের ডেটা আপনারই থাকে।', 'Creator': 'নির্মাতা', 'Offline-first': 'অফলাইন-প্রথম', 'Light mode': 'লাইট মোড', 'Local privacy': 'স্থানীয় গোপনীয়তা',
   'Sign in to Dentiva Pro': 'Dentiva Pro-তে সাইন ইন করুন', 'LOCAL ACCOUNT SIGN-IN': 'স্থানীয় অ্যাকাউন্টে সাইন ইন', 'User': 'ব্যবহারকারী', 'PIN': 'পিন', 'Enter your local PIN': 'আপনার স্থানীয় পিন দিন', 'Sign in': 'সাইন ইন', 'Contact an Administrator if your account is disabled or your PIN is forgotten.': 'অ্যাকাউন্ট নিষ্ক্রিয় হলে বা পিন ভুলে গেলে অ্যাডমিনিস্ট্রেটরের সঙ্গে যোগাযোগ করুন।', 'User accounts': 'ব্যবহারকারী অ্যাকাউন্ট', 'Access control': 'অ্যাক্সেস নিয়ন্ত্রণ', 'Add user account': 'ব্যবহারকারী অ্যাকাউন্ট যোগ করুন', 'Create a secure user account': 'নিরাপদ ব্যবহারকারী অ্যাকাউন্ট তৈরি করুন', 'Edit account access': 'অ্যাকাউন্ট অ্যাক্সেস সম্পাদনা', 'Full name': 'পূর্ণ নাম', 'Role template': 'রোল টেমপ্লেট', 'Associated staff member': 'সংযুক্ত স্টাফ সদস্য', 'Account status': 'অ্যাকাউন্টের অবস্থা', 'New PIN (leave blank to keep current)': 'নতুন পিন (বর্তমান রাখতে খালি রাখুন)', 'Effective permissions': 'কার্যকর অনুমতি', 'Create account': 'অ্যাকাউন্ট তৈরি করুন', 'Save account': 'অ্যাকাউন্ট সংরক্ষণ', 'Treatment plan': 'চিকিৎসা পরিকল্পনা', 'Treatment plan is clinician-authored': 'চিকিৎসা পরিকল্পনা চিকিৎসকের তৈরি', 'New treatment plan': 'নতুন চিকিৎসা পরিকল্পনা', 'Edit treatment plan': 'চিকিৎসা পরিকল্পনা সম্পাদনা', 'Create a treatment plan': 'চিকিৎসা পরিকল্পনা তৈরি করুন', 'Plan title': 'পরিকল্পনার শিরোনাম', 'Clinical goal': 'ক্লিনিক্যাল লক্ষ্য', 'Plan status': 'পরিকল্পনার অবস্থা', 'Start date': 'শুরুর তারিখ', 'Review date': 'পর্যালোচনার তারিখ', 'Stages': 'ধাপসমূহ', 'Financial statement': 'আর্থিক বিবরণী', 'Print statement': 'বিবরণী প্রিন্ট', 'Total charges': 'মোট চার্জ', 'No financial activity': 'কোনো আর্থিক কার্যক্রম নেই', 'Running balance': 'চলমান ব্যালান্স', 'Stage name': 'ধাপের নাম',
   'Add patient': 'রোগী যোগ করুন', 'Add staff member': 'স্টাফ সদস্য যোগ করুন', 'Add supplier': 'সরবরাহকারী যোগ করুন', 'Add treatment': 'চিকিৎসা যোগ করুন', 'Adjust stock': 'স্টক সমন্বয় করুন', 'Attach file': 'ফাইল সংযুক্ত করুন', 'Book appointment': 'অ্যাপয়েন্টমেন্ট বুক করুন', 'Check in patient': 'রোগী চেক-ইন করুন', 'Download original': 'মূল ফাইল ডাউনলোড', 'Edit': 'সম্পাদনা', 'Edit supplier': 'সরবরাহকারী সম্পাদনা', 'Export PDF': 'PDF এক্সপোর্ট', 'Export patients CSV': 'রোগীর CSV এক্সপোর্ট', 'Export preserved data': 'সংরক্ষিত ডেটা এক্সপোর্ট', 'Export verified backup': 'যাচাইকৃত ব্যাকআপ এক্সপোর্ট', 'Filters': 'ফিল্টার', 'Saved views': 'সংরক্ষিত ভিউ', 'Save view': 'ভিউ সংরক্ষণ', 'Patient views': 'রোগী ভিউ', 'Save this patient view': 'এই রোগী ভিউ সংরক্ষণ করুন', 'Keep the current search and patient filters available for the next visit.': 'বর্তমান সার্চ ও রোগী ফিল্টার পরের ভিজিটের জন্য সংরক্ষণ করুন।', 'View name': 'ভিউয়ের নাম', 'No saved searches': 'কোনো সংরক্ষিত সার্চ নেই', 'Save a patient search to reuse it here.': 'এখানে পুনরায় ব্যবহার করতে একটি রোগী সার্চ সংরক্ষণ করুন।', 'Load': 'লোড', 'Done': 'সম্পন্ন', 'Reset layout': 'লেআউট রিসেট', 'Use the arrows to reorder enabled cards.': 'তীর চিহ্ন ব্যবহার করে সক্রিয় কার্ড সাজান।', 'Full timeline': 'সম্পূর্ণ টাইমলাইন', 'Import CSV': 'CSV ইমপোর্ট', 'Inventory is empty': 'ইনভেন্টরি খালি', 'Manage user accounts': 'ব্যবহারকারী অ্যাকাউন্ট পরিচালনা', 'New referral': 'নতুন রেফারেল', 'No activity yet': 'এখনও কোনো কার্যক্রম নেই', 'No appointments in today’s queue': 'আজকের সিরিয়ালে কোনো অ্যাপয়েন্টমেন্ট নেই', 'No audit events match': 'কোনো অডিট ইভেন্ট মেলেনি', 'No invoices yet': 'এখনও কোনো ইনভয়েস নেই', 'No matching records': 'কোনো মিলযুক্ত রেকর্ড নেই', 'No prescriptions yet': 'এখনও কোনো প্রেসক্রিপশন নেই', 'No treatment plans yet': 'এখনও কোনো চিকিৎসা পরিকল্পনা নেই', 'No user accounts yet': 'এখনও কোনো ব্যবহারকারী অ্যাকাউন্ট নেই', 'Open data management': 'ডেটা ব্যবস্থাপনা খুলুন', 'Open full chart': 'সম্পূর্ণ চার্ট খুলুন', 'Open payments': 'পেমেন্ট খুলুন', 'Restore backup': 'ব্যাকআপ পুনরুদ্ধার', 'Open quick search': 'দ্রুত সার্চ খুলুন', 'Open settings': 'সেটিংস খুলুন', 'Print': 'প্রিন্ট', 'Print chart': 'চার্ট প্রিন্ট', 'Print report': 'রিপোর্ট প্রিন্ট', 'Record visit': 'ভিজিট রেকর্ড', 'Refund': 'রিফান্ড', 'Remove logo': 'লোগো সরান', 'Reset this workspace': 'এই ওয়ার্কস্পেস রিসেট করুন', 'Save chart note': 'চার্ট নোট সংরক্ষণ', 'Today’s Queue': 'আজকের সিরিয়াল', 'Day': 'দিন', 'Week': 'সপ্তাহ', 'Month': 'মাস', 'Agenda': 'এজেন্ডা', 'Upcoming agenda': 'আসন্ন এজেন্ডা', 'Upload clinic logo': 'ক্লিনিক লোগো আপলোড', 'Validate and restore selection': 'নির্বাচন যাচাই ও পুনরুদ্ধার', 'View audit trail': 'অডিট ট্রেইল দেখুন'
-};
-Object.assign(BENGALI, {
+,
+
   Analytics: 'বিশ্লেষণ', Notifications: 'নোটিফিকেশন', Diagnostics: 'ডায়াগনস্টিকস', 'Command centre': 'কমান্ড সেন্টার', 'Search your workspace': 'ওয়ার্কস্পেসে খুঁজুন', Commands: 'কমান্ড', Command: 'কমান্ড', 'Open analytics': 'বিশ্লেষণ খুলুন', 'Open reports': 'রিপোর্ট খুলুন', 'Run integrity check': 'ইন্টিগ্রিটি চেক চালান', 'Workspace health': 'ওয়ার্কস্পেসের স্বাস্থ্য', Healthy: 'স্বাস্থ্যকর', 'Needs attention': 'মনোযোগ প্রয়োজন', 'Database health': 'ডেটাবেসের স্বাস্থ্য', 'Access health': 'অ্যাক্সেসের স্বাস্থ্য', 'Integrity results': 'ইন্টিগ্রিটি ফলাফল', 'No current integrity issues': 'বর্তমানে কোনো ইন্টিগ্রিটি সমস্যা নেই', 'Revenue and visit trend': 'আয় ও ভিজিটের প্রবণতা', 'Payment mix': 'পরিশোধের ধরন', 'Clinical activity': 'ক্লিনিক্যাল কার্যক্রম', 'Commercial review': 'বাণিজ্যিক পর্যালোচনা', 'Patient alert': 'রোগীর সতর্কতা', 'Important alert': 'গুরুত্বপূর্ণ সতর্কতা', 'Preferred contact method': 'পছন্দের যোগাযোগ মাধ্যম', Tags: 'ট্যাগ', Procedures: 'প্রক্রিয়াসমূহ', 'Tooth number(s)': 'দাঁতের নম্বর', 'Estimated duration (minutes)': 'আনুমানিক সময় (মিনিট)', 'Estimated cost': 'আনুমানিক খরচ', Discount: 'ছাড়', 'Estimated total': 'আনুমানিক মোট', 'Additional medicines': 'অতিরিক্ত ওষুধ', 'Mark all read': 'সব পড়া হিসেবে চিহ্নিত করুন', Open: 'খুলুন', Dismiss: 'সরান', 'No payment data': 'কোনো পরিশোধের তথ্য নেই', 'No matching records': 'কোনো মিলযুক্ত রেকর্ড নেই', 'Review': 'পর্যালোচনা', 'Low stock': 'স্টক কম', 'Expiry review': 'মেয়াদ পর্যালোচনা', 'Queue attention': 'সিরিয়ালে মনোযোগ প্রয়োজন', 'Backup recommended': 'ব্যাকআপ নেওয়া উচিত'
-});
-function localized(value) { return state.settings.language === 'Bengali' ? (BENGALI[value] || value) : value; }
+
+};
+
+function localized(value) { return appState.settings.language === 'Bengali' ? (BENGALI_DICT[value] || value) : value; }
 function translateDom() {
-  if (state.settings.language !== 'Bengali' || !app) return;
-  const entries = Object.entries(BENGALI).sort((a, b) => b[0].length - a[0].length);
+  if (appState.settings.language !== 'Bengali' || !app) return;
+  const entries = Object.entries(BENGALI_DICT).sort((a, b) => b[0].length - a[0].length);
   const translate = (value) => entries.reduce((result, [english, bengali]) => result.includes(english) ? result.split(english).join(bengali) : result, String(value || ''));
   const walker = document.createTreeWalker(app, 4);
   let node;
   while ((node = walker.nextNode())) {
-    const raw = node.nodeValue || '';
-    if (raw.trim()) node.nodeValue = translate(raw);
+    const rawText = node.nodeValue || '';
+    if (rawText.trim()) node.nodeValue = translate(rawText);
   }
   app.querySelectorAll('[placeholder], [title], [aria-label]').forEach((element) => {
     ['placeholder', 'title', 'aria-label'].forEach((attribute) => {
@@ -417,7 +150,7 @@ function translateDom() {
 }
 
 const NAV_GROUPS = [
-  { label: 'Workspace', items: [['dashboard', 'Dashboard', 'grid'], ['patients', 'Patients', 'users'], ['appointments', 'Appointments', 'calendar'], ['queue', 'Today\'s Queue', 'clipboard']] },
+  { label: 'Workspace', items: [['dashboard', 'Dashboard', 'grid'], ['patients', 'Patients', 'users'], ['appointments', 'Appointments', 'calendar'], ['queue', "Today's Queue", 'clipboard']] },
   { label: 'Clinical', items: [['clinical', 'Clinical Records', 'activity'], ['prescriptions', 'Prescriptions', 'file'], ['dental', 'Dental Chart', 'tooth'], ['treatments', 'Treatment Catalog', 'layers']] },
   { label: 'Finance', items: [['billing', 'Billing', 'receipt'], ['payments', 'Payments', 'credit'], ['accounting', 'Accounting', 'dollar']] },
   { label: 'Operations', items: [['inventory', 'Inventory', 'box'], ['suppliers', 'Suppliers', 'truck'], ['staff', 'Staff', 'briefcase']] },
@@ -425,1398 +158,2832 @@ const NAV_GROUPS = [
   { label: 'System', items: [['notifications', 'Notifications', 'bell'], ['backup', 'Backup & Restore', 'backup'], ['diagnostics', 'Diagnostics', 'database'], ['users', 'User Accounts', 'users'], ['settings', 'Settings', 'settings'], ['help', 'Help', 'help'], ['about', 'About', 'info']] }
 ];
 
-function currency(value = 0) {
-  const amount = Number(value) || 0;
-  try {
-    return new Intl.NumberFormat(state.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD', { style: 'currency', currency: state.settings.currency || 'BDT', currencyDisplay: 'narrowSymbol', maximumFractionDigits: 2 }).format(amount);
-  } catch {
-    return `৳${amount.toFixed(2)}`;
-  }
+function icon(name, size = 18, className = '') {
+  const path = ICONS[name] || ICONS.info;
+  return `<svg class="icon ${className}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
-function number(value = 0) { return new Intl.NumberFormat(state.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD').format(Number(value) || 0); }
+
+/* ------------------------------------------------------------------ */
+/* App state: session + settings + lookup directory. The renderer      */
+/* never holds a full collection — lists are fetched per view.         */
+/* ------------------------------------------------------------------ */
+const appState = {
+  ready: false,
+  boot: null,
+  session: null,
+  firstRun: false,
+  setupComplete: false,
+  settings: {},
+  unsupportedSchema: false,
+  migrationError: '',
+  storage: null,
+  counts: {},
+  directory: { patients: [], staff: [], treatments: [] },
+  notifications: [],
+  sessionTimeoutMinutes: 30,
+  lastActivity: Date.now()
+};
+
+function can(permission) {
+  if (!appState.session) return true; // first-run setup session holds everything
+  return (appState.session.permissions || []).includes(permission) || hasPermission({ active: true, role: appState.session.role, permissions: appState.session.permissions }, permission);
+}
+function requirePermission(permission, message = 'Your account is not allowed to perform this action.') {
+  if (can(permission)) return true;
+  notify(message, 'error');
+  return false;
+}
+
+const q = (name, params = {}) => api.runQuery(name, params);
+async function op(name, payload = {}) {
+  const result = await api.runOp(name, payload);
+  if (!result || result.ok === false) {
+    notify(result?.error || 'The action could not be completed.', 'error');
+    return null;
+  }
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* Formatting                                                          */
+/* ------------------------------------------------------------------ */
+function currency(value = 0) {
+  const settings = appState.settings;
+  const symbol = { BDT: '৳', USD: '$', EUR: '€', INR: '₹' }[settings.currency] || `${settings.currency || 'BDT'} `;
+  const amount = new Intl.NumberFormat(appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD', { maximumFractionDigits: 2 }).format(Number(value) || 0);
+  return `${symbol}${amount}`;
+}
+function number(value = 0) { return new Intl.NumberFormat(appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD').format(Number(value) || 0); }
 function date(value, opts = {}) {
   if (!value) return '—';
-  const parsed = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return '—';
-  return new Intl.DateTimeFormat(state.settings.language === 'Bengali' ? 'bn-BD' : 'en-GB', { day: '2-digit', month: 'short', year: 'numeric', ...opts }).format(parsed);
+  const locale = appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-GB';
+  try { return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', ...opts }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`)); } catch { return String(value); }
 }
-function ageFromDate(value) { if (!value) return null; const birth = new Date(`${value}T00:00:00`); if (Number.isNaN(birth.getTime())) return null; const current = new Date(); let years = current.getFullYear() - birth.getFullYear(); const beforeBirthday = current.getMonth() < birth.getMonth() || (current.getMonth() === birth.getMonth() && current.getDate() < birth.getDate()); if (beforeBirthday) years -= 1; return years >= 0 && years < 130 ? years : null; }
-function minutesSince(value) { if (!value) return 0; const parsed = new Date(value).getTime(); return Number.isFinite(parsed) ? Math.max(0, Math.floor((Date.now() - parsed) / 60000)) : 0; }
+function dateFull(value) {
+  if (!value) return '—';
+  const locale = appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-GB';
+  try { return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`)); } catch { return String(value); }
+}
 function time(value) {
   if (!value) return '—';
-  const [h, m] = value.split(':').map(Number);
-  const d = new Date(); d.setHours(h || 0, m || 0, 0, 0);
-  return new Intl.DateTimeFormat(state.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD', { hour: 'numeric', minute: '2-digit', hour12: state.settings.timeFormat !== '24-hour' }).format(d);
+  const [h, m] = String(value).split(':').map(Number);
+  if (appState.settings.timeFormat === '24') return `${String(h).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m || 0).padStart(2, '0')} ${period}`;
 }
 function relativeDate(value) {
   if (!value) return '—';
-  const diff = Math.round((new Date(`${value}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 86400000);
+  const diff = Math.round((new Date(`${value}T00:00:00`).getTime() - new Date(`${today()}T00:00:00`).getTime()) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
-  return date(value, { day: 'numeric', month: 'short' });
+  if (diff > 0 && diff < 30) return `In ${diff} days`;
+  if (diff < 0 && diff > -30) return `${Math.abs(diff)} days ago`;
+  return date(value);
 }
-function initials(value = '') { return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'DP'; }
-function patientName(id) { return state.patients.find((p) => p.id === id)?.fullName || 'Unassigned patient'; }
-function staffName(id) { return state.staff.find((p) => p.id === id)?.name || state.settings.dentistName || 'Primary dentist'; }
-function currentUser() { if (ui.authenticatedUserId) return state.users?.find((user) => user.id === ui.authenticatedUserId && user.active !== false) || null; if (state.users?.some((user) => user.active !== false && user.pinHash)) return null; return state.users?.find((user) => user.role === 'Administrator' && user.active !== false) || state.users?.find((user) => user.active !== false) || null; }
-function requiresLogin() { return Boolean(state.users?.some((user) => user.active !== false && user.pinHash) && !ui.authenticatedUserId); }
-function can(permission) { return !state.users?.length || hasPermission(currentUser(), permission); }
-function requirePermission(permission, message = 'Your account is not allowed to perform this action.') { if (can(permission)) return true; notify(message, 'error'); return false; }
-function permissionForPatientTab(tab) { return { visits: 'clinical.view', appointments: 'appointments.view', 'treatment-plan': 'clinical.view', dental: 'clinical.view', prescriptions: 'prescriptions.view', billing: 'billing.view', payments: 'payments.view', statement: 'billing.view', attachments: 'clinical.view', referrals: 'clinical.view', followups: 'clinical.view', notes: 'patients.view', audit: 'audit.view', timeline: 'patients.view' }[tab] || 'patients.view'; }
-function nextCode(kind, settingKey) {
-  const n = state.counters[kind] || 1;
-  state.counters[kind] = n + 1;
-  const prefix = state.settings[settingKey] || kind.slice(0, 3).toUpperCase();
-  return `${prefix}-${String(n).padStart(4, '0')}`;
+function ageFromDate(value) {
+  if (!value) return null;
+  const birth = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(birth.getTime())) return null;
+  const current = new Date();
+  let years = current.getFullYear() - birth.getFullYear();
+  const beforeBirthday = current.getMonth() < birth.getMonth() || (current.getMonth() === birth.getMonth() && current.getDate() < birth.getDate());
+  if (beforeBirthday) years -= 1;
+  return years >= 0 && years < 130 ? years : null;
 }
-function active(list) { return list.filter((item) => !item.archived); }
-function byId(list, id) { return list.find((item) => item.id === id); }
-function sum(list, getter) { return list.reduce((total, item) => total + (Number(getter(item)) || 0), 0); }
-function paymentRefundedAmount(payment) {
-  const directRefund = numeric(payment.refundedAmount);
-  const adjustmentRefund = sum(active(state.paymentAdjustments || []).filter((adjustment) => adjustment.paymentId === payment.id && adjustment.type === 'Refund'), (adjustment) => adjustment.amount);
-  return Math.max(0, directRefund + adjustmentRefund);
+function initials(value = '') { return String(value).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'DP'; }
+function patientName(id) { return appState.directory.patients.find((p) => p.id === id)?.fullName || 'Unassigned patient'; }
+function staffName(id) { return appState.directory.staff.find((p) => p.id === id)?.name || appState.settings.dentistName || 'Primary dentist'; }
+function formatBytes(bytes) { if (!bytes) return '0 B'; const units = ['B', 'KB', 'MB', 'GB', 'TB']; const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`; }
+function numeric(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
+
+/* Money display from cents (authoritative) with decimal fallback. */
+function moneyCents(record, camel = 'amountCents', decimal = 'amount') {
+  if (record?.[camel] !== undefined && record?.[camel] !== null) return Math.max(0, Number(record[camel]));
+  return Math.max(0, moneyToCents(record?.[decimal] ?? 0));
 }
-function paymentAmount(payment) { return Math.max(0, numeric(payment.amount) - paymentRefundedAmount(payment)); }
-function invoicePaymentStatus(invoice) {
-  if (!invoice) return { paid: 0, due: 0, status: 'Unpaid' };
-  const payments = active(state.payments).filter((payment) => payment.invoiceId === invoice.id).map((payment) => ({ ...payment, amount: paymentAmount(payment), refundedAmount: 0 }));
-  return paymentStatusFor(invoice.total, payments);
+function money(record, camel = 'amountCents', decimal = 'amount') { return currency(centsToMoney(moneyCents(record, camel, decimal))); }
+
+function statusTone(status = '') {
+  const normalized = String(status).toLowerCase().replace(/\s+/g, '-');
+  if (['completed', 'paid', 'active', 'checked-in', 'in-treatment', 'healthy', 'in-stock', 'recorded', 'ok'].includes(normalized)) return 'success';
+  if (['waiting', 'partially-paid', 'partial', 'scheduled', 'caries', 'low-stock', 'partially-refunded', 'in-progress', 'contacted'].includes(normalized)) return 'warning';
+  if (['cancelled', 'no-show', 'unpaid', 'out-of-stock', 'expired', 'archived', 'refunded', 'inactive', 'dismissed'].includes(normalized)) return 'danger';
+  return 'neutral';
 }
-function paymentMethods() { return [...new Set(['Cash', 'Bank', 'Card', ...(state.settings.paymentMethods || [])].map((method) => String(method).trim()).filter(Boolean))]; }
-function expenseCategories() { return [...new Set([...(state.settings.expenseCategories || []), 'Other'])]; }
-function inventoryCategories() { return [...new Set([...(state.settings.inventoryCategories || []), 'Other'])]; }
-function monthLabel(month = ui.calendarMonth, year = ui.calendarYear) { return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(year, month, 1)); }
-function daysInMonth(month, year) { return new Date(year, month + 1, 0).getDate(); }
-function startOffset(month, year) { return new Date(year, month, 1).getDay(); }
-function pageTitle() {
-  const item = NAV_GROUPS.flatMap((group) => group.items).find(([id]) => id === ui.page);
-  return localized(item?.[1] || 'Dashboard');
+function statusBadge(status) { return badge(status || 'Not set', statusTone(status)); }
+function badge(label, tone = 'neutral') { return `<span class="badge badge-${tone}"><i></i>${esc(localized(label))}</span>`; }
+
+/* ------------------------------------------------------------------ */
+/* UI state                                                            */
+/* ------------------------------------------------------------------ */
+const initialCalendarDate = new Date();
+let ui = {
+  toast: null,
+  locked: false,
+  page: 'dashboard',
+  range: 'today',
+  rangeFrom: '',
+  rangeTo: '',
+  analyticsRange: 'month',
+  reportsRange: 'month',
+  reportType: 'revenue',
+  dentition: 'adult',
+  calendarDate: today(),
+  apptView: 'day',
+  search: '',
+  patientPage: 1,
+  patientQuery: '',
+  patientBalanceFilter: 'all',
+  patientStatusFilter: 'all',
+  patientTab: 'overview',
+  patientId: null,
+  patientDetail: null,
+  modal: null,
+  csvImport: null,
+  unlockFailures: 0,
+  unlockBlockedUntil: 0,
+  restoreCandidate: null
+};
+
+/* Per-list pagination/filter state (server-side). */
+const listState = {
+  patients: { page: 1, pageSize: 25, query: '', filters: {} },
+  appointments: { page: 1, pageSize: 30, query: '', filters: {} },
+  visits: { page: 1, pageSize: 25, query: '', filters: {} },
+  prescriptions: { page: 1, pageSize: 25, query: '', filters: {} },
+  invoices: { page: 1, pageSize: 25, query: '', filters: {} },
+  payments: { page: 1, pageSize: 25, query: '', filters: {} },
+  inventory: { page: 1, pageSize: 25, query: '', filters: {} },
+  stockMovements: { page: 1, pageSize: 25, query: '', filters: {} },
+  suppliers: { page: 1, pageSize: 25, query: '', filters: {} },
+  staff: { page: 1, pageSize: 25, query: '', filters: {} },
+  treatments: { page: 1, pageSize: 25, query: '', filters: {} },
+  expenses: { page: 1, pageSize: 25, query: '', filters: {} },
+  users: { page: 1, pageSize: 25, query: '', filters: {} },
+  audit: { page: 1, pageSize: 25, query: '', filters: {} },
+  savedFilters: { page: 1, pageSize: 50, query: '', filters: {} }
+};
+
+function listQuery(collection, overrides = {}) {
+  const state = listState[collection] || { page: 1, pageSize: 25, query: '', filters: {} };
+  return q('list', { collection, page: state.page, pageSize: state.pageSize, query: state.query || '', sort: state.sort || '', filters: { ...state.filters, ...overrides } });
 }
 
-function notify(message, type = 'success') {
-  const toastId = uid('toast');
-  ui.toast = { message, type, id: toastId };
-  render();
-  window.clearTimeout(notify.timer);
-  notify.timer = window.setTimeout(() => { if (ui.toast?.id === toastId) { ui.toast = null; render(); } }, 3600);
+/* ------------------------------------------------------------------ */
+/* Notifications (service-derived + persisted)                         */
+/* ------------------------------------------------------------------ */
+const NOTIFICATION_RULES = [['queue', 'Queue wait'], ['clinical', 'Clinical follow-ups'], ['inventory', 'Stock and expiry'], ['warning', 'Outstanding balances'], ['backup', 'Backup reminders']];
+function notificationRuleEnabled(kind) { const rule = appState.notifications.find((item) => item.kind === kind); return rule ? rule.enabled !== false : true; }
+async function loadNotifications() {
+  try {
+    const [rules, notes] = await Promise.all([
+      q('list', { collection: 'notificationRules', page: 1, pageSize: 50 }),
+      q('list', { collection: 'notifications', page: 1, pageSize: 100 })
+    ]);
+    appState.notifications = rules.rows || [];
+    const derived = deriveOperationalNotifications({
+      appointments: [], visits: [], inventory: [],
+      notificationRules: appState.notifications
+    }, today());
+    const saved = (notes.rows || []).filter((item) => !item.dismissed).map((item) => ({ ...item, persisted: true }));
+    const seen = new Set();
+    const merged = [...derived, ...saved].filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; });
+    const readMap = (appState.boot?.notificationRead) || {};
+    appState.notifications = appState.notifications; // rules keep their slot
+    appState.notificationItems = merged.slice(0, 32).map((item) => ({ ...item, read: Boolean(item.read || readMap[item.id]) }));
+  } catch { appState.notificationItems = []; }
 }
-function resetActivityTimer() {
-  window.clearTimeout(ui.activityTimer);
-  if (ui.locked || !state.settings.applicationLock || !state.settings.autoLockMinutes) return;
-  const minutes = clamp(Number(state.settings.autoLockMinutes) || 30, 1, 240);
-  ui.activityTimer = window.setTimeout(() => lockWorkspace('Automatic inactivity lock'), minutes * 60 * 1000);
+function notificationItems() { return appState.notificationItems || []; }
+function unreadCount() { return notificationItems().filter((item) => !item.read).length; }
+
+/* ------------------------------------------------------------------ */
+/* Session lifecycle                                                   */
+/* ------------------------------------------------------------------ */
+function requiresLogin() {
+  return Boolean(appState.boot && !appState.firstRun && !appState.session);
 }
 function recordActivity() {
-  if (!ui.locked) resetActivityTimer();
+  appState.lastActivity = Date.now();
 }
-function lockWorkspace(reason = 'Workspace locked') {
-  if (!state.settings.applicationLock || !state.settings.pinHash) return notify('Set an application PIN in Settings first.', 'error');
-  ui.modal = null;
-  ui.authenticatedUserId = null;
+async function lockWorkspace(reason = 'Workspace locked') {
   ui.locked = true;
-  ui.toast = null;
-  audit(reason, 'Security', '', reason);
-  Store.save(state);
+  ui.modal = null;
+  notify(reason, 'info');
   render();
 }
-function audit(action, entity, recordId = '', summary = '') {
-  state.audit.unshift({ id: uid('audit'), at: now(), action, entity, recordId, summary, user: currentUser()?.name || state.settings.dentistName || 'Local administrator', userId: currentUser()?.id || '' });
-  state.audit = state.audit.slice(0, 5000);
+async function unlockWorkspace(pin) {
+  const result = await api.login(appState.boot?.lockedUserId || ui.unlockUserId, pin);
+  if (result.ok) { ui.locked = false; ui.session = result.session; appState.session = result.session; render(); return true; }
+  notify(result.error || 'That PIN is not correct.', 'error');
+  return false;
 }
-function commit(message, entity = 'System', recordId = '') {
-  if (message) audit(message, entity, recordId, message);
-  Store.save(state);
-  render();
-}
-function downloadBlob(content, filename, type = 'application/json') {
-  const blob = content instanceof Blob ? content : new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 500);
-}
-function jsonDownload(data, filename) { downloadBlob(JSON.stringify(data, null, 2), filename, 'application/json'); }
-function csvEscape(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
-function downloadCsv(rows, filename) {
-  if (!rows.length) { notify('There are no records to export yet.', 'info'); return; }
-  const headers = Object.keys(rows[0]);
-  const csv = '\ufeff' + [headers.map(csvEscape).join(','), ...rows.map((row) => headers.map((h) => csvEscape(row[h])).join(','))].join('\n');
-  downloadBlob(csv, filename, 'text/csv;charset=utf-8');
-}
-function printDocumentMarkup(title, content, pageSize = state.settings.printPageSize || 'A4') {
-  const safePageSize = ['A4', 'Letter', 'Legal', 'A3', 'A5', 'Receipt'].includes(pageSize) ? pageSize : 'A4';
-  const template = state.settings.documentTemplate || {};
-  const logoSource = template.showLogo !== false ? safeLogoSource(state.settings.logo) : '';
-  const logo = logoSource ? `<img src="${attr(logoSource)}" alt="" style="height:48px;max-width:160px;object-fit:contain;">` : `<div class="print-mark">DP</div>`;
-  const clinicContact = template.showClinicContact === false ? '' : `<div class="muted">${esc(state.settings.dentistName || 'Professional Dental Practice')} · ${esc(state.settings.phone || '')}<br>${esc(state.settings.address || '')}</div>`;
-  const footerText = String(template.footer || 'Generated by Dentiva Pro').trim() || 'Generated by Dentiva Pro';
-  return `<!doctype html><html lang="${state.settings.language === 'Bengali' ? 'bn' : 'en'}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
-    @page{size:${safePageSize === 'Receipt' ? '80mm auto' : safePageSize};margin:10mm}*{box-sizing:border-box}body{font:13px Arial,sans-serif;color:#202b31;margin:0;padding:32px;background:#fff}header{display:flex;align-items:flex-start;justify-content:space-between;border-bottom:2px solid #0c6b70;padding-bottom:18px;margin-bottom:24px}.brand{display:flex;gap:12px;align-items:center}.print-mark{width:46px;height:46px;border-radius:14px;background:#0c6b70;color:#fff;display:grid;place-items:center;font-weight:700}.clinic{font-size:18px;font-weight:700}.muted{color:#68747b;font-size:11px;line-height:1.6}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 10px}.print-table{width:100%;border-collapse:collapse}.print-table th,.print-table td{padding:8px 10px;border-bottom:1px solid #dfe5e5;text-align:left}.print-table th{background:#f1f5f5;font-size:11px;text-transform:uppercase;letter-spacing:.06em}.summary{display:flex;gap:24px;margin:12px 0 18px}.summary strong{display:block;font-size:18px}.right{text-align:right}.document-note{color:#68747b;font-size:11px;margin-top:20px}@media print{body{padding:0}button{display:none}}
-  </style></head><body><header><div class="brand">${logo}<div><div class="clinic">${esc(state.settings.clinicName || 'Dentiva Pro')}</div>${clinicContact}</div></div><div class="right muted">${date(today())}<br>${esc(state.settings.email || '')}</div></header><h1>${esc(title)}</h1>${content}<footer class="muted" style="margin-top:32px;border-top:1px solid #dfe5e5;padding-top:12px">${esc(footerText)} · ${APP_VERSION}</footer></body></html>`;
-}
-function printHtml(title, content, pageSize = state.settings.printPageSize || 'A4') {
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700');
-  if (!printWindow) { notify('Allow pop-ups to use print preview.', 'error'); return; }
-  printWindow.document.write(printDocumentMarkup(title, content, pageSize));
-  printWindow.document.close();
-  printWindow.focus();
-  window.setTimeout(() => printWindow.print(), 250);
-}
-async function exportPdf(title, content, pageSize = state.settings.printPageSize || 'A4') {
-  const markup = printDocumentMarkup(title, content, pageSize);
-  if (window.dentivaDesktop?.printHtmlPdf) {
-    try {
-      const base64 = await window.dentivaDesktop.printHtmlPdf(markup, { pageSize });
-      const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-      downloadBlob(new Blob([bytes], { type: 'application/pdf' }), `${sanitizeFilename(title, 'dentiva-document')}.pdf`, 'application/pdf');
-      notify('PDF exported.');
-      return;
-    } catch (error) {
-      console.error('PDF export failed', error);
-      notify('PDF export failed. Use print preview and choose Save as PDF.', 'error');
-      return;
+async function refreshSession() {
+  try {
+    const result = await api.session();
+    if (!result.session && appState.session && !ui.locked && !appState.firstRun) {
+      appState.session = null;
+      lockWorkspace('Workspace locked');
+    } else if (result.session) {
+      appState.session = result.session;
+      appState.lastActivity = Date.now();
     }
+  } catch { /* keep current session on transient errors */ }
+}
+setInterval(refreshSession, 60_000);
+
+/* ------------------------------------------------------------------ */
+/* Toast                                                               */
+/* ------------------------------------------------------------------ */
+let toastTimer = null;
+function notify(message, type = 'success') {
+  ui.toast = { message, type, id: Date.now() };
+  if (typeof document !== 'undefined') {
+    const el = document.querySelector('.toast');
+    if (el) {
+      el.className = `toast toast-${type}`;
+      el.querySelector('span')?.replaceChildren(message);
+    } else { render(); }
   }
-  printHtml(title, content);
-  notify('Print preview opened. Choose Save as PDF to create a PDF.');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { ui.toast = null; if (!document.querySelector('#app .toast')) render(); }, 4200);
 }
 
-
-function navItem(id, label, iconName) {
-  const activeClass = ui.page === id ? 'active' : '';
-  return `<button class="nav-item ${activeClass}" data-action="navigate" data-page="${id}" aria-current="${ui.page === id ? 'page' : 'false'}" title="${esc(localized(label))}">${icon(iconName, 18)}<span>${esc(localized(label))}</span></button>`;
+/* ------------------------------------------------------------------ */
+/* Shell                                                               */
+/* ------------------------------------------------------------------ */
+function pageTitle() {
+  const groups = NAV_GROUPS;
+  for (const group of groups) {
+    const item = group.items.find(([id]) => id === ui.page);
+    if (item) return item[1];
+  }
+  return 'Dashboard';
 }
 function sidebar() {
-  return `<aside class="sidebar ${ui.sidebarCollapsed ? 'collapsed' : ''} ${ui.mobileNav ? 'mobile-open' : ''}">
-    <div class="brand-lockup"><div class="brand-symbol">${icon('tooth', 22)}</div><div class="brand-copy"><strong>DENTIVA<span> PRO</span></strong><small>Practice workspace</small></div><button class="icon-button sidebar-close" data-action="toggle-mobile-nav" aria-label="Close navigation">${icon('close', 17)}</button></div>
-    <div class="clinic-switcher"><div class="clinic-avatar">${initials(state.settings.clinicName || 'DP')}</div><div class="clinic-meta"><strong>${esc(state.settings.clinicName || 'Your practice')}</strong><span>${state.setupComplete ? esc(state.settings.chamberName || 'Offline workspace') : 'Setup required'}</span></div><span class="online-dot" title="Local data store"></span></div>
-    <nav class="primary-nav" aria-label="Primary navigation">${NAV_GROUPS.map((group) => `<div class="nav-group"><div class="nav-group-label">${esc(group.label)}</div>${group.items.map(([id, label, ico]) => navItem(id, label, ico)).join('')}</div>`).join('')}</nav>
-    <div class="sidebar-footer"><div class="privacy-note">${icon('shield', 15)}<span>Private & local<br><small>No cloud required</small></span></div><button class="collapse-button" data-action="toggle-sidebar">${icon(ui.sidebarCollapsed ? 'arrow' : 'chevron', 16)}<span>${ui.sidebarCollapsed ? 'Expand menu' : 'Collapse menu'}</span></button></div>
+  const active = (id) => ui.page === id ? ' active' : '';
+  return `<aside class="sidebar${ui.mobileNav ? ' open' : ''}" aria-label="Primary navigation">
+    <div class="sidebar-brand">${icon('tooth', 22)}<div><strong>DENTIVA<span>PRO</span></strong><small>${esc(appState.settings.clinicName || 'Offline-first practice OS')}</small></div></div>
+    <nav class="sidebar-nav">
+      ${NAV_GROUPS.map((group) => `<div class="nav-group"><span class="nav-group-label">${esc(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item${active(id)}" data-action="navigate" data-page="${id}">${icon(iconName, 17)}<span>${esc(localized(label))}</span>${id === 'notifications' && unreadCount() ? `<em class="nav-count">${unreadCount()}</em>` : ''}</button>`).join('')}</div>`).join('')}
+    </nav>
+    <div class="sidebar-foot">${appState.session ? `<div class="session-chip" title="${esc(appState.session.role)}">${icon('shield', 15)}<div><strong>${esc(appState.session.userName)}</strong><small>${esc(appState.session.role)}</small></div></div><button class="link-button" data-action="logout">${esc('Sign out')}</button>` : `<div class="session-chip">${icon('shield', 15)}<div><strong>Setup</strong><small>First run</small></div></div>`}</div>
   </aside>`;
 }
 function topbar() {
-  const unread = notificationItems().filter((n) => !n.read).length;
-  const user = currentUser();
-  return `<header class="topbar"><div class="topbar-left"><button class="icon-button menu-button" data-action="toggle-mobile-nav" aria-label="Open navigation">${icon('menu', 20)}</button><div class="breadcrumb"><span>${esc(localized('Workspace'))}</span>${ui.page !== 'dashboard' ? `${icon('chevron', 13)}<strong>${esc(pageTitle())}</strong>` : ''}</div></div><div class="topbar-actions"><button class="global-search" data-action="open-search" aria-label="Search"><span>${icon('search', 17)}<span>${esc(localized('Search anything'))}</span></span><kbd>Ctrl K</kbd></button><button class="icon-button notification-button" data-action="open-notifications" aria-label="Notifications">${icon('bell', 19)}${unread ? `<b>${unread > 9 ? '9+' : unread}</b>` : ''}</button><div class="topbar-divider"></div><button class="user-menu" data-action="open-user-menu"><span class="avatar avatar-small">${initials(user?.name || state.settings.dentistName || 'Dr')}</span><span class="user-meta"><strong>${esc(user?.name || state.settings.dentistName || 'Practice admin')}</strong><small>${esc(user?.role || state.settings.professionalTitle || 'Administrator')}</small></span>${icon('down', 14)}</button></div></header>`;
-}
-function bytesToHex(bytes) { return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(''); }
-function hexToBytes(hex) { return Uint8Array.from((hex.match(/.{1,2}/g) || []).map((pair) => Number.parseInt(pair, 16))); }
-async function hashPin(pin, saltHex = '') {
-  if (!globalThis.crypto?.subtle || !globalThis.crypto?.getRandomValues) throw new Error('Secure local PIN hashing is unavailable in this environment.');
-  const salt = saltHex || bytesToHex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
-  const key = await globalThis.crypto.subtle.importKey('raw', new TextEncoder().encode(pin), { name: 'PBKDF2' }, false, ['deriveBits']);
-  const bits = await globalThis.crypto.subtle.deriveBits({ name: 'PBKDF2', salt: hexToBytes(salt), iterations: 120000, hash: 'SHA-256' }, key, 256);
-  return { salt, hash: bytesToHex(new Uint8Array(bits)) };
-}
-function authScreen() {
-  const users = (state.users || []).filter((user) => user.active !== false);
-  return `<main class="lock-screen"><section class="lock-card auth-card"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div><div class="lock-icon">${icon('user', 28)}</div><span class="eyebrow">LOCAL ACCOUNT SIGN-IN</span><h1>Sign in to Dentiva Pro</h1><p>Choose your local practice account. Credentials never leave this device.</p><form data-form="user-login" class="lock-form">${selectField('User', 'userId', users.map((user) => [user.id, `${user.name} · ${user.role}`]), users[0]?.id || '')}${field('PIN', 'pin', '', 'password', 'required inputmode="numeric" autocomplete="current-password" placeholder="Enter your local PIN" autofocus')}<button class="btn btn-primary btn-wide" type="submit">${icon('unlock', 16)}<span>Sign in</span></button></form>${ui.toast?.type === 'error' ? `<p class="lock-error">${esc(ui.toast.message)}</p>` : ''}<small class="lock-help">Contact an Administrator if your account is disabled or your PIN is forgotten.</small></section></main>`;
-}
-function unsupportedSchemaScreen() {
-  return `<main class="lock-screen"><section class="lock-card schema-warning"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div><div class="lock-icon warning">${icon('warning', 28)}</div><span class="eyebrow">UPGRADE REQUIRED</span><h1>Workspace needs a newer Dentiva Pro</h1><p>${esc(state.migrationError || 'This workspace was created by a newer version.')}</p><p class="lock-help">Your local data has been preserved and will not be overwritten. Export the preserved workspace, then open it with a compatible Dentiva Pro release.</p><div class="schema-actions">${button('Export preserved data', 'export-unsupported-store', 'download', 'secondary')}${button('Reset this workspace', 'reset-workspace', 'trash', 'link')}</div></section></main>`;
-}
-
-function lockScreen() {
-  return `<main class="lock-screen"><section class="lock-card"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div><div class="lock-icon">${icon('lock', 28)}</div><span class="eyebrow">WORKSPACE LOCKED</span><h1>Enter your application PIN</h1><p>This local workspace is protected. Your records remain on this device.</p><form data-form="unlock" class="lock-form">${field('Application PIN', 'pin', '', 'password', 'required inputmode="numeric" autocomplete="current-password" placeholder="Enter 4–12 digits" autofocus')}<button class="btn btn-primary btn-wide" type="submit">${icon('unlock', 16)}<span>Unlock workspace</span></button></form>${ui.toast?.type === 'error' ? `<p class="lock-error">${esc(ui.toast.message)}</p>` : ''}<small class="lock-help">Forgotten PINs cannot be recovered by Dentiva Pro. Use a verified backup according to your clinic policy.</small></section></main>`;
+  const globalSearch = `<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search your workspace" value="${attr(ui.search)}" data-input="global-search" aria-label="Search your workspace"><kbd>⌘ K</kbd></label>`;
+  return `<header class="topbar">
+    <button class="icon-button mobile-only" data-action="toggle-mobile-nav" aria-label="Open menu">${icon('menu', 20)}</button>
+    ${globalSearch}
+    <div class="topbar-right">
+      <span class="topbar-date">${icon('calendar', 15)}${dateFull(today())}</span>
+      ${appState.session ? `<button class="icon-button" data-action="open-notifications" aria-label="Notifications">${icon('bell', 18)}${unreadCount() ? `<em class="dot-badge">${unreadCount()}</em>` : ''}</button><button class="icon-button" data-action="lock-workspace" aria-label="Lock workspace" title="Lock workspace">${icon('lock', 17)}</button>` : ''}
+    </div>
+  </header>`;
 }
 function shell() {
-  return `<div class="app-shell">${sidebar()}<div class="main-shell">${topbar()}<main class="main-content" id="main-content">${renderPage()}</main></div>${ui.modal ? modal() : ''}${ui.toast ? `<div class="toast toast-${ui.toast.type}">${icon(ui.toast.type === 'error' ? 'warning' : ui.toast.type === 'info' ? 'info' : 'check', 17)}<span>${esc(ui.toast.message)}</span><button class="toast-close" data-action="close-toast">${icon('close', 14)}</button></div>` : ''}</div>`;
+  return `<div class="app-shell">
+    ${sidebar()}
+    <div class="main-shell">${topbar()}<main class="main-content" id="main-content"></main></div>
+    ${ui.modal ? modal() : ''}
+    ${ui.toast ? `<div class="toast toast-${ui.toast.type}" role="status">${icon(ui.toast.type === 'error' ? 'warning' : ui.toast.type === 'info' ? 'info' : 'check', 17)}<span>${esc(ui.toast.message)}</span><button class="toast-close" data-action="close-toast" aria-label="Dismiss">${icon('close', 14)}</button></div>` : ''}
+  </div>`;
 }
+
 function pageHeader(title, subtitle, action = '') {
-  return `<div class="page-header"><div><div class="eyebrow">${esc(state.settings.clinicName || 'Dentiva Pro')}</div><h1>${esc(localized(title))}</h1><p>${esc(localized(subtitle))}</p></div>${action ? `<div class="page-actions">${action}</div>` : ''}</div>`;
+  return `<div class="page-header"><div><div class="eyebrow">${esc(appState.settings.clinicName || 'Dentiva Pro')}</div><h1>${esc(localized(title))}</h1><p>${esc(localized(subtitle))}</p></div>${action ? `<div class="page-actions">${action}</div>` : ''}</div>`;
 }
 function button(label, action, iconName = '', style = 'secondary', extra = '') {
   return `<button class="btn btn-${style}" data-action="${action}" ${extra}>${iconName ? icon(iconName, 16) : ''}<span>${esc(localized(label))}</span></button>`;
 }
-function badge(label, tone = 'neutral') { return `<span class="badge badge-${tone}"><i></i>${esc(localized(label))}</span>`; }
-function emptyState(iconName, title, text, action = '') { return `<div class="empty-state">${icon(iconName, 27, 'empty-icon')}<h3>${esc(localized(title))}</h3><p>${esc(localized(text))}</p>${action}</div>`; }
+function emptyState(iconName, title, text, action = '') { return `<div class="empty-state"><span class="empty-icon-wrap">${icon(iconName, 27, 'empty-icon')}</span><h3>${esc(localized(title))}</h3><p>${esc(localized(text))}</p>${action}</div>`; }
 function cardTitle(iconName, title, action = '') { return `<div class="card-title"><div class="card-title-text">${icon(iconName, 17)}<h2>${esc(localized(title))}</h2></div>${action}</div>`; }
-function statusTone(status = '') {
-  const normalized = status.toLowerCase().replace(/\s+/g, '-');
-  if (['completed', 'paid', 'active', 'checked-in', 'in-treatment', 'healthy', 'in-stock'].includes(normalized)) return 'success';
-  if (['waiting', 'partially-paid', 'partial', 'scheduled', 'caries', 'low-stock'].includes(normalized)) return 'warning';
-  if (['cancelled', 'no-show', 'unpaid', 'out-of-stock', 'expired', 'archived'].includes(normalized)) return 'danger';
-  return 'neutral';
-}
-function statusBadge(status) { return badge(status || 'Not set', statusTone(status)); }
-const NOTIFICATION_RULES = [['queue', 'Queue wait'], ['clinical', 'Clinical follow-ups'], ['inventory', 'Stock and expiry'], ['warning', 'Outstanding balances'], ['backup', 'Backup reminders']];
-function notificationRuleEnabled(kind) { const rule = (state.notificationRules || []).find((item) => item.kind === kind); return rule ? rule.enabled !== false : true; }
-function notificationItems() {
-  if (state.settings.notifications === false) return [];
-  const derived = deriveOperationalNotifications(state, today()).map((item) => { const record = [...state.appointments, ...state.visits, ...state.inventory].find((candidate) => candidate.id === item.recordId); const message = item.type === 'queue' ? `${patientName(record?.patientId)} is waiting.` : item.type === 'clinical' ? `${patientName(record?.patientId)} · follow-up is due.` : item.message; return { ...item, message }; }).filter((item) => notificationRuleEnabled(item.type));
-  active(state.invoices).map((invoice) => ({ ...invoice, ...invoicePaymentStatus(invoice) })).filter((invoice) => invoice.status !== 'Paid' && invoice.status !== 'Cancelled' && invoice.due > 0 && notificationRuleEnabled('warning')).slice(0, 6).forEach((invoice) => derived.push({ id: `due-${invoice.id}`, type: 'warning', title: 'Outstanding invoice', message: `${invoice.invoiceNumber || 'Invoice'} · ${patientName(invoice.patientId)} · ${currency(invoice.due)} due`, date: invoice.date, page: 'billing', recordId: invoice.id, read: false }));
-  if (state.patients.length && notificationRuleEnabled('backup') && (!state.lastBackupAt || Date.now() - new Date(state.lastBackupAt).getTime() > 7 * 86400000)) derived.push({ id: 'backup-stale', type: 'backup', title: 'Backup recommended', message: 'Export a verified backup to protect this local workspace.', date: today(), page: 'backup', read: false });
-  const saved = active(state.notifications).map((item) => ({ ...item, persisted: true }));
-  const seen = new Set();
-  return [...derived, ...saved].filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; }).map((item) => ({ ...item, read: Boolean(item.read || state.notificationRead?.[item.id]) })).slice(0, 32);
-}
-
-function renderPage() {
-  const pages = {
-    dashboard: renderDashboard,
-    patients: renderPatients,
-    appointments: renderAppointments,
-    queue: renderQueue,
-    clinical: renderClinical,
-    prescriptions: renderPrescriptions,
-    dental: renderDental,
-    treatments: renderTreatments,
-    billing: renderBilling,
-    payments: renderPayments,
-    accounting: renderAccounting,
-    inventory: renderInventory,
-    suppliers: renderSuppliers,
-    staff: renderStaff,
-    reports: renderReports,
-    analytics: renderAnalytics,
-    notifications: renderNotifications,
-    backup: renderBackup,
-    diagnostics: renderDiagnostics,
-    settings: renderSettings,
-    users: renderUsers,
-    help: renderHelp,
-    about: renderAbout
-  };
-  const pagePermissions = { patients: 'patients.view', appointments: 'appointments.view', queue: 'appointments.queue', clinical: 'clinical.view', prescriptions: 'prescriptions.view', dental: 'clinical.view', treatments: 'clinical.view', billing: 'billing.view', payments: 'payments.view', accounting: 'accounting.view', inventory: 'inventory.view', suppliers: 'inventory.view', staff: 'staff.view', reports: 'reports.view', analytics: 'reports.analytics', notifications: 'notifications.manage', backup: 'backup.create', diagnostics: 'diagnostics.view', settings: 'settings.view', users: 'users.manage' };
-  const permission = pagePermissions[ui.page];
-  return permission && !can(permission) ? permissionDeniedPage(pageTitle()) : (pages[ui.page] || renderDashboard)();
-}
-
-function setupBanner() {
-  if (state.setupComplete) return '';
-  const configured = [state.settings.clinicName, state.settings.dentistName, state.settings.phone, state.settings.address].filter(Boolean).length;
-  return `<section class="setup-banner"><div class="setup-icon">${icon('sparkle', 21)}</div><div class="setup-copy"><strong>Make this workspace yours</strong><p>Add your clinic identity once. Your records stay on this device and can be backed up at any time.</p><div class="setup-progress"><span style="width:${configured * 25}%"></span></div><small>${configured} of 4 essentials complete</small></div>${button('Complete setup', 'open-setup', 'arrow', 'primary')}</section>`;
-}
-function dashboardWidget(key, markup) { return (state.dashboard || ['schedule', 'queue', 'followups', 'signals']).includes(key) ? markup : ''; }
-function dashboardWidgetModal() {
-  const widgets = [['schedule', 'Today’s schedule', 'Your upcoming appointments and chair flow.'], ['queue', 'Today’s queue', 'Checked-in, waiting and completed patient counts.'], ['followups', 'Follow-ups due', 'Clinical follow-up dates that need attention.'], ['signals', 'Operational signals', 'Outstanding balances, low stock and backup health.']];
-  const layout = state.dashboard || ['schedule', 'queue', 'followups', 'signals'];
-  return `${modalHead('DASHBOARD', 'Customize your command centre', 'Keep the signals your team needs in view. Changes are saved locally per practice workspace.')}<div class="dashboard-widget-options">${widgets.map(([key, title, description]) => { const enabled = layout.includes(key); const position = layout.indexOf(key); return `<div class="dashboard-widget-option ${enabled ? 'selected' : ''}"><button class="widget-toggle" data-action="toggle-dashboard-widget" data-widget="${key}" aria-pressed="${enabled}"><span class="widget-check">${icon(enabled ? 'check' : 'plus', 15)}</span><span><strong>${title}</strong><small>${description}</small></span></button>${enabled ? `<span class="widget-order" aria-label="Dashboard card order"><button class="icon-button tiny" data-action="move-dashboard-widget" data-widget="${key}" data-direction="up" ${position === 0 ? 'disabled' : ''} aria-label="Move ${title} up">${icon('up', 14)}</button><button class="icon-button tiny" data-action="move-dashboard-widget" data-widget="${key}" data-direction="down" ${position === layout.length - 1 ? 'disabled' : ''} aria-label="Move ${title} down">${icon('down', 14)}</button></span>` : ''}</div>`; }).join('')}</div><p class="form-note">The metric strip and shortcut actions are always available. Keep at least one operational card enabled. Use the arrows to reorder enabled cards.</p><div class="modal-footer"><button class="btn btn-link" data-action="reset-dashboard-widgets">Reset layout</button><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
-}
-function renderDashboard() {
-  const todayAppointments = active(state.appointments).filter((a) => a.date === today()).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-  const waiting = todayAppointments.filter((a) => ['Checked In', 'Waiting', 'In Treatment'].includes(a.status));
-  const dashboardBounds = periodBounds(ui.range || 'today', new Date(), ui.rangeFrom, ui.rangeTo);
-  const inDashboardRange = (value) => !dashboardBounds.invalid && Boolean(value) && (!dashboardBounds.from || value >= dashboardBounds.from) && (!dashboardBounds.to || value <= dashboardBounds.to);
-  const rangeAppointments = active(state.appointments).filter((appointment) => inDashboardRange(appointment.date));
-  const rangePatients = active(state.patients).filter((patient) => inDashboardRange(patient.registrationDate || patient.createdAt?.slice(0, 10)));
-  const rangePayments = active(state.payments).filter((payment) => inDashboardRange(payment.date));
-  const rangeCollected = sum(rangePayments, paymentAmount);
-  const dashboardRangeLabel = { today: 'Today’s', '7d': '7-day', month: 'Monthly', quarter: 'Quarterly', '6m': '6-month', year: 'Yearly', custom: 'Custom range' }[ui.range] || 'Today’s';
-  const dashboardPeriodControl = `<div class="period-picker"><span>${icon('calendar', 15)}</span><select data-change="dashboard-range"><option value="today" ${ui.range === 'today' ? 'selected' : ''}>Today</option><option value="7d" ${ui.range === '7d' ? 'selected' : ''}>Last 7 days</option><option value="month" ${ui.range === 'month' ? 'selected' : ''}>Last 1 month</option><option value="quarter" ${ui.range === 'quarter' ? 'selected' : ''}>Last 3 months</option><option value="6m" ${ui.range === '6m' ? 'selected' : ''}>Last 6 months</option><option value="year" ${ui.range === 'year' ? 'selected' : ''}>Last 1 year</option><option value="custom" ${ui.range === 'custom' ? 'selected' : ''}>Custom range</option></select>${icon('down', 14)}</div>${ui.range === 'custom' ? `<div class="period-picker period-picker-dates"><input type="date" value="${attr(ui.rangeFrom)}" data-change="dashboard-range-from" aria-label="Dashboard range from"><span>to</span><input type="date" value="${attr(ui.rangeTo)}" data-change="dashboard-range-to" aria-label="Dashboard range to"></div>` : ''}`;
-  const followups = active(state.visits).filter((v) => v.followUpDate && v.followUpDate <= today()).sort((a, b) => a.followUpDate.localeCompare(b.followUpDate)).slice(0, 4);
-  const lowStock = active(state.inventory).filter((i) => Number(i.currentStock) <= Number(i.minimumStock || state.settings.lowStockThreshold));
-  const overdue = active(state.invoices).map((invoice) => ({ ...invoice, ...invoicePaymentStatus(invoice) })).filter((invoice) => invoice.status !== 'Paid' && invoice.status !== 'Cancelled' && invoice.due > 0);
-  return `<div class="page dashboard-page">${pageHeader(`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}${state.settings.dentistName ? `, ${esc(state.settings.dentistName.split(' ').slice(-1)[0])}` : ''}`, 'A clear view of your practice, without the noise.', `${dashboardPeriodControl}${button('Customize dashboard', 'open-dashboard-customizer', 'settings', 'secondary')}`)}${setupBanner()}<div class="metric-grid"><div class="metric-card metric-teal"><div class="metric-top"><span class="metric-label">${dashboardRangeLabel} appointments</span><span class="metric-icon">${icon('calendar', 18)}</span></div><strong>${number(rangeAppointments.length)}</strong><small>${rangeAppointments.length ? `${rangeAppointments.filter((a) => a.status === 'Completed').length} completed in range` : 'No appointments in range'}</small></div><div class="metric-card"><div class="metric-top"><span class="metric-label">${dashboardRangeLabel} patients</span><span class="metric-icon soft-blue">${icon('users', 18)}</span></div><strong>${number(rangePatients.length)}</strong><small>${rangePatients.length ? `${number(state.patients.length)} in your directory` : 'No patients added yet'}</small></div><div class="metric-card"><div class="metric-top"><span class="metric-label">Waiting queue</span><span class="metric-icon soft-amber">${icon('clock', 18)}</span></div><strong>${number(waiting.length)}</strong><small>${waiting.length ? 'Patients need attention' : 'No one is waiting'}</small></div><div class="metric-card"><div class="metric-top"><span class="metric-label">${dashboardRangeLabel} collected</span><span class="metric-icon soft-purple">${icon('dollar', 18)}</span></div><strong>${currency(rangeCollected)}</strong><small>${rangeCollected ? 'Across recorded payments' : 'No payments recorded'}</small></div></div><div class="dashboard-grid">${dashboardWidget('schedule', `<section class="card schedule-card">${cardTitle('calendar', 'Today’s schedule', button('Open appointments', 'navigate', 'arrow', 'link', 'data-page="appointments"'))}<div class="schedule-list">${todayAppointments.length ? todayAppointments.map((a) => appointmentRow(a)).join('') : emptyState('calendar', 'Nothing booked today', 'Create an appointment to build your schedule.', button('New appointment', 'open-appointment', 'plus', 'secondary'))}</div></section>`)}${dashboardWidget('queue', `<section class="card queue-card">${cardTitle('clipboard', 'Today’s queue', button('View queue', 'navigate', 'arrow', 'link', 'data-page="queue"'))}<div class="queue-summary"><div class="queue-ring"><strong>${waiting.length}</strong><span>waiting</span></div><div class="queue-copy"><strong>${todayAppointments.length ? `${todayAppointments.length} scheduled today` : 'Your queue is ready'}</strong><p>Check patients in as they arrive and keep care moving.</p></div></div><div class="mini-status-list"><div><span class="status-dot dot-teal"></span>Checked in <strong>${todayAppointments.filter((a) => a.status === 'Checked In').length}</strong></div><div><span class="status-dot dot-amber"></span>In treatment <strong>${todayAppointments.filter((a) => a.status === 'In Treatment').length}</strong></div><div><span class="status-dot dot-green"></span>Completed <strong>${todayAppointments.filter((a) => a.status === 'Completed').length}</strong></div></div></section>`)}${dashboardWidget('followups', `<section class="card followup-card">${cardTitle('flag', 'Follow-ups due', button('Clinical records', 'navigate', 'arrow', 'link', 'data-page="clinical"'))}<div class="followup-list">${followups.length ? followups.map((v) => `<div class="followup-row"><span class="avatar avatar-xs">${initials(patientName(v.patientId))}</span><div><strong>${esc(patientName(v.patientId))}</strong><small>${esc(v.diagnosis || v.reason || 'Follow-up')} · ${relativeDate(v.followUpDate)}</small></div><span class="followup-date">${date(v.followUpDate, { day: 'numeric', month: 'short' })}</span></div>`).join('') : emptyState('flag', 'No follow-ups due', 'Follow-up dates from clinical visits will appear here.')}</div></section>`)}${dashboardWidget('signals', `<section class="card signals-card">${cardTitle('activity', 'Operational signals')}<div class="signal-list"><div class="signal-item ${overdue.length ? 'signal-warning' : ''}"><span class="signal-icon">${icon('credit', 16)}</span><div><strong>${overdue.length ? `${overdue.length} outstanding invoice${overdue.length > 1 ? 's' : ''}` : 'No outstanding balances'}</strong><small>${overdue.length ? 'Review from Billing' : 'You’re all caught up'}</small></div>${overdue.length ? badge('Review', 'warning') : icon('check', 16)}</div><div class="signal-item ${lowStock.length ? 'signal-warning' : ''}"><span class="signal-icon">${icon('box', 16)}</span><div><strong>${lowStock.length ? `${lowStock.length} stock alert${lowStock.length > 1 ? 's' : ''}` : 'Inventory is in good shape'}</strong><small>${lowStock.length ? 'Low or out of stock' : 'No reorder needed'}</small></div>${lowStock.length ? badge('Action', 'warning') : icon('check', 16)}</div><div class="signal-item"><span class="signal-icon">${icon('backup', 16)}</span><div><strong>${state.lastBackupAt ? 'Latest backup verified' : 'Backup not configured'}</strong><small>${state.lastBackupAt ? date(state.lastBackupAt.slice(0, 10)) : 'Protect your practice data'}</small></div>${button(state.lastBackupAt ? 'View' : 'Set up', 'navigate', 'arrow', 'link', 'data-page="backup"')}</div></div></section>`)}</div><section class="quick-actions card"><div><div class="eyebrow">SHORTCUTS</div><h2>Move work forward</h2><p>Common actions, one click away.</p></div><div class="quick-action-grid">${[['New patient', 'open-patient', 'users'], ['Appointment', 'open-appointment', 'calendar'], ['New visit', 'open-visit', 'activity'], ['New invoice', 'open-invoice', 'receipt'], ['Record payment', 'open-payment', 'credit'], ['Add stock', 'open-stock', 'box']].map(([label, action, ico]) => `<button data-action="${action}" class="quick-action">${icon(ico, 18)}<span>${esc(label)}</span>${icon('arrow', 14)}</button>`).join('')}</div></section></div>`;
-}
-function appointmentRow(a) {
-  const patient = byId(state.patients, a.patientId);
-  return `<div class="schedule-row"><div class="schedule-time"><strong>${time(a.time)}</strong><small>${a.duration || 30} min</small></div><div class="schedule-line"></div><div class="schedule-person"><span class="avatar avatar-xs">${initials(patient?.fullName || 'PT')}</span><div><strong>${esc(patient?.fullName || 'Unassigned patient')}</strong><small>${esc(a.reason || 'Appointment')} · ${esc(a.chair || 'Chair 1')}</small></div></div><div class="row-end">${statusBadge(a.status || 'Scheduled')}<button class="icon-button tiny" data-action="edit-appointment" data-id="${a.id}" aria-label="Edit appointment">${icon('more', 17)}</button></div></div>`;
-}
-
-function searchInput(placeholder, value = ui.search, dataKey = 'global-search') { return `<label class="search-field">${icon('search', 17)}<input type="search" placeholder="${attr(placeholder)}" value="${attr(value)}" data-input="${dataKey}"><kbd>${dataKey === 'global-search' ? '⌘ K' : ''}</kbd></label>`; }
 function toolbar(filters = '', actions = '') { return `<div class="toolbar"><div class="toolbar-left">${filters}</div><div class="toolbar-right">${actions}</div></div>`; }
 function dataTable(headers, body, empty = '') { return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body || `<tr><td colspan="${headers.length}">${empty}</td></tr>`}</tbody></table></div>`; }
-function tablePager(total, page, actionPrefix = 'table') {
-  const pageSize = 50; const pages = Math.max(1, Math.ceil(total / pageSize));
-  if (pages <= 1) return '';
-  return `<nav class="table-pager" aria-label="Table pages"><button class="btn btn-link" data-action="${actionPrefix}-prev" ${page <= 1 ? 'disabled' : ''}>${icon('chevron', 14, 'rotate-180')} Previous</button><span>Page ${number(page)} of ${number(pages)} · ${number(total)} records</span><button class="btn btn-link" data-action="${actionPrefix}-next" ${page >= pages ? 'disabled' : ''}>Next ${icon('chevron', 14)}</button></nav>`;
+function tablePager(total, page, collection) {
+  const pageSize = listState[collection]?.pageSize || 25;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const prev = page > 1 ? `<button class="btn btn-link" data-action="list-page" data-collection="${collection}" data-page="${page - 1}">← Newer</button>` : '<span class="pager-muted">← Newer</span>';
+  const next = page < pages ? `<button class="btn btn-link" data-action="list-page" data-collection="${collection}" data-page="${page + 1}">Older →</button>` : '<span class="pager-muted">Older →</span>';
+  return `<div class="table-pager">${prev}<span class="pager-info">${number((page - 1) * pageSize + 1)}–${number(Math.min(page * pageSize, total))} of ${number(total)}</span>${next}</div>`;
 }
 
-function renderPatients() {
-  if (ui.patientId) return renderPatientProfile();
-  const query = ui.search.trim().toLowerCase();
-  const patients = state.patients.filter((p) => {
-    const isArchived = Boolean(p.archived || p.status === 'Archived');
-    const statusMatch = ui.patientStatusFilter === 'Archived' ? isArchived : ui.patientStatusFilter === 'Active' || !ui.patientStatusFilter || ui.patientStatusFilter === 'All statuses' ? !isArchived : true;
-    const queryMatch = !query || [p.patientCode, p.fullName, p.phone, p.email, p.address, p.medicalHistory, p.allergies].some((value) => String(value || '').toLowerCase().includes(query));
-    const visitDates = active(state.visits).filter((visit) => visit.patientId === p.id).map((visit) => visit.date).filter(Boolean);
-    const latestVisit = p.lastVisit || visitDates.sort().at(-1) || '';
-    const fromMatch = !ui.patientDateFrom || latestVisit >= ui.patientDateFrom;
-    const toMatch = !ui.patientDateTo || latestVisit <= ui.patientDateTo;
-    const toothMatch = !ui.patientToothStatus || state.dentalRecords.some((record) => record.patientId === p.id && record.status === ui.patientToothStatus);
-    const balance = sum(active(state.invoices).filter((invoice) => invoice.patientId === p.id), (invoice) => invoicePaymentStatus(invoice).due);
-    const balanceMatch = ui.patientBalanceFilter === 'outstanding' ? balance > 0 : ui.patientBalanceFilter === 'clear' ? balance <= 0 : true;
-    return statusMatch && queryMatch && fromMatch && toMatch && toothMatch && balanceMatch;
-  }).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
-  const patientPageSize = 50; const patientPages = Math.max(1, Math.ceil(patients.length / patientPageSize)); ui.patientPage = clamp(ui.patientPage || 1, 1, patientPages);
-  const rows = patients.slice((ui.patientPage - 1) * patientPageSize, ui.patientPage * patientPageSize).map((p) => `<tr class="clickable-row" data-action="open-patient-profile" data-id="${p.id}"><td><span class="code-label">${esc(p.patientCode || '—')}</span></td><td><div class="person-cell"><span class="avatar avatar-table">${initials(p.fullName)}</span><div><strong>${esc(p.fullName)}</strong><small>${p.preferredName ? `Prefers ${esc(p.preferredName)}` : p.gender ? esc(p.gender) : 'Patient'}</small></div></div></td><td><div class="contact-cell">${p.phone ? `<span>${icon('phone', 13)}${esc(p.phone)}</span>` : '<span class="muted">No phone</span>'}${p.email ? `<span>${icon('mail', 13)}${esc(p.email)}</span>` : ''}</div></td><td>${date(p.lastVisit)}</td><td>${p.nextVisit ? date(p.nextVisit) : '<span class="muted">Not scheduled</span>'}</td><td>${statusBadge(p.status || 'Active')}</td><td><button class="icon-button tiny" data-action="open-patient-profile" data-id="${p.id}" aria-label="Open patient profile">${icon('arrow', 15)}</button></td></tr>`).join('');
-  return `<div class="page">${pageHeader('Patients', 'A complete, searchable record of the people in your care.', button('New patient', 'open-patient', 'plus', 'primary'))}<div class="stats-strip"><div><span class="stat-label">Total patients</span><strong>${number(patients.length)}</strong></div><div><span class="stat-label">New this month</span><strong>${number(active(state.patients).filter((p) => p.registrationDate?.slice(0, 7) === today().slice(0, 7)).length)}</strong></div><div><span class="stat-label">With upcoming visit</span><strong>${number(active(state.patients).filter((p) => p.nextVisit && p.nextVisit >= today()).length)}</strong></div><div><span class="stat-label">Needs attention</span><strong>${number(active(state.patients).filter((p) => !p.phone || !p.dateOfBirth).length)}</strong></div></div><section class="card table-card"><div class="card-toolbar">${searchInput('Search by name, code, phone or email')}<div class="table-actions">${button('Filters', 'toggle-patient-filters', 'filter', 'secondary')}${button('Saved views', 'open-saved-filters', 'search', 'secondary')}${button('Save view', 'save-patient-filter', 'check', 'secondary')}${button('Import CSV', 'import-patients', 'upload', 'secondary')}${button('Export CSV', 'export-patients', 'download', 'secondary')}<input class="visually-hidden" type="file" id="patient-csv-file" accept=".csv,text/csv" data-input="patient-csv-file"></div></div><div class="filter-drawer ${ui.patientFilters ? 'open' : ''}"><label>Patient status<select data-change="patient-status-filter"><option ${!ui.patientStatusFilter || ui.patientStatusFilter === 'All statuses' ? 'selected' : ''}>All statuses</option><option ${ui.patientStatusFilter === 'Active' ? 'selected' : ''}>Active</option><option ${ui.patientStatusFilter === 'Archived' ? 'selected' : ''}>Archived</option></select></label><label>Last visit from<input type="date" value="${attr(ui.patientDateFrom)}" data-change="patient-date-from"></label><label>Last visit to<input type="date" value="${attr(ui.patientDateTo)}" data-change="patient-date-to"></label><label>Tooth status<select data-change="patient-tooth-status"><option value="">Any tooth status</option>${['Caries', 'Filled', 'Missing', 'Extracted', 'Root Canal', 'Crown', 'Bridge', 'Implant', 'Fracture'].map((status) => `<option ${ui.patientToothStatus === status ? 'selected' : ''}>${status}</option>`).join('')}</select></label><label>Balance<select data-change="patient-balance"><option value="all" ${ui.patientBalanceFilter === 'all' ? 'selected' : ''}>Any balance</option><option value="outstanding" ${ui.patientBalanceFilter === 'outstanding' ? 'selected' : ''}>Outstanding</option><option value="clear" ${ui.patientBalanceFilter === 'clear' ? 'selected' : ''}>Clear</option></select></label><span>Combine filters with search to find a patient by clinical, visit, dental or financial context.</span></div>${patients.length ? `${dataTable(['Patient code', 'Patient', 'Contact', 'Last visit', 'Next visit', 'Status', ''], rows)}${tablePager(patients.length, ui.patientPage, 'patient-page')}` : emptyState('users', query ? 'No patients match that search' : 'Your patient directory is empty', query ? 'Try another name, code or phone number.' : 'Add your first patient to start a complete clinical record.', button('Add patient', 'open-patient', 'plus', 'primary'))}</section></div>`;
+/* ------------------------------------------------------------------ */
+/* Auth / lock / unsupported-schema screens                            */
+/* ------------------------------------------------------------------ */
+function authScreen() {
+  const users = (appState.boot?.userDirectory || []).filter((user) => user.active !== false);
+  return `<main class="lock-screen"><section class="lock-card"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div>
+    <div class="lock-icon">${icon('lock', 26)}</div>
+    <span class="eyebrow">LOCAL ACCOUNT SIGN-IN</span>
+    <h1>Sign in to Dentiva Pro</h1>
+    <p>Enter your local PIN. Accounts are stored on this device and protected with PBKDF2 key derivation.</p>
+    <form data-form="user-login" class="auth-form">
+      <label class="field-label">User${users.length > 1 ? `<select name="userId" required>${users.map((user) => `<option value="${attr(user.id)}" ${user.id === ui.unlockUserId ? 'selected' : ''}>${esc(user.name)} · ${esc(user.role)}</option>`).join('')}</select>` : `<input type="hidden" name="userId" value="${attr(ui.unlockUserId || users[0]?.id || '')}"><span class="field-static">${esc(users[0]?.name || '')} · ${esc(users[0]?.role || '')}</span>`}</label>
+      <label class="field-label">PIN<input type="password" name="pin" inputmode="numeric" autocomplete="current-password" minlength="4" maxlength="12" pattern="[0-9]{4,12}" placeholder="Enter your local PIN" required autofocus></label>
+      <button class="btn btn-primary btn-block" type="submit">${icon('lock', 16)}<span>Sign in</span></button>
+    </form>
+    <p class="form-note">Contact an Administrator if your account is disabled or your PIN is forgotten. Last sign-ins and lockout state stay auditable on this device.</p>
+  </section></main>`;
 }
-function renderPatientProfile() {
-  const patient = byId(state.patients, ui.patientId);
-  if (!patient) { ui.patientId = null; return renderPatients(); }
-  const visits = active(state.visits).filter((v) => v.patientId === patient.id).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const appointments = active(state.appointments).filter((a) => a.patientId === patient.id).sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
-  const invoices = active(state.invoices).filter((i) => i.patientId === patient.id);
-  const payments = active(state.payments).filter((p) => p.patientId === patient.id);
-  const billed = sum(invoices, (i) => i.total);
-  const paid = sum(payments, paymentAmount);
-  const currentTab = ui.patientTab || 'overview';
-  const tabs = [['overview', 'Overview'], ['visits', 'Visits'], ['appointments', 'Appointments'], ['treatment-plan', 'Treatment plan'], ['dental', 'Dental chart'], ['prescriptions', 'Prescriptions'], ['billing', 'Billing'], ['payments', 'Payments'], ['statement', 'Financial statement'], ['attachments', 'Attachments'], ['referrals', 'Referrals'], ['followups', 'Follow-ups'], ['notes', 'Notes'], ['audit', 'Audit'], ['timeline', 'Timeline']].filter(([id]) => can(permissionForPatientTab(id)));
-  return `<div class="page patient-profile-page"><div class="profile-breadcrumb"><button class="back-link" data-action="close-patient-profile">${icon('arrow', 15)}<span>Back to patients</span></button><span>/</span><span>${esc(patient.patientCode || 'Patient')}</span></div><section class="profile-hero"><div class="profile-identity"><span class="avatar avatar-large">${initials(patient.fullName)}</span><div><div class="profile-code">${esc(patient.patientCode || '—')} · ${date(patient.registrationDate)} ${statusBadge(patient.status || 'Active')}</div><h1>${esc(patient.fullName)}</h1><div class="profile-meta">${patient.dateOfBirth ? `${ageFromDate(patient.dateOfBirth) ?? '—'} years · ${date(patient.dateOfBirth)} · ${patient.gender || 'Gender not recorded'}` : 'Date of birth not recorded'} ${patient.phone ? ` · ${icon('phone', 13)} ${esc(patient.phone)}` : ''}</div>${patient.importantAlerts ? `<div class="profile-alert-inline">${icon('warning', 13)} ${esc(patient.importantAlerts)}</div>` : ''}</div></div><div class="profile-actions">${button('New visit', 'open-visit', 'plus', 'primary', `data-patient-id="${patient.id}"`)}<button class="icon-button bordered" data-action="edit-patient" data-id="${patient.id}" aria-label="Edit patient">${icon('edit', 17)}</button><button class="icon-button bordered" data-action="print-patient" data-id="${patient.id}" aria-label="Print patient summary">${icon('printer', 17)}</button></div></section><div class="profile-stats"><div><span>Visits</span><strong>${number(visits.length)}</strong></div><div><span>Next appointment</span><strong>${appointments.find((appointment) => appointment.date >= today() && !['Cancelled', 'No Show'].includes(appointment.status)) ? date(appointments.find((appointment) => appointment.date >= today() && !['Cancelled', 'No Show'].includes(appointment.status)).date, { day: 'numeric', month: 'short' }) : '—'}</strong></div><div><span>Total billed</span><strong>${currency(billed)}</strong></div><div><span>Outstanding</span><strong class="${billed - paid > 0 ? 'text-warning' : ''}">${currency(Math.max(0, billed - paid))}</strong></div></div><nav class="profile-tabs" aria-label="Patient profile sections">${tabs.map(([id, label]) => `<button class="profile-tab ${currentTab === id ? 'active' : ''}" data-action="patient-tab" data-tab="${id}">${esc(label)}${id === 'visits' && visits.length ? `<span>${visits.length}</span>` : ''}</button>`).join('')}</nav><section class="profile-content">${renderPatientTab(patient, currentTab, { visits, appointments, invoices, payments, billed, paid })}</section></div>`;
+function lockScreen() {
+  return `<main class="lock-screen"><section class="lock-card"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div>
+    <div class="lock-icon">${icon('lock', 26)}</div>
+    <span class="eyebrow">WORKSPACE LOCKED</span>
+    <h1>Workspace locked</h1>
+    <p>This local workspace is protected. Your records remain on this device.</p>
+    <form data-form="unlock" class="auth-form">
+      <label class="field-label">Application PIN<input type="password" name="pin" inputmode="numeric" autocomplete="current-password" minlength="4" maxlength="12" pattern="[0-9]{4,12}" placeholder="Enter your application PIN" required autofocus></label>
+      <button class="btn btn-primary btn-block" type="submit">${icon('lock', 16)}<span>Unlock workspace</span></button>
+    </form>
+    <p class="form-note">Forgotten PINs cannot be recovered by Dentiva Pro. Use a verified backup according to your clinic policy.</p>
+  </section></main>`;
 }
-function renderPatientTab(patient, tab, data) {
-  if (!can(permissionForPatientTab(tab))) return `<section class="empty-page"><div class="empty-icon">${icon('shield', 26)}</div><h2>Section protected</h2><p>Your account does not have permission to view this patient section.</p></section>`;
-  if (tab === 'visits') return `<div class="section-heading"><div><h2>Clinical visits</h2><p>Every encounter is traceable to this patient.</p></div>${button('Record visit', 'open-visit', 'plus', 'secondary')}</div>${data.visits.length ? `<div class="timeline-list">${data.visits.map((v) => `<article class="timeline-card"><div class="timeline-marker">${icon('activity', 17)}</div><div class="timeline-body"><div class="timeline-top"><div><strong>${esc(v.reason || v.chiefComplaint || 'Clinical visit')}</strong><small>${date(v.date)}${v.time ? ` · ${time(v.time)}` : ''}</small></div>${statusBadge(v.status || 'Completed')}</div>${v.diagnosis ? `<p><b>Diagnosis:</b> ${esc(v.diagnosis)}</p>` : ''}${v.treatmentPerformed ? `<p><b>Treatment:</b> ${esc(v.treatmentPerformed)}</p>` : ''}${v.followUpDate ? `<div class="followup-chip">${icon('flag', 13)} Follow-up ${date(v.followUpDate)}</div>` : ''}</div></article>`).join('')}</div>` : emptyState('activity', 'No visits recorded', 'When you record an encounter, its clinical history will live here.', button('Record visit', 'open-visit', 'plus', 'primary'))}`;
-  if (tab === 'appointments') return `<div class="section-heading"><div><h2>Appointments</h2><p>Keep future visits and chair context connected to this patient.</p></div>${button('Book appointment', 'open-appointment', 'plus', 'secondary', `data-patient-id="${patient.id}"`)}</div>${data.appointments.length ? `<div class="record-list">${data.appointments.map((appointment) => `<div class="record-row"><span class="record-icon">${icon('calendar', 17)}</span><div><strong>${date(appointment.date)} · ${time(appointment.time)}</strong><small>${esc(appointment.reason || 'Appointment')} · ${esc(appointment.room || appointment.chair || 'Chair not assigned')}</small></div>${statusBadge(appointment.status || 'Scheduled')}<button class="icon-button tiny" data-action="edit-appointment" data-id="${appointment.id}" aria-label="Edit appointment">${icon('edit', 15)}</button></div>`).join('')}</div>` : emptyState('calendar', 'No appointments for this patient', 'Book the next visit without leaving the profile.', button('Book appointment', 'open-appointment', 'plus', 'primary', `data-patient-id="${patient.id}"`))}`;
-  if (tab === 'treatment-plan') { const plans = active(state.treatmentPlans || []).filter((plan) => plan.patientId === patient.id).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')); return `<div class="section-heading"><div><h2>Treatment plan</h2><p>Stage-based care planning stays connected to this patient and remains clinician-authored.</p></div>${button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-patient-id="${patient.id}"`)}</div>${plans.length ? `<div class="plan-list">${plans.map((plan) => `<article class="card treatment-plan-card"><div class="plan-card-head"><div><span class="eyebrow">${esc(plan.status || 'Proposed')}</span><h3>${esc(plan.title)}</h3><p>${esc(plan.goal || 'No clinical goal recorded')}</p></div><div class="row-actions">${button('Edit', 'edit-treatment-plan', 'edit', 'link', `data-id="${plan.id}"`)}${button('Record visit', 'convert-treatment-plan', 'activity', 'link', `data-id="${plan.id}"`)}${statusBadge(plan.status || 'Proposed')}</div></div><div class="plan-meta"><span>Start ${date(plan.startDate)}</span><span>Review ${date(plan.reviewDate)}</span><span>Estimate ${currency(plan.estimatedTotal ?? sum(plan.stages || [], (stage) => stage.estimatedCost))}</span><span>${number((plan.stages || []).filter((stage) => stage.status === 'Completed').length)} of ${number((plan.stages || []).length)} stages complete</span></div><div class="plan-stages">${(plan.stages || []).map((stage, index) => `<div class="plan-stage"><span class="stage-number">${index + 1}</span><div><strong>${esc(stage.title)}</strong><small>${stage.plannedDate ? date(stage.plannedDate) : 'Date not set'} · ${currency(stage.estimatedCost || 0)}${stage.notes ? ` · ${esc(stage.notes)}` : ''}</small></div><button class="stage-status" data-action="cycle-plan-stage" data-id="${plan.id}" data-stage-index="${index}">${statusBadge(stage.status || 'Planned')}</button></div>`).join('')}</div></article>`).join('')}</div>` : emptyState('layers', 'No treatment plans yet', 'Create a staged plan when care needs more than one appointment.', button('New treatment plan', 'open-treatment-plan', 'plus', 'primary', `data-patient-id="${patient.id}"`))}`; }
-  if (tab === 'dental') return `<div class="section-heading"><div><h2>Dental chart</h2><p>Tooth-level records for ${esc(patient.fullName)}.</p></div>${button('Open full chart', 'navigate', 'tooth', 'secondary', 'data-page="dental"')}</div>${renderMiniDentalChart(patient)}`;
-  if (tab === 'prescriptions') { const prescriptions = active(state.prescriptions).filter((p) => p.patientId === patient.id); return `<div class="section-heading"><div><h2>Prescriptions</h2><p>Medication instructions recorded by the practice.</p></div>${button('New prescription', 'open-prescription', 'plus', 'secondary')}</div>${prescriptions.length ? `<div class="record-list">${prescriptions.map((p) => `<div class="record-row"><span class="record-icon purple">${icon('file', 17)}</span><div><strong>${esc(p.prescriptionCode || 'Prescription')} · ${date(p.date)}</strong><small>${esc(p.medications?.map((m) => m.medicine).join(', ') || p.medicine || 'Medication not specified')}</small></div>${button('Print', 'print-prescription', 'printer', 'link', `data-id="${p.id}"`)}</div>`).join('')}</div>` : emptyState('file', 'No prescriptions yet', 'Prescriptions created for this patient will appear here.')}`; }
-  if (tab === 'billing') return `<div class="section-heading"><div><h2>Billing & payments</h2><p>Transparent financial history for ${esc(patient.fullName)}.</p></div>${button('New invoice', 'open-invoice', 'plus', 'secondary')}</div><div class="two-col-cards"><div class="summary-panel"><span>Total billed</span><strong>${currency(data.billed)}</strong><small>${data.invoices.length} invoice${data.invoices.length === 1 ? '' : 's'}</small></div><div class="summary-panel"><span>Total paid</span><strong>${currency(data.paid)}</strong><small>${data.payments.length} payment${data.payments.length === 1 ? '' : 's'}</small></div><div class="summary-panel warning"><span>Outstanding</span><strong>${currency(Math.max(0, data.billed - data.paid))}</strong><small>Calculated from valid payments</small></div></div>${data.invoices.length ? dataTable(['Invoice', 'Date', 'Total', 'Paid', 'Due', 'Status'], data.invoices.map((i) => { const paymentState = invoicePaymentStatus(i); return `<tr><td><span class="code-label">${esc(i.invoiceNumber)}</span></td><td>${date(i.date)}</td><td>${currency(i.total)}</td><td>${currency(paymentState.paid)}</td><td>${currency(paymentState.due)}</td><td>${statusBadge(paymentState.status)}</td></tr>`; }).join('')) : emptyState('receipt', 'No invoices yet', 'Invoices and receipts created for this patient will appear here.')}`;
-  if (tab === 'payments') return `<div class="section-heading"><div><h2>Payments</h2><p>Every receipt and refund remains traceable to this patient.</p></div>${button('Record payment', 'open-payment', 'plus', 'secondary', `data-patient-id="${patient.id}"`)}</div>${data.payments.length ? `<div class="record-list">${data.payments.map((payment) => `<div class="record-row"><span class="record-icon green">${icon('credit', 17)}</span><div><strong>${esc(payment.receiptNumber || 'Receipt')} · ${currency(paymentAmount(payment))}</strong><small>${date(payment.date)} · ${esc(payment.method || 'Payment')}${payment.reference ? ` · ${esc(payment.reference)}` : ''}</small></div>${statusBadge(payment.status || 'Recorded')}${paymentAmount(payment) > 0 ? button('Refund', 'refund-payment', 'refresh', 'link', `data-id="${payment.id}"`) : ''}</div>`).join('')}</div>` : emptyState('credit', 'No payments recorded', 'Record the patient’s first collection from this profile.', button('Record payment', 'open-payment', 'plus', 'primary'))}`;
-  if (tab === 'followups') { const followups = [...active(state.visits).filter((visit) => visit.patientId === patient.id && visit.followUpDate), ...active(state.followUpTasks || []).filter((task) => task.patientId === patient.id)].sort((a, b) => String(a.followUpDate || a.dueDate || '').localeCompare(String(b.followUpDate || b.dueDate || ''))); return `<div class="section-heading"><div><h2>Follow-ups</h2><p>Review clinical follow-up dates and task notes before they become overdue.</p></div>${button('Record visit', 'open-visit', 'plus', 'secondary', `data-patient-id="${patient.id}"`)}</div>${followups.length ? `<div class="record-list">${followups.map((item) => `<div class="record-row"><span class="record-icon amber">${icon('flag', 17)}</span><div><strong>${date(item.followUpDate || item.dueDate)}</strong><small>${esc(item.reason || item.title || item.note || 'Clinical follow-up')}</small></div>${statusBadge((item.followUpDate || item.dueDate) < today() ? 'Overdue' : 'Scheduled')}</div>`).join('')}</div>` : emptyState('flag', 'No follow-ups recorded', 'Follow-up dates from visits and tasks will appear here.')}`; }
-  if (tab === 'notes') return `<div class="section-heading"><div><h2>Notes</h2><p>Keep communication preferences and patient-facing context in one private place.</p></div>${button('Edit patient', 'edit-patient', 'edit', 'secondary', `data-id="${patient.id}"`)}</div><section class="card note-panel"><div><span class="eyebrow">PATIENT NOTES</span><p>${esc(patient.notes || 'No patient notes recorded yet.')}</p></div>${patient.preferredContact ? `<span class="soft-label">Preferred contact: ${esc(patient.preferredContact)}</span>` : ''}</section>`;
-  if (tab === 'audit') { const entries = active(state.audit || []).filter((entry) => entry.recordId === patient.id || entry.summary?.includes(patient.fullName)).slice(0, 80); return `<div class="section-heading"><div><h2>Patient audit</h2><p>Important changes referencing this patient, kept locally.</p></div></div>${entries.length ? `<div class="audit-list profile-audit-list">${entries.map((entry) => `<div class="audit-row"><span class="audit-row-icon">${icon('activity', 15)}</span><div><strong>${esc(entry.action)}</strong><small>${date(entry.at?.slice(0, 10))} · ${esc(entry.entity || 'Record')}</small><p>${esc(entry.summary || '')}</p></div></div>`).join('')}</div>` : emptyState('shield', 'No patient audit events', 'Important profile changes will appear here.')}`; }
-  if (tab === 'statement') {
-    const entries = statementEntries({ invoices: data.invoices, payments: data.payments, adjustments: state.paymentAdjustments || [] }, patient.id);
-    const debit = sum(entries, (entry) => entry.debit);
-    const credit = sum(entries, (entry) => entry.credit);
-    return `<div class="section-heading"><div><h2>Financial statement</h2><p>Invoice charges, recorded payments and refunds reconciled to source records.</p></div>${button('Print statement', 'print-patient-statement', 'printer', 'secondary', `data-id="${patient.id}"`)}</div><div class="two-col-cards"><div class="summary-panel"><span>Total charges</span><strong>${currency(debit)}</strong><small>Invoices and refunds</small></div><div class="summary-panel"><span>Payments</span><strong>${currency(credit)}</strong><small>Valid recorded collections</small></div><div class="summary-panel warning"><span>Balance</span><strong>${currency(entries.at(-1)?.balance || 0)}</strong><small>Charges less payments</small></div></div>${entries.length ? dataTable(['Date', 'Type', 'Reference', 'Debit', 'Credit', 'Running balance', 'Note'], entries.map((entry) => `<tr><td>${date(entry.date)}</td><td>${esc(entry.type)}</td><td><span class="code-label">${esc(entry.reference)}</span></td><td>${entry.debit ? currency(entry.debit) : '—'}</td><td>${entry.credit ? currency(entry.credit) : '—'}</td><td><strong>${currency(entry.balance)}</strong></td><td>${esc(entry.note)}</td></tr>`).join('')) : emptyState('receipt', 'No financial activity', 'Invoices and payments for this patient will appear in the statement.')}`;
+function unsupportedSchemaScreen() {
+  return `<main class="lock-screen"><section class="lock-card schema-warning"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div>
+    <div class="lock-icon warning">${icon('warning', 28)}</div>
+    <span class="eyebrow">UPGRADE REQUIRED</span>
+    <h1>Workspace needs a newer Dentiva Pro</h1>
+    <p>${esc(appState.migrationError || 'This workspace was created by a newer version.')}</p>
+    <p class="form-note">Your local data has been preserved and cannot be overwritten by this build. Export the preserved workspace, then open it with a compatible Dentiva Pro release.</p>
+    <div class="schema-actions">${button('Export preserved data', 'export-unsupported-store', 'download', 'secondary')}${button('Reset this workspace', 'reset-unsupported-workspace', 'trash', 'link')}</div>
+  </section></main>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pages                                                               */
+/* ------------------------------------------------------------------ */
+const PAGE_PERMISSIONS = { patients: 'patients.view', appointments: 'appointments.view', queue: 'appointments.queue', clinical: 'clinical.view', prescriptions: 'prescriptions.view', dental: 'clinical.view', treatments: 'clinical.view', billing: 'billing.view', payments: 'payments.view', accounting: 'accounting.view', inventory: 'inventory.view', suppliers: 'inventory.view', staff: 'staff.view', reports: 'reports.view', analytics: 'reports.analytics', notifications: 'notifications.manage', backup: 'backup.create', diagnostics: 'diagnostics.view', settings: 'settings.view', users: 'users.manage' };
+
+function permissionDeniedPage(title) {
+  return `<div class="page"><div class="empty-state" style="padding:64px 0"><span class="empty-icon-wrap">${icon('shield', 27, 'empty-icon')}</span><h3>${esc(localized(title))}</h3><p>Your current account does not have permission to open this area. Ask an Administrator to adjust access.</p></div></div>`;
+}
+
+async function renderPage() {
+  const pages = {
+    dashboard: renderDashboard, patients: renderPatients, appointments: renderAppointments, queue: renderQueue,
+    clinical: renderClinical, prescriptions: renderPrescriptions, dental: renderDental, treatments: renderTreatments,
+    billing: renderBilling, payments: renderPayments, accounting: renderAccounting, inventory: renderInventory,
+    suppliers: renderSuppliers, staff: renderStaff, reports: renderReports, analytics: renderAnalytics,
+    notifications: renderNotifications, backup: renderBackup, diagnostics: renderDiagnostics,
+    settings: renderSettings, users: renderUsers, help: renderHelp, about: renderAbout
+  };
+  const permission = PAGE_PERMISSIONS[ui.page];
+  if (permission && !can(permission)) return permissionDeniedPage(pageTitle());
+  const render = pages[ui.page] || renderDashboard;
+  try {
+    return await render();
+  } catch (error) {
+    console.error('Page render failed', error);
+    return `<div class="page">${pageHeader(pageTitle(), 'Something went wrong while loading this view.')}<div class="empty-state"><span class="empty-icon-wrap">${icon('warning', 27, 'empty-icon')}</span><h3>View could not be loaded</h3><p>${esc(error?.message || 'Unexpected error.')} Try again — your data is safe in the local store.</p>${button('Retry', 'retry-page', 'refresh', 'primary')}</div></div>`;
   }
-  if (tab === 'referrals') { const referrals = active(state.referrals).filter((r) => r.patientId === patient.id).sort((a, b) => (b.date || '').localeCompare(a.date || '')); return `<div class="section-heading"><div><h2>Referral history</h2><p>Track referrals to another doctor, specialist or organisation.</p></div>${button('New referral', 'open-referral', 'plus', 'secondary')}</div>${referrals.length ? `<div class="record-list">${referrals.map((r) => `<article class="record-row"><span class="record-icon">${icon('flag', 17)}</span><div><strong>${esc(r.referralTo)} · ${date(r.date)}</strong><small>${esc(r.specialty || 'Specialty not recorded')} · ${esc(r.reason || 'Reason not recorded')}</small>${r.response ? `<small class="text-success">Response: ${esc(r.response)}</small>` : ''}</div><button class="icon-button tiny" data-action="edit-referral" data-id="${r.id}">${icon('edit', 16)}</button></article>`).join('')}</div>` : emptyState('flag', 'No referrals recorded', 'Keep referral destination, reason, response and follow-up notes connected to this patient.', button('New referral', 'open-referral', 'plus', 'primary'))}`; }
-  if (tab === 'attachments') { const attachments = active(state.attachments).filter((a) => a.patientId === patient.id).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')); return `<div class="section-heading"><div><h2>Attachments</h2><p>Keep X-rays, reports, prescriptions and clinical documents with the patient record.</p></div>${button('Attach file', 'attach-file', 'upload', 'secondary', `data-patient-id="${patient.id}"`)}<input class="visually-hidden" type="file" id="patient-attachment-file" accept="image/png,image/jpeg,image/webp,image/tiff,application/pdf,application/dicom,.dcm,text/plain" data-input="patient-attachment-file"></div>${attachments.length ? `<div class="attachment-grid">${attachments.map((a) => `<article class="attachment-card"><div class="attachment-icon">${icon(a.type?.startsWith('image/') ? 'eye' : 'file', 19)}</div><div class="attachment-info"><strong title="${attr(a.name)}">${esc(a.name)}</strong><small>${esc(a.category || 'Clinical document')} · ${formatBytes(a.size)} · ${date(a.createdAt?.slice(0, 10))}</small></div><div class="attachment-actions"><button class="icon-button tiny" data-action="open-attachment" data-id="${a.id}" aria-label="Open attachment">${icon('eye', 15)}</button><button class="icon-button tiny" data-action="download-attachment" data-id="${a.id}" aria-label="Download attachment">${icon('download', 15)}</button><button class="icon-button tiny" data-action="edit-attachment" data-id="${a.id}" aria-label="Edit attachment details">${icon('edit', 15)}</button><button class="icon-button tiny" data-action="delete-attachment" data-id="${a.id}" aria-label="Remove attachment">${icon('trash', 15)}</button></div></article>`).join('')}</div>` : emptyState('file', 'No attachments yet', 'Upload an X-ray, lab report, image or PDF. Files stay on this device and are included in the structured backup.', button('Attach file', 'attach-file', 'upload', 'primary', `data-patient-id="${patient.id}"`))}`; }
-  if (tab === 'timeline') return `<div class="section-heading"><div><h2>Patient timeline</h2><p>Administrative and clinical activity in chronological order.</p></div></div>${renderTimeline(patient)}`;
-  return `<div class="profile-overview-grid"><div class="card inset-card"><div class="section-heading compact"><h2>Patient details</h2>${button('Edit', 'edit-patient', 'edit', 'link', `data-id="${patient.id}"`)}</div><dl class="detail-list"><div><dt>Preferred name</dt><dd>${esc(patient.preferredName || 'Not recorded')}</dd></div><div><dt>Phone</dt><dd>${esc(patient.phone || 'Not recorded')}</dd></div><div><dt>Email</dt><dd>${esc(patient.email || 'Not recorded')}</dd></div><div><dt>Address</dt><dd>${esc(patient.address || 'Not recorded')}</dd></div><div><dt>Emergency contact</dt><dd>${esc(patient.emergencyContact || 'Not recorded')}${patient.emergencyPhone ? ` · ${esc(patient.emergencyPhone)}` : ''}</dd></div><div><dt>Preferred contact</dt><dd>${esc(patient.preferredContact || 'Phone')}</dd></div><div><dt>Tags</dt><dd>${normaliseTags(patient.tags).length ? normaliseTags(patient.tags).map((tag) => `<span class="soft-label">${esc(tag)}</span>`).join(' ') : 'No tags'}</dd></div></dl>${patient.importantAlerts ? `<div class="patient-alert"><span>${icon('warning', 15)}</span><div><strong>Important alert</strong><p>${esc(patient.importantAlerts)}</p></div></div>` : ''}</div><div class="card inset-card"><div class="section-heading compact"><h2>Clinical context</h2><span class="soft-label">Private</span></div><dl class="detail-list"><div><dt>Blood group</dt><dd>${esc(patient.bloodGroup || 'Not recorded')}</dd></div><div><dt>Allergies</dt><dd class="${patient.allergies ? 'text-warning' : ''}">${esc(patient.allergies || 'None recorded')}</dd></div><div><dt>Chronic conditions</dt><dd>${esc(patient.chronicConditions || 'None recorded')}</dd></div><div><dt>Current medications</dt><dd>${esc(patient.currentMedications || 'None recorded')}</dd></div>${Object.entries(patient.customFields || {}).filter(([, value]) => value).map(([key, value]) => `<div><dt>${esc((state.settings.customPatientFields || []).find((definition) => definition.key === key)?.label || key)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl></div><div class="card inset-card wide"><div class="section-heading compact"><h2>Recent activity</h2>${button('Full timeline', 'patient-tab', 'arrow', 'link', 'data-tab="timeline"')}</div>${data.visits.slice(0, 3).length ? data.visits.slice(0, 3).map((v) => `<div class="activity-row"><span class="activity-dot">${icon('activity', 14)}</span><div><strong>${esc(v.reason || 'Clinical visit')}</strong><small>${date(v.date)} · ${esc(v.treatmentPerformed || v.diagnosis || 'Notes recorded')}</small></div></div>`).join('') : emptyState('activity', 'No activity yet', 'Visits, appointments, payments and referrals will build this history.')}</div></div>`;
-}
-function renderMiniDentalChart(patient) {
-  const records = state.dentalRecords.filter((r) => r.patientId === patient.id);
-  const statuses = Object.fromEntries(records.map((r) => [r.tooth, r.status]));
-  return `<div class="mini-dental-chart"><div class="teeth-row">${[18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28].map((tooth) => toothButton(tooth, statuses[tooth])).join('')}</div><div class="arch-label">Upper arch · FDI numbering</div><div class="arch-label lower">Lower arch · FDI numbering</div><div class="teeth-row lower-teeth">${[48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38].map((tooth) => toothButton(tooth, statuses[tooth])).join('')}</div><div class="chart-legend"><span><i class="legend-dot healthy"></i>Healthy / unrecorded</span><span><i class="legend-dot caries"></i>Caries</span><span><i class="legend-dot filled"></i>Restored</span><span><i class="legend-dot missing"></i>Missing</span></div></div>`;
-}
-function toothButton(tooth, status = '') { return `<button class="tooth ${status ? `tooth-${status.toLowerCase().replace(' ', '-')}` : ''}" data-action="select-tooth" data-tooth="${tooth}" title="Tooth ${tooth} — ${status || 'No record'}"><span>${tooth}</span>${icon('tooth', 22)}</button>`; }
-function renderTimeline(patient) {
-  const events = buildTimelineEvents(state, patient.id);
-  return events.length ? `<div class="timeline-filter-bar"><span class="soft-label">${number(events.length)} events</span><span class="muted">Clinical, financial and administrative activity</span></div><div class="timeline-stream">${events.map((event) => `<div class="stream-item"><span class="stream-icon">${icon(event.icon, 16)}</span><div><strong>${esc(event.title)}</strong><p>${esc(event.text)}</p><small>${date(event.date)} · ${esc(event.type)}</small></div></div>`).join('')}</div>` : emptyState('clock', 'Timeline is empty', 'Patient activity will appear here as records are created.');
 }
 
+function periodPicker(key, current, extraClasses = '') {
+  const options = [['today', 'Today'], ['7d', 'Last 7 days'], ['month', 'Last 1 month'], ['quarter', 'Last 3 months'], ['6m', 'Last 6 months'], ['year', 'Last 1 year'], ['custom', 'Custom range'], ['all', 'All time']];
+  return `<div class="period-picker ${extraClasses}"><span>${icon('calendar', 15)}</span><select data-change="${key}">${options.map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${icon('down', 14)}</div>${current === 'custom' ? `<div class="period-picker period-picker-dates"><input type="date" value="${attr(ui.rangeFrom)}" data-change="${key}-from" aria-label="Range from"><span>to</span><input type="date" value="${attr(ui.rangeTo)}" data-change="${key}-to" aria-label="Range to"></div>` : ''}`;
+}
+function rangeFor(key, current, customFrom, customTo) {
+  const bounds = periodBounds(current || 'month', new Date(), customFrom, customTo);
+  return { bounds, label: { today: 'Today’s', '7d': '7-day', month: 'Monthly', quarter: 'Quarterly', '6m': '6-month', year: 'Yearly', custom: 'Custom', all: 'All-time' }[current] || 'Monthly' };
+}
+
+/* ------------------------------ dashboard ------------------------------ */
+async function renderDashboard() {
+  const rangeKey = ui.range === 'custom' ? 'custom' : (ui.range === 'today' || ui.range === '7d' ? 'day' : ui.range);
+  const [dash, apptReport, revReport] = await Promise.all([
+    q('dashboard', { range: 'month' }),
+    q('report', { type: 'appointments', rangeKey, from: ui.rangeFrom || undefined, to: ui.rangeTo || undefined }).catch(() => null),
+    can('reports.view') ? q('report', { type: 'revenue', rangeKey, from: ui.rangeFrom || undefined, to: ui.rangeTo || undefined }).catch(() => null) : null
+  ]);
+  const appointmentsToday = dash.appointmentsToday || [];
+  const waiting = appointmentsToday.filter((a) => ['Checked In', 'Waiting', 'In Treatment'].includes(a.status));
+  const aggregates = dash.aggregates?.totals || {};
+  const apptStats = apptReport?.kpis || {};
+  const collectedCents = revReport?.kpis?.collectedCents || 0;
+  const rangeLabel = { today: 'Today’s', '7d': '7-day', month: 'Monthly', quarter: 'Quarterly', '6m': '6-month', year: 'Yearly', custom: 'Custom range', all: 'All-time' }[ui.range] || 'Today’s';
+  const layout = dash.dashboardLayout?.widgets?.length ? dash.dashboardLayout.widgets : ['schedule', 'queue', 'followups', 'signals'];
+  const widget = (key, markup) => layout.includes(key) ? markup : '';
+  const setupBanner = appState.setupComplete ? '' : `<section class="setup-banner"><div class="setup-icon">${icon('sparkle', 21)}</div><div class="setup-copy"><strong>Make this workspace yours</strong><p>Add your clinic identity once. Your records stay on this device and can be backed up at any time.</p></div>${button('Complete setup', 'open-setup', 'arrow', 'primary')}</section>`;
+  return `<div class="page dashboard-page">
+    ${pageHeader(`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}${appState.settings.dentistName ? `, ${esc(appState.settings.dentistName.split(' ').slice(-1)[0])}` : ''}`, 'A clear view of your practice, without the noise.', `${periodPicker('dashboard-range', ui.range)}${button('Customize dashboard', 'open-dashboard-customizer', 'settings', 'secondary')}`)}
+    ${setupBanner}
+    <div class="metric-grid">
+      <div class="metric-card metric-teal"><div class="metric-top"><span class="metric-label">${rangeLabel} appointments</span><span class="metric-icon">${icon('calendar', 18)}</span></div><strong>${number(apptStats.appointments ?? appointmentsToday.length)}</strong><small>${Number(apptStats.completed ?? 0)} completed in range</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">${rangeLabel} patients</span><span class="metric-icon soft-blue">${icon('users', 18)}</span></div><strong>${number(dash.counts?.patients ?? 0)}</strong><small>${number(appState.counts?.patients ?? 0)} in your directory</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Waiting queue</span><span class="metric-icon soft-amber">${icon('clock', 18)}</span></div><strong>${number(waiting.length)}</strong><small>${waiting.length ? 'Patients need attention' : 'No one is waiting'}</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">${rangeLabel} collected</span><span class="metric-icon soft-purple">${icon('dollar', 18)}</span></div><strong>${currency(centsToMoney(collectedCents))}</strong><small>Across recorded payments</small></div>
+    </div>
+    <div class="dashboard-grid">
+      ${widget('schedule', `<section class="card schedule-card">${cardTitle('calendar', 'Today’s schedule', button('Open appointments', 'navigate', 'arrow', 'link', 'data-page="appointments"'))}<div class="schedule-list">${appointmentsToday.length ? appointmentsToday.map(appointmentRow).join('') : emptyState('calendar', 'Nothing booked today', 'Create an appointment to build your schedule.', button('New appointment', 'open-appointment', 'plus', 'secondary'))}</div></section>`)}
+      ${widget('queue', `<section class="card queue-card">${cardTitle('clipboard', 'Today’s queue', button('View queue', 'navigate', 'arrow', 'link', 'data-page="queue"'))}<div class="queue-summary"><div class="queue-ring"><strong>${waiting.length}</strong><span>waiting</span></div><div class="queue-copy"><strong>${appointmentsToday.length ? `${appointmentsToday.length} scheduled today` : 'Your queue is ready'}</strong><p>Check patients in as they arrive and keep care moving.</p></div></div><div class="mini-status-list"><div><span class="status-dot dot-teal"></span>Checked in <strong>${appointmentsToday.filter((a) => a.status === 'Checked In').length}</strong></div><div><span class="status-dot dot-amber"></span>In treatment <strong>${appointmentsToday.filter((a) => a.status === 'In Treatment').length}</strong></div><div><span class="status-dot dot-green"></span>Completed <strong>${appointmentsToday.filter((a) => a.status === 'Completed').length}</strong></div></div></section>`)}
+      ${widget('followups', `<section class="card followup-card">${cardTitle('flag', 'Follow-ups due', button('Clinical records', 'navigate', 'arrow', 'link', 'data-page="clinical"'))}<div class="followup-list">${(dash.dueTasks || []).slice(0, 4).map((task) => `<div class="followup-row"><span class="avatar avatar-xs">${initials(patientName(task.patientId))}</span><div><strong>${esc(patientName(task.patientId))}</strong><small>${esc(task.title || 'Follow-up')} · ${relativeDate(task.dueDate)}</small></div><span class="followup-date">${date(task.dueDate, { day: 'numeric', month: 'short' })}</span></div>`).join('') || emptyState('flag', 'No follow-ups due', 'Follow-up dates from clinical visits will appear here.')}</div></section>`)}
+      ${widget('signals', `<section class="card signals-card">${cardTitle('activity', 'Operational signals')}<div class="signal-list">
+        <div class="signal-item ${aggregates.invoicesOutstandingCents > 0 ? 'signal-warning' : ''}"><span class="signal-icon">${icon('credit', 16)}</span><div><strong>${aggregates.invoicesOutstandingCents > 0 ? `Outstanding ${currency(centsToMoney(aggregates.invoicesOutstandingCents))}` : 'No outstanding balances'}</strong><small>${aggregates.invoicesOutstandingCents > 0 ? 'Review from Billing' : 'You’re all caught up'}</small></div>${aggregates.invoicesOutstandingCents > 0 ? badge('Review', 'warning') : icon('check', 16)}</div>
+        <div class="signal-item ${aggregates.lowStockItems > 0 ? 'signal-warning' : ''}"><span class="signal-icon">${icon('box', 16)}</span><div><strong>${aggregates.lowStockItems > 0 ? `${aggregates.lowStockItems} stock alert${aggregates.lowStockItems > 1 ? 's' : ''}` : 'Inventory is in good shape'}</strong><small>${aggregates.lowStockItems > 0 ? 'Low or out of stock' : 'No reorder needed'}</small></div>${aggregates.lowStockItems > 0 ? badge('Action', 'warning') : icon('check', 16)}</div>
+        <div class="signal-item"><span class="signal-icon">${icon('backup', 16)}</span><div><strong>${appState.storage?.lastBackupAt ? 'Backup verified' : 'Backup not configured'}</strong><small>${appState.storage?.lastBackupAt ? date(appState.storage.lastBackupAt.slice(0, 10)) : 'Protect your practice data'}</small></div>${button(appState.storage?.lastBackupAt ? 'View' : 'Set up', 'navigate', 'arrow', 'link', 'data-page="backup"')}</div>
+      </div></section>`)}
+    </div>
+    <section class="quick-actions card"><div><div class="eyebrow">SHORTCUTS</div><h2>Move work forward</h2><p>Common actions, one click away.</p></div>
+      <div class="quick-action-grid">${[['New patient', 'open-patient', 'users'], ['Appointment', 'open-appointment', 'calendar'], ['New visit', 'open-visit', 'activity'], ['New invoice', 'open-invoice', 'receipt'], ['Record payment', 'open-payment', 'credit'], ['Add stock', 'open-stock', 'box']].map(([label, action, ico]) => `<button data-action="${action}" class="quick-action">${icon(ico, 18)}<span>${esc(label)}</span>${icon('arrow', 14)}</button>`).join('')}</div>
+    </section>
+  </div>`;
+}
+function appointmentRow(a) {
+  return `<div class="appointment-row ${a.status === 'Cancelled' ? 'is-cancelled' : ''}" data-action="open-appointment-detail" data-id="${attr(a.id)}"><span class="appt-time">${time(a.time)}</span><span class="avatar avatar-xs">${initials(patientName(a.patientId))}</span><div class="appt-body"><strong>${esc(patientName(a.patientId))}</strong><small>${esc(a.reason || '—')}${a.chair ? ` · ${esc(a.chair)}` : ''}</small></div>${statusBadge(a.status)}</div>`;
+}
+
+/* ------------------------------- patients ------------------------------ */
+async function renderPatients() {
+  const [result, savedViews] = await Promise.all([
+    listQuery('patients', { status: ui.patientStatusFilter, balance: ui.patientBalanceFilter }),
+    listQuery('savedFilters', { entity: 'patients' })
+  ]);
+  const rows = result.rows || [];
+  const body = rows.map((p) => `<tr class="clickable-row" data-action="open-patient-profile" data-id="${attr(p.id)}">
+    <td><div class="person-cell"><span class="avatar avatar-small">${initials(p.fullName)}</span><div><strong>${esc(p.fullName)}</strong><small>${esc(p.patientCode || '—')}${p.phone ? ` · ${esc(p.phone)}` : ''}</small></div></div></td>
+    <td>${p.phone ? esc(p.phone) : '<span class="muted">—</span>'}</td>
+    <td>${p.lastVisit ? relativeDate(p.lastVisit) : '<span class="muted">Never</span>'}</td>
+    <td><strong class="${(p.balanceCents || 0) > 0 ? 'text-warning' : ''}">${currency(centsToMoney(p.balanceCents || 0))}</strong></td>
+    <td>${statusBadge(p.archived ? 'Archived' : 'Active')}</td>
+    <td class="row-actions">${button('View', 'open-patient-profile', 'arrow', 'link', `data-id="${attr(p.id)}"`)}</td>
+  </tr>`).join('');
+  const views = (savedViews.rows || []);
+  const savedViewsMenu = views.length ? `<div class="saved-views-strip"><span class="eyebrow">Saved views</span>${views.map((view) => `<button class="chip-button ${listState.patients.query === view.query ? 'selected' : ''}" data-action="apply-saved-filter" data-id="${attr(view.id)}" data-collection="patients">${icon('filter', 13)}${esc(view.name)}</button>`).join('')}<button class="chip-button" data-action="save-filter" data-collection="patients">${icon('plus', 13)}<span>Save view</span></button></div>` : '';
+  return `<div class="page">
+    ${pageHeader('Patients', 'Your complete patient directory, searchable and filterable.', `${button('Export patients CSV', 'export-patients-csv', 'download', 'secondary')}${button('Import CSV', 'open-csv-import', 'upload', 'secondary')}${button('Add patient', 'open-patient', 'plus', 'primary')}`)}
+    ${savedViewsMenu}
+    ${toolbar(`
+      <label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search name, code or phone" value="${attr(listState.patients.query)}" data-input="list-query" data-collection="patients" aria-label="Search patients"><kbd>⌘ K</kbd></label>
+      <select data-change="patient-status-filter" aria-label="Patient status"><option value="all" ${ui.patientStatusFilter === 'all' ? 'selected' : ''}>All statuses</option><option value="active" ${ui.patientStatusFilter === 'active' ? 'selected' : ''}>Active</option><option value="archived" ${ui.patientStatusFilter === 'archived' ? 'selected' : ''}>Archived</option></select>
+      <select data-change="patient-balance-filter" aria-label="Balance filter"><option value="all" ${ui.patientBalanceFilter === 'all' ? 'selected' : ''}>Any balance</option><option value="outstanding" ${ui.patientBalanceFilter === 'outstanding' ? 'selected' : ''}>Outstanding</option><option value="clear" ${ui.patientBalanceFilter === 'clear' ? 'selected' : ''}>Settled</option></select>`, '')}
+    ${dataTable(['Patient', 'Phone', 'Last visit', 'Balance', 'Status', ''], body, emptyState('users', 'No matching records', listState.patients.query ? 'Try a different search or clear the filters.' : 'Add your first patient to begin.', button('Add patient', 'open-patient', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.patients.page, 'patients')}
+  </div>`;
+}
+
+/* --------------------------- patient profile --------------------------- */
+const PATIENT_TABS = [
+  ['overview', 'Overview', 'info'], ['timeline', 'Patient timeline', 'activity'], ['visits', 'Clinical records', 'clipboard'],
+  ['dental', 'Dental chart', 'tooth'], ['prescriptions', 'Prescriptions', 'file'], ['treatment-plan', 'Treatment plan', 'layers'],
+  ['billing', 'Billing', 'receipt'], ['payments', 'Payments', 'credit'], ['statement', 'Financial statement', 'chart'],
+  ['attachments', 'Attachments', 'paperclip'], ['referrals', 'Referrals', 'send'], ['followups', 'Follow-ups', 'flag'],
+  ['notes', 'Notes', 'edit'], ['audit', 'Audit trail', 'shield']
+];
+const PATIENT_TAB_PERMISSIONS = { visits: 'clinical.view', appointments: 'appointments.view', 'treatment-plan': 'clinical.view', dental: 'clinical.view', prescriptions: 'prescriptions.view', billing: 'billing.view', payments: 'payments.view', statement: 'billing.view', attachments: 'clinical.view', referrals: 'clinical.view', followups: 'clinical.view', notes: 'patients.view', audit: 'audit.view', timeline: 'patients.view', overview: 'patients.view' };
+
+async function renderPatientProfile() {
+  if (!ui.patientId) return renderPatients();
+  const patient = await q('patientAggregate', { patientId: ui.patientId });
+  ui.patientDetail = patient;
+  const p = patient.patient;
+  if (!p) return `<div class="page"><div class="empty-state"><h3>Patient not found</h3><p>This record may have been removed.</p>${button('Back to patients', 'navigate', 'arrow', 'secondary', 'data-page="patients"')}</div></div>`;
+  const counts = patient.counts || {};
+  const balance = patient.balanceCents || 0;
+  const tab = ui.patientTab || 'overview';
+  const tabs = PATIENT_TABS.filter(([id]) => !PATIENT_TAB_PERMISSIONS[id] || can(PATIENT_TAB_PERMISSIONS[id]));
+  return `<div class="page patient-page">
+    <div class="patient-head-card">
+      <div class="patient-head-main"><span class="avatar avatar-lg">${initials(p.fullName)}</span>
+        <div><h1>${esc(p.fullName)}</h1><p class="patient-sub">${esc(p.patientCode || '—')}${p.phone ? ` · ${esc(p.phone)}` : ''}${p.email ? ` · ${esc(p.email)}` : ''}</p>
+        <div class="patient-meta">${p.gender ? badge(p.gender, 'neutral') : ''}${p.bloodGroup ? badge(`Blood ${p.bloodGroup}`, 'neutral') : ''}${p.dateOfBirth ? badge(`Age ${ageFromDate(p.dateOfBirth)}`, 'neutral') : ''}${p.archived ? badge('Archived', 'danger') : badge('Active', 'success')}</div></div>
+      </div>
+      <div class="patient-head-stats">
+        <div class="mini-stat"><small>Balance</small><strong class="${balance > 0 ? 'text-warning' : ''}">${currency(centsToMoney(balance))}</strong></div>
+        <div class="mini-stat"><small>Visits</small><strong>${number(counts.visits || 0)}</strong></div>
+        <div class="mini-stat"><small>Appointments</small><strong>${number(counts.appointments || 0)}</strong></div>
+        <div class="mini-stat"><small>Invoices</small><strong>${number(counts.invoices || 0)}</strong></div>
+      </div>
+      <div class="patient-head-actions">${button('Edit patient', 'open-patient', 'edit', 'secondary', `data-id="${attr(p.id)}"`)}${button('Print summary', 'print-patient', 'printer', 'secondary', `data-id="${attr(p.id)}"`)}${button('Merge duplicate…', 'open-patient-merge', 'link', 'link', `data-id="${attr(p.id)}"`)}</div>
+    </div>
+    <div class="tab-strip" role="tablist">${tabs.map(([id, label, iconName]) => `<button class="tab-button ${tab === id ? 'active' : ''}" data-action="patient-tab" data-tab="${id}" role="tab" aria-selected="${tab === id}">${icon(iconName, 15)}<span>${esc(localized(label))}</span></button>`).join('')}</div>
+    ${await renderPatientTab(p, tab, patient)}
+  </div>`;
+}
+
+async function renderPatientTab(p, tab, patient) {
+  const id = p.id;
+  switch (tab) {
+    case 'overview': {
+      const alerts = [p.allergies, p.medicalHistory, p.importantAlerts].filter(Boolean);
+      return `<div class="patient-grid">
+        <section class="card"><div class="card-title"><div class="card-title-text">${icon('user', 17)}<h2>Details</h2></div></div>
+          <dl class="detail-list">
+            <div><dt>Date of birth</dt><dd>${p.dateOfBirth ? `${dateFull(p.dateOfBirth)}${ageFromDate(p.dateOfBirth) ? ` (${ageFromDate(p.dateOfBirth)} yrs)` : ''}` : '—'}</dd></div>
+            <div><dt>Gender</dt><dd>${esc(p.gender || '—')}</dd></div>
+            <div><dt>Blood group</dt><dd>${esc(p.bloodGroup || '—')}</dd></div>
+            <div><dt>Phone</dt><dd>${esc(p.phone || '—')}</dd></div>
+            <div><dt>Email</dt><dd>${esc(p.email || '—')}</dd></div>
+            <div><dt>Address</dt><dd>${esc([p.address, p.city, p.district].filter(Boolean).join(', ') || '—')}</dd></div>
+            <div><dt>Occupation</dt><dd>${esc(p.occupation || '—')}</dd></div>
+            <div><dt>Marital status</dt><dd>${esc(p.maritalStatus || '—')}</dd></div>
+            <div><dt>Emergency contact</dt><dd>${p.emergencyName ? `${esc(p.emergencyName)}${p.emergencyRelation ? ` (${esc(p.emergencyRelation)})` : ''} · ${esc(p.emergencyPhone || '—')}` : '—'}</dd></div>
+            <div><dt>Preferred contact</dt><dd>${esc(p.preferredContact || 'Phone')}</dd></div>
+            <div><dt>Registered</dt><dd>${dateFull(p.registrationDate)}</dd></div>
+            ${p.tags?.length ? `<div><dt>Tags</dt><dd>${p.tags.map((t) => badge(t, 'neutral')).join(' ')}</dd></div>` : ''}
+          </dl>
+        </section>
+        <section class="card"><div class="card-title"><div class="card-title-text">${icon('warning', 17)}<h2>Clinical alerts</h2></div></div>
+          ${alerts.length ? alerts.map((text, i) => `<div class="alert-row ${i === 0 ? 'alert-danger' : i === 1 ? 'alert-warning' : 'alert-info'}"><span>${i === 0 ? icon('warning', 16) : i === 1 ? icon('activity', 16) : icon('info', 16)}</span><div><strong>${['Allergies', 'Medical history', 'Important alert'][i]}</strong><p>${esc(text)}</p></div></div>`).join('') : emptyState('check', 'No alerts recorded', 'Allergies and history entered on the patient record appear here.')}
+        </section>
+        <section class="card card-wide"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Communication & notes</h2></div></div>
+          <div class="notes-blocks"><div><strong>Communication notes</strong><p>${esc(p.communicationNotes || '—')}</p></div><div><strong>Notes</strong><p>${esc(p.notes || '—')}</p></div></div>
+        </section>
+      </div>`;
+    }
+    case 'timeline': {
+      const list = await q('list', { collection: 'patients', page: 1, pageSize: 1, query: '' }).catch(() => null);
+      void list;
+      const timeline = patient.timeline;
+      const rows = (timeline.rows || []).map((row) => `<div class="timeline-row ${row.type}"><span class="timeline-icon">${icon({ visit: 'clipboard', invoice: 'receipt', payment: 'credit', appointment: 'calendar', prescription: 'file', referral: 'send', attachment: 'paperclip', followup: 'flag' }[row.type] || 'dot', 15)}</span><div><strong>${esc(row.title)}</strong><small>${date(row.date)} · ${esc(row.subtitle || '')}</small></div>${row.status ? statusBadge(row.status) : ''}</div>`).join('');
+      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Full timeline</h2></div></div>${rows || emptyState('activity', 'No activity yet', 'Records created for this patient will appear here.')}</section>`;
+    }
+    case 'visits': return renderPatientVisits(id, patient);
+    case 'dental': return renderPatientDental(p, patient);
+    case 'prescriptions': {
+      const result = await q('list', { collection: 'prescriptions', page: 1, pageSize: 50, filters: { patientId: id } });
+      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('file', 17)}<h2>Prescriptions</h2></div>${button('New prescription', 'open-prescription', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+        ${(result.rows || []).map((rx) => `<div class="record-row"><div><strong>${esc(rx.prescriptionCode || '—')} · ${esc(rx.doctor || '—')}</strong><small>${date(rx.date)} · ${(rx.medications || []).map((m) => m.medicine).filter(Boolean).join(', ') || '—'}</small></div><div class="row-actions">${button('Print', 'print-prescription', 'printer', 'link', `data-id="${attr(rx.id)}"`)}${button('View', 'open-prescription', 'eye', 'link', `data-id="${attr(rx.id)}"`)}</div></div>`).join('') || emptyState('file', 'No prescriptions yet', 'Prescriptions written for this patient appear here.', button('New prescription', 'open-prescription', 'plus', 'secondary', `data-id="${attr(id)}"`))}
+      </section>`;
+    }
+    case 'treatment-plan': return renderPatientPlans(id, patient);
+    case 'billing': return renderPatientBilling(id, patient);
+    case 'payments': return renderPatientPayments(id, patient);
+    case 'statement': return renderPatientStatement(id, patient);
+    case 'attachments': return renderPatientAttachments(id, patient);
+    case 'referrals': return renderPatientReferrals(id, patient);
+    case 'followups': return renderPatientFollowups(id, patient);
+    case 'notes': {
+      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('edit', 17)}<h2>Notes</h2></div>${button('Edit patient', 'open-patient', 'edit', 'secondary', `data-id="${attr(id)}"`)}</div>
+        <div class="notes-blocks"><div><strong>Communication notes</strong><p>${esc(p.communicationNotes || '—')}</p></div><div><strong>Notes</strong><p>${esc(p.notes || '—')}</p></div></div>
+      </section>`;
+    }
+    case 'audit': {
+      const result = await q('auditList', { page: 1, pageSize: 50, entity: '', userId: '' });
+      const rows = (result.rows || []).filter((entry) => !entry.entityId || entry.entityId === id || String(entry.summary || '').includes(p.fullName)).map((entry) => `<div class="record-row"><div><strong>${esc(entry.action)}</strong><small>${dateFull(entry.createdAt?.slice(0, 10))} ${time(entry.createdAt?.slice(11, 16))} · ${esc(entry.userName || '—')} · ${esc(entry.summary || '')}</small></div></div>`).join('');
+      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('shield', 17)}<h2>Audit trail</h2></div></div>${rows || emptyState('shield', 'No audit events match', 'Audit entries touching this patient appear here.')}</section>`;
+    }
+    default: return emptyState('info', 'Nothing here yet', 'This section will populate as records are created.');
+  }
+}
+
+async function renderPatientVisits(id, patient) {
+  const result = await q('list', { collection: 'visits', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'date-desc' });
+  const rows = (result.rows || []).map((v) => `<div class="record-row record-row-detail">
+    <div><strong>${esc(v.visitCode || '—')} · ${esc(v.reason || '—')}</strong><small>${dateFull(v.date)}${v.diagnosis ? ` · Dx: ${esc(v.diagnosis)}` : ''}${v.followUpDate ? ` · Follow-up ${date(v.followUpDate)}` : ''}</small>
+    ${v.treatmentPerformed ? `<p class="record-detail-text">${esc(v.treatmentPerformed)}</p>` : ''}${v.findings ? `<p class="record-detail-text muted">${esc(v.findings)}</p>` : ''}${v.notes ? `<p class="record-detail-text muted">${esc(v.notes)}</p>` : ''}</div>
+    <div class="row-actions">${button('Print visit', 'print-visit', 'printer', 'link', `data-id="${attr(v.id)}"`)}${button('Edit', 'open-visit', 'edit', 'link', `data-id="${attr(v.id)}"`)}</div></div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('clipboard', 17)}<h2>Clinical records</h2></div>${button('Record visit', 'open-visit', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('clipboard', 'No visits yet', 'Clinical visits for this patient appear here.', button('Record visit', 'open-visit', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+}
+
+async function renderPatientDental(p, patient) {
+  const history = await q('dentalHistory', { patientId: p.id });
+  const records = history.records || [];
+  const statusFor = (tooth) => { const current = records.filter((r) => Number(r.tooth) === Number(tooth) && !r.superseded && (r.dentition || 'adult') === ui.dentition).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]; return current; };
+  const teeth = Array.from({ length: 32 }, (_, i) => i + 1);
+  const chart = (set, label) => `<div class="dental-set"><h3>${esc(label)}${ui.dentition === set ? '' : ` <button class="link-button" data-action="set-dentition" data-dentition="${set}">View</button>`}</h3><div class="tooth-grid">${teeth.map((tooth) => { const record = ui.dentition === set ? statusFor(tooth) : null; return `<button class="tooth ${record ? `tooth-${String(record.status || '').toLowerCase().replace(/\\s+/g, '-')}` : ''}" data-action="select-tooth" data-tooth="${tooth}" title="Tooth ${tooth} — ${record?.status || record?.note || 'No record'}"><span>${tooth}</span></button>`; }).join('')}</div></div>`;
+  const selected = ui.dentalTooth ? statusFor(ui.dentalTooth) : null;
+  return `<section class="card dental-card">
+    <div class="card-title"><div class="card-title-text">${icon('tooth', 17)}<h2>Dental chart — ${esc(p.fullName)}</h2></div><div class="dentition-toggle"><button class="btn ${ui.dentition === 'adult' ? 'btn-primary' : 'btn-secondary'}" data-action="set-dentition" data-dentition="adult">Adult</button><button class="btn ${ui.dentition === 'primary' ? 'btn-primary' : 'btn-secondary'}" data-action="set-dentition" data-dentition="primary">Primary</button></div></div>
+    ${chart('adult', 'Permanent (FDI 11–48)')}${chart('primary', 'Primary (FDI 51–85)')}
+    <div class="dental-detail">
+      ${ui.dentalTooth ? `<div class="dental-detail-head"><strong>Tooth ${ui.dentalTooth} (${ui.dentition})</strong><span class="muted">${records.filter((r) => Number(r.tooth) === Number(ui.dentalTooth) && (r.dentition || 'adult') === ui.dentition).length} record(s) in history</span></div>
+        <div class="tooth-status-row">${['', 'Missing', 'Caries', 'Restored', 'Crown', 'Root canal', 'Extracted', 'Implant'].map((status) => `<button class="chip-button ${selected?.status === status ? 'selected' : ''}" data-action="set-tooth-status" data-status="${attr(status)}">${esc(status || 'Clear')}</button>`).join('')}</div>
+        <label class="field-label">Chart note<textarea name="dental-note" rows="2" placeholder="Procedure or clinical note for this tooth">${attr(ui.toothNote ?? selected?.note ?? '')}</textarea></label>
+        <div class="dental-actions">${button('Save chart note', 'save-tooth', 'check', 'primary')}${button('Clear record', 'remove-tooth', 'trash', 'link')}${button('Print chart', 'print-chart', 'printer', 'secondary', `data-id="${attr(p.id)}"`)}</div>
+        <div class="tooth-history">${records.filter((r) => Number(r.tooth) === Number(ui.dentalTooth) && (r.dentition || 'adult') === ui.dentition).map((r) => `<div class="record-row"><div><strong>${esc(r.status || 'Note')}${r.procedure ? ` · ${esc(r.procedure)}` : ''}</strong><small>${dateFull(r.createdAt?.slice(0, 10))}${r.superseded ? ' · superseded' : ''} · ${esc(r.note || '')}</small></div></div>`).join('')}</div>`
+      : emptyState('tooth', 'Select a tooth', 'Click any tooth to record its status, procedure or a chart note. History is preserved.')}
+    </div>
+  </section>`;
+}
+
+async function renderPatientPlans(id, patient) {
+  const result = await q('list', { collection: 'treatmentPlans', page: 1, pageSize: 50, filters: { patientId: id } });
+  const rows = (result.rows || []).map((plan) => `<div class="record-row record-row-detail">
+    <div><strong>${esc(plan.title)}</strong><small>${statusBadge(plan.status)} · ${currency(centsToMoney(plan.estimatedTotalCents ?? plan.estimatedTotal))}${plan.startDate ? ` · starts ${date(plan.startDate)}` : ''}</small>
+    ${(plan.stages || []).length ? `<ul class="stage-list">${plan.stages.map((stage) => `<li data-action="cycle-plan-stage" data-plan="${attr(plan.id)}" data-stage="${attr(stage.id)}" title="Click to advance stage status"><span class="stage-dot ${stage.status}"></span><span class="stage-title">${esc(stage.title)}</span><small>${esc(stage.status)}${stage.plannedDate ? ` · ${date(stage.plannedDate)}` : ''}${stage.estimatedCost ? ` · ${currency(stage.estimatedCost)}` : ''}</small></li>`).join('')}</ul>` : ''}
+    </div>
+    <div class="row-actions">${button('Convert to visit', 'convert-treatment-plan', 'arrow', 'link', `data-id="${attr(plan.id)}"`)}${button('Edit', 'open-treatment-plan', 'edit', 'link', `data-id="${attr(plan.id)}"`)}</div>
+  </div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('layers', 17)}<h2>Treatment plans</h2></div>${button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('layers', 'No treatment plans yet', 'Clinician-authored plans for this patient appear here.', button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+}
+
+async function renderPatientBilling(id, patient) {
+  const result = await q('list', { collection: 'invoices', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'date-desc' });
+  const rows = (result.rows || []).map((inv) => `<div class="record-row">
+    <div><strong>${esc(inv.invoiceNumber || '—')}</strong><small>${date(inv.date)} · ${currency(centsToMoney(inv.totalCents ?? inv.total))} · paid ${currency(centsToMoney(inv.paidCents ?? inv.paid))} · due ${currency(centsToMoney(inv.dueCents ?? inv.due))}</small></div>
+    <div class="row-actions">${statusBadge(inv.status)}${button('Print', 'print-invoice', 'printer', 'link', `data-id="${attr(inv.id)}"`)}${inv.status !== 'Cancelled' ? button('Record payment', 'open-payment', 'credit', 'link', `data-id="${attr(inv.id)}"`) : ''}${can('billing.void') ? button('Void', 'void-invoice', 'trash', 'link', `data-id="${attr(inv.id)}"`) : ''}</div>
+  </div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('receipt', 17)}<h2>Invoices</h2></div>${button('New invoice', 'open-invoice', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('receipt', 'No invoices yet', 'Billing for this patient appears here.', button('New invoice', 'open-invoice', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+}
+
+async function renderPatientPayments(id, patient) {
+  const result = await q('list', { collection: 'payments', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'date-desc' });
+  const rows = (result.rows || []).map((payment) => `<div class="record-row">
+    <div><strong>${esc(payment.receiptNumber || '—')} · ${money(payment)}</strong><small>${date(payment.date)} · ${esc(payment.method || '—')}${payment.refundedAmount ? ` · refunded ${currency(payment.refundedAmount)}` : ''}</small></div>
+    <div class="row-actions">${statusBadge(payment.status || 'Recorded')}${button('Print receipt', 'print-payment', 'printer', 'link', `data-id="${attr(payment.id)}"`)}${can('payments.refund') ? button('Refund', 'open-refund', 'undo', 'link', `data-id="${attr(payment.id)}"`) : ''}</div>
+  </div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('credit', 17)}<h2>Payments</h2></div>${button('Record payment', 'open-payment', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('credit', 'No payments yet', 'Payments for this patient appear here.', button('Record payment', 'open-payment', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+}
+
+async function renderPatientStatement(id, patient) {
+  const statement = await q('patientStatement', { patientId: id });
+  const entries = statement.rows || [];
+  const rows = entries.map((entry) => `<tr><td>${date(entry.date)}</td><td>${esc(entry.type)}</td><td>${esc(entry.reference)}</td><td class="${entry.debit > 0 ? 'text-danger' : 'muted'}">${entry.debit > 0 ? currency(centsToMoney(entry.debitCents ?? entry.debit)) : ''}</td><td class="${entry.credit > 0 ? 'text-success' : 'muted'}">${entry.credit > 0 ? currency(centsToMoney(entry.creditCents ?? entry.credit)) : ''}</td><td><strong>${currency(centsToMoney(entry.balanceCents ?? entry.balance))}</strong></td><td class="muted">${esc(entry.note || '')}</td></tr>`).join('');
+  return `<section class="card statement-card">
+    <div class="card-title"><div class="card-title-text">${icon('chart', 17)}<h2>Financial statement</h2></div><div class="statement-actions"><div class="mini-stat"><small>Total charges</small><strong>${currency(statement.billedCents)}</strong></div><div class="mini-stat"><small>Balance</small><strong class="${(statement.balanceCents || 0) > 0 ? 'text-warning' : ''}">${currency(statement.balanceCents)}</strong></div>${button('Print statement', 'print-patient-statement', 'printer', 'secondary', `data-id="${attr(id)}"`)}</div></div>
+    ${entries.length ? dataTable(['Date', 'Type', 'Reference', 'Debit', 'Credit', 'Balance', 'Note'], rows) : emptyState('chart', 'No financial activity', 'Invoices and payments for this patient build the running balance.')}
+  </section>`;
+}
+
+async function renderPatientAttachments(id, patient) {
+  const result = await q('list', { collection: 'attachments', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'recent' });
+  const rows = (result.rows || []).map((attachment) => `<div class="record-row">
+    <div class="person-cell"><span class="file-icon">${icon(attachment.type?.startsWith('image/') ? 'image' : 'file', 20)}</span><div><strong>${esc(attachment.name || 'Untitled')}</strong><small>${date(attachment.createdAt?.slice(0, 10))} · ${esc(attachment.category || attachment.type || '—')} · ${formatBytes(attachment.size || 0)}</small></div></div>
+    <div class="row-actions">${button('View', 'open-attachment', 'eye', 'link', `data-id="${attr(attachment.id)}"`)}${button('Download original', 'download-attachment', 'download', 'link', `data-id="${attr(attachment.id)}"`)}${can('attachments.delete') ? button('Remove', 'delete-attachment', 'trash', 'link', `data-id="${attr(attachment.id)}"`) : ''}</div>
+  </div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('paperclip', 17)}<h2>Attachments</h2></div>${button('Attach file', 'open-attachment-add', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('paperclip', 'No attachments yet', 'X-rays, PDFs and clinical documents attach to this patient. PDF active content is never embedded.')}
+  </section>`;
+}
+
+async function renderPatientReferrals(id, patient) {
+  const result = await q('list', { collection: 'referrals', page: 1, pageSize: 50, filters: { patientId: id }, sort: 'date-desc' });
+  const rows = (result.rows || []).map((referral) => `<div class="record-row"><div><strong>→ ${esc(referral.referralTo)}${referral.specialty ? ` (${esc(referral.specialty)})` : ''}</strong><small>${date(referral.date)} · ${esc(referral.reason || '')}${referral.response ? ` · response: ${esc(referral.response)}` : ''}</small></div><div class="row-actions">${statusBadge(referral.status || 'Sent')}${button('Edit', 'open-referral', 'edit', 'link', `data-id="${attr(referral.id)}"`)}</div></div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('send', 17)}<h2>Referrals</h2></div>${button('New referral', 'open-referral', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('send', 'No referrals yet', 'Outgoing referrals and their responses appear here.')}</section>`;
+}
+
+async function renderPatientFollowups(id, patient) {
+  const result = await q('list', { collection: 'followUpTasks', page: 1, pageSize: 50, filters: { patientId: id }, sort: 'due' });
+  const rows = (result.rows || []).map((task) => `<div class="record-row"><div><strong>${esc(task.title || 'Follow-up')}</strong><small>due ${date(task.dueDate)}${task.reason ? ` · ${esc(task.reason)}` : ''}</small></div><div class="row-actions">${statusBadge(task.status || 'Open')}${task.status !== 'Completed' ? button('Complete', 'complete-followup', 'check', 'link', `data-id="${attr(task.id)}"`) : ''}${button('Edit', 'open-followup', 'edit', 'link', `data-id="${attr(task.id)}"`)}</div></div>`).join('');
+  return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('flag', 17)}<h2>Follow-ups</h2></div>${button('Schedule follow-up', 'open-followup', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
+    ${rows || emptyState('flag', 'No follow-ups scheduled', 'Follow-up dates from visits or manual scheduling appear here.')}</section>`;
+}
+
+/* ----------------------------- appointments ---------------------------- */
 function appointmentViewDay(value) {
-  const items = active(state.appointments).filter((appointment) => appointment.date === value).sort((a, b) => `${a.time || ''}${a.id}`.localeCompare(`${b.time || ''}${b.id}`));
-  return `<div class="appointment-list-view">${items.length ? items.map((appointment) => appointmentRow(appointment)).join('') : emptyState('calendar', 'No appointments for this day', 'Book an appointment to keep the chair plan visible.', button('New appointment', 'open-appointment', 'plus', 'secondary'))}</div>`;
+  return `<div class="view-pane">${value.map(appointmentRow).join('') || emptyState('calendar', 'Nothing booked', 'No appointments on this day.', button('Book appointment', 'open-appointment', 'plus', 'secondary'))}</div>`;
 }
 function appointmentViewWeek(value) {
-  const selected = new Date(`${value}T00:00:00`);
-  const start = new Date(selected);
-  start.setDate(start.getDate() - start.getDay());
-  return `<div class="appointment-week-view">${Array.from({ length: 7 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); const iso = localDateKey(day); const items = active(state.appointments).filter((appointment) => appointment.date === iso).sort((a, b) => `${a.time || ''}${a.id}`.localeCompare(`${b.time || ''}${b.id}`)); return `<section class="appointment-week-day ${iso === today() ? 'is-today' : ''}"><div class="appointment-week-head"><strong>${new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(day)}</strong><span>${day.getDate()} ${new Intl.DateTimeFormat('en-US', { month: 'short' }).format(day)}</span></div>${items.length ? items.map((appointment) => `<button class="appointment-compact-row" data-action="edit-appointment" data-id="${appointment.id}"><strong>${time(appointment.time)}</strong><span>${esc(patientName(appointment.patientId))}</span>${statusBadge(appointment.status || 'Scheduled')}</button>`).join('') : '<small class="muted">No bookings</small>'}</section>`; }).join('')}</div>`;
+  const byDay = {};
+  value.forEach((a) => { (byDay[a.date] = byDay[a.date] || []).push(a); });
+  return `<div class="week-grid">${Object.keys(byDay).sort().map((day) => `<div class="week-day"><h3>${dateFull(day)}</h3>${byDay[day].sort((a, b) => a.time.localeCompare(b.time)).map(appointmentRow).join('')}</div>`).join('') || emptyState('calendar', 'No appointments this week', 'Pick a day or book a new appointment.', button('Book appointment', 'open-appointment', 'plus', 'secondary'))}</div>`;
 }
-function appointmentViewAgenda() {
-  const items = active(state.appointments).filter((appointment) => appointment.date >= today()).sort((a, b) => `${a.date}${a.time || ''}`.localeCompare(`${b.date}${b.time || ''}`)).slice(0, 50);
-  return `<div class="appointment-agenda-view">${items.length ? items.map((appointment) => `<button class="appointment-agenda-row" data-action="edit-appointment" data-id="${appointment.id}"><span class="date-tile"><strong>${new Date(`${appointment.date}T00:00:00`).getDate()}</strong><small>${new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${appointment.date}T00:00:00`))}</small></span><span class="appointment-agenda-copy"><strong>${esc(patientName(appointment.patientId))}</strong><small>${date(appointment.date)} · ${time(appointment.time)} · ${esc(appointment.reason || 'Appointment')}</small></span>${statusBadge(appointment.status || 'Scheduled')}</button>`).join('') : emptyState('calendar', 'No upcoming appointments', 'Your agenda will fill as appointments are booked.', button('Book appointment', 'open-appointment', 'plus', 'secondary'))}</div>`;
+function appointmentViewAgenda(value) {
+  return `<div class="agenda-list">${value.map((a) => `<div class="agenda-row" data-action="open-appointment-detail" data-id="${attr(a.id)}"><span class="agenda-date">${dateFull(a.date)}</span><span class="appt-time">${time(a.time)}</span><strong>${esc(patientName(a.patientId))}</strong><small>${esc(a.reason || '—')}</small>${statusBadge(a.status)}</div>`).join('') || emptyState('calendar', 'Upcoming agenda is empty', 'Book appointments to build the agenda.')}</div>`;
 }
-function renderAppointments() {
-  const monthAppointments = active(state.appointments).filter((a) => { const d = new Date(`${a.date}T00:00:00`); return d.getMonth() === ui.calendarMonth && d.getFullYear() === ui.calendarYear; });
-  const upcoming = active(state.appointments).filter((a) => a.date >= today()).sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)).slice(0, 12);
-  const view = ui.appointmentView || 'month';
-  const selectedDate = ui.appointmentDate || today();
-  const selectedDay = new Date(`${selectedDate}T00:00:00`);
-  const weekStart = new Date(selectedDay);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-  const viewTitle = view === 'month' ? monthLabel() : view === 'day' ? date(selectedDate, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : view === 'week' ? `${date(localDateKey(weekStart), { day: 'numeric', month: 'short' })} – ${date(localDateKey(new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6)), { day: 'numeric', month: 'short', year: 'numeric' })}` : 'Upcoming agenda';
-  const scheduleMarkup = view === 'month' ? calendarGrid(monthAppointments) : view === 'day' ? appointmentViewDay(selectedDate) : view === 'week' ? appointmentViewWeek(selectedDate) : appointmentViewAgenda();
-  return `<div class="page">${pageHeader('Appointments', 'Plan the day, protect chair time and keep patients informed.', button('New appointment', 'open-appointment', 'plus', 'primary'))}<div class="view-tabs appointment-view-tabs"><button class="${view === 'day' ? 'active' : ''}" data-action="set-appointment-view" data-view="day">Day</button><button class="${view === 'week' ? 'active' : ''}" data-action="set-appointment-view" data-view="week">Week</button><button class="${view === 'month' ? 'active' : ''}" data-action="set-appointment-view" data-view="month">Month</button><button class="${view === 'agenda' ? 'active' : ''}" data-action="set-appointment-view" data-view="agenda">Agenda</button><button data-action="navigate" data-page="queue">Today’s Queue</button></div><div class="calendar-layout"><section class="card calendar-card"><div class="calendar-toolbar">${view === 'agenda' ? '' : `<button class="icon-button bordered" data-action="calendar-prev" aria-label="Previous ${view}">${icon('chevron', 16, 'rotate-180')}</button>`}<h2>${viewTitle}</h2>${view === 'agenda' ? '' : `<button class="icon-button bordered" data-action="calendar-next" aria-label="Next ${view}">${icon('chevron', 16)}</button><button class="today-button" data-action="calendar-today">Today</button>`}</div>${scheduleMarkup}</section><section class="card upcoming-card">${cardTitle('clock', 'Upcoming appointments', button('View queue', 'navigate', 'arrow', 'link', 'data-page="queue"'))}<div class="upcoming-list">${upcoming.length ? upcoming.map((a) => `<div class="upcoming-row" data-action="edit-appointment" data-id="${a.id}"><div class="date-tile"><strong>${new Date(`${a.date}T00:00:00`).getDate()}</strong><small>${new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${a.date}T00:00:00`))}</small></div><div><strong>${esc(patientName(a.patientId))}</strong><small>${time(a.time)} · ${esc(a.reason || 'Appointment')}</small></div>${statusBadge(a.status || 'Scheduled')}</div>`).join('') : emptyState('calendar', 'No upcoming appointments', 'Book the next visit from here.', button('Book appointment', 'open-appointment', 'plus', 'secondary'))}</div></section></div><section class="card calendar-note"><div class="note-icon">${icon('shield', 19)}</div><div><strong>Scheduling guardrails are on</strong><p>Appointments keep their patient, duration, dentist and chair context. Double-booking is flagged for review before saving.</p></div><button class="text-button" data-action="navigate" data-page="settings">Configure${icon('arrow', 14)}</button></section></div>`;
-}
-function calendarGrid(appointments) {
-  const total = daysInMonth(ui.calendarMonth, ui.calendarYear);
-  const offset = startOffset(ui.calendarMonth, ui.calendarYear);
-  const cells = [];
-  for (let i = 0; i < offset; i += 1) cells.push('<div class="calendar-cell muted-cell"></div>');
-  for (let day = 1; day <= total; day += 1) {
-    const iso = `${ui.calendarYear}-${String(ui.calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const items = appointments.filter((a) => a.date === iso).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    cells.push(`<div class="calendar-cell ${iso === today() ? 'is-today' : ''}"><div class="calendar-day"><span>${day}</span>${items.length ? `<b>${items.length}</b>` : ''}</div><div class="calendar-events">${items.slice(0, 3).map((a) => `<button data-action="edit-appointment" data-id="${a.id}" class="calendar-event ${statusTone(a.status)}"><span>${time(a.time)}</span> ${esc(patientName(a.patientId))}</button>`).join('')}${items.length > 3 ? `<small class="more-events">+${items.length - 3} more</small>` : ''}</div></div>`);
-  }
-  while (cells.length % 7) cells.push('<div class="calendar-cell muted-cell"></div>');
-  return `<div class="calendar-weekdays">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${cells.join('')}</div>`;
-}
-
-function renderQueue() {
-  const queue = active(state.appointments).filter((a) => a.date === today()).sort((a, b) => (a.serial || '').localeCompare(b.serial || '') || (a.time || '').localeCompare(b.time || ''));
-  const activeQueue = queue.filter((a) => !['Completed', 'Cancelled', 'No Show'].includes(a.status));
-  return `<div class="page">${pageHeader('Today’s Queue', 'A calm, live view of arrivals and chair flow.', `${button('Print queue', 'print-queue', 'printer', 'secondary')}${button('Check in patient', 'open-appointment', 'plus', 'primary')}`)}<section class="queue-hero"><div class="queue-hero-copy"><span class="eyebrow">${date(today(), { weekday: 'long', day: 'numeric', month: 'long' })}</span><h2>${activeQueue.length ? `${activeQueue.length} patient${activeQueue.length === 1 ? '' : 's'} in motion` : 'Your queue is clear'}</h2><p>${activeQueue.length ? 'Use status changes to keep reception and the clinical team aligned.' : 'Appointments checked in today will appear in this workspace.'}</p></div><div class="queue-hero-ring"><strong>${queue.length}</strong><span>today</span></div></section><section class="card table-card queue-table-card">${queue.length ? dataTable(['Serial', 'Patient', 'Appointment', 'Reason', 'Dentist / chair', 'Wait', 'Status', ''], queue.map((a, index) => `<tr><td><span class="serial-number">${esc(a.serial || `${state.settings.serialPrefix}-${String(index + 1).padStart(3, '0')}`)}</span></td><td><div class="person-cell"><span class="avatar avatar-table">${initials(patientName(a.patientId))}</span><div><strong>${esc(patientName(a.patientId))}</strong><small>${esc(byId(state.patients, a.patientId)?.patientCode || 'Patient')}</small></div></div></td><td><strong>${time(a.time)}</strong><small class="cell-sub">${a.duration || 30} min</small></td><td>${esc(a.reason || '—')}</td><td>${esc(staffName(a.dentistId))}<small class="cell-sub">${esc(a.chair || 'Chair 1')}</small></td><td>${['Checked In', 'Waiting'].includes(a.status) && a.checkedInAt ? `<strong class="${minutesSince(a.checkedInAt) >= 20 ? 'text-warning' : ''}">${number(minutesSince(a.checkedInAt))} min</strong>` : '<span class="muted">—</span>'}</td><td><button class="status-select" data-action="cycle-queue-status" data-id="${a.id}">${statusBadge(a.status || 'Scheduled')}${icon('down', 13)}</button></td><td><button class="icon-button tiny" data-action="edit-appointment" data-id="${a.id}">${icon('more', 17)}</button></td></tr>`).join('')) : emptyState('clipboard', 'No appointments in today’s queue', 'Schedule a patient to start the day’s serial list.', button('New appointment', 'open-appointment', 'plus', 'primary'))}</section></div>`;
-}
-
-function renderClinical() {
-  const visits = active(state.visits).sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
-  const query = ui.search.trim().toLowerCase();
-  const visible = visits.filter((v) => !query || patientName(v.patientId).toLowerCase().includes(query) || String(v.diagnosis || '').toLowerCase().includes(query) || String(v.reason || '').toLowerCase().includes(query));
-  return `<div class="page">${pageHeader('Clinical records', 'Capture the professional record of every encounter.', button('Record visit', 'open-visit', 'plus', 'primary'))}<section class="clinical-intro"><div class="clinical-intro-icon">${icon('activity', 23)}</div><div><strong>Clinical input stays with the clinician</strong><p>Dentiva Pro records your notes, diagnoses, treatments and follow-ups. It does not independently diagnose or prescribe.</p></div><span class="soft-label">Record keeping</span></section><section class="card table-card"><div class="card-toolbar">${searchInput('Search visits by patient, reason or diagnosis')}<div class="table-actions">${button('Export CSV', 'export-visits', 'download', 'secondary')}</div></div>${visible.length ? dataTable(['Date', 'Patient', 'Reason', 'Diagnosis', 'Treatment performed', 'Follow-up', ''], visible.map((v) => `<tr class="clickable-row" data-action="open-patient-profile" data-id="${v.patientId}"><td>${date(v.date)}<small class="cell-sub">${v.time ? time(v.time) : ''}</small></td><td><div class="person-cell"><span class="avatar avatar-table">${initials(patientName(v.patientId))}</span><strong>${esc(patientName(v.patientId))}</strong></div></td><td>${esc(v.reason || v.chiefComplaint || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${esc(v.treatmentPerformed || '—')}</td><td>${v.followUpDate ? date(v.followUpDate) : '<span class="muted">—</span>'}</td><td><button class="icon-button tiny" data-action="edit-visit" data-id="${v.id}">${icon('edit', 16)}</button></td></tr>`).join('')) : emptyState('activity', query ? 'No visits match that search' : 'No clinical visits recorded', query ? 'Try another patient name or diagnosis.' : 'Record the first encounter to build a traceable clinical history.', button('Record visit', 'open-visit', 'plus', 'primary'))}</section></div>`;
-}
-function renderPrescriptions() {
-  const prescriptions = active(state.prescriptions).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  return `<div class="page">${pageHeader('Prescriptions', 'Create clear, printable medication instructions from recorded clinical input.', button('New prescription', 'open-prescription', 'plus', 'primary'))}<section class="clinical-intro"><div class="clinical-intro-icon purple-bg">${icon('file', 22)}</div><div><strong>Professional prescription record</strong><p>Each prescription keeps patient, prescriber, medicine, dosage and instructions together for a reliable paper trail.</p></div><span class="soft-label">Offline & printable</span></section><section class="card table-card">${prescriptions.length ? dataTable(['Prescription', 'Patient', 'Date', 'Medication', 'Instructions', ''], prescriptions.map((p) => `<tr><td><span class="code-label">${esc(p.prescriptionCode || 'RX')}</span></td><td><div class="person-cell"><span class="avatar avatar-table">${initials(patientName(p.patientId))}</span><strong>${esc(patientName(p.patientId))}</strong></div></td><td>${date(p.date)}</td><td><strong>${esc(p.medications?.map((m) => m.medicine).join(', ') || p.medicine || '—')}</strong><small class="cell-sub">${esc(p.medications?.[0]?.strength || p.strength || '')}</small></td><td>${esc(p.medications?.[0]?.instructions || p.instructions || '—')}</td><td><div class="row-actions">${button('Print', 'print-prescription', 'printer', 'link', `data-id="${p.id}"`)}<button class="icon-button tiny" data-action="edit-prescription" data-id="${p.id}">${icon('edit', 16)}</button></div></td></tr>`).join('')) : emptyState('file', 'No prescriptions yet', 'Create a prescription after recording a patient visit.', button('Create prescription', 'open-prescription', 'plus', 'primary'))}</section></div>`;
-}
-
-function renderDental() {
-  const selectedPatient = byId(state.patients, ui.dentalPatientId);
-  const records = selectedPatient ? state.dentalRecords.filter((r) => r.patientId === selectedPatient.id) : [];
-  const statusCounts = ['Healthy', 'Caries', 'Filled', 'Missing', 'Root Canal', 'Crown', 'Bridge', 'Implant', 'Fracture', 'Extracted'].map((status) => [status, records.filter((r) => r.status === status).length]);
-  const dentition = ui.dentition === 'primary' ? 'primary' : 'adult';
-  const upperTeeth = dentition === 'primary' ? [55, 54, 53, 52, 51, 61, 62, 63, 64, 65] : [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
-  const lowerTeeth = dentition === 'primary' ? [85, 84, 83, 82, 81, 71, 72, 73, 74, 75] : [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
-  const statuses = Object.fromEntries(records.map((r) => [r.tooth, r.status]));
-  return `<div class="page">${pageHeader('Dental chart', 'A structured tooth-level record for adult and primary dentition.', `${button('Print chart', 'print-dental-chart', 'printer', 'secondary')}${button('Save chart note', 'save-tooth', 'check', 'primary')}`)}<section class="card chart-selector"><div class="selector-label"><span class="eyebrow">PATIENT</span><strong>${selectedPatient ? esc(selectedPatient.fullName) : 'Select a patient to begin'}</strong></div><select data-change="dental-patient"><option value="">Choose patient...</option>${active(state.patients).sort((a, b) => a.fullName.localeCompare(b.fullName)).map((p) => `<option value="${p.id}" ${p.id === ui.dentalPatientId ? 'selected' : ''}>${esc(p.patientCode)} · ${esc(p.fullName)}</option>`).join('')}</select>${selectedPatient ? `<span class="chart-record-count">${records.length} tooth record${records.length === 1 ? '' : 's'}</span>` : ''}</section>${selectedPatient ? `<div class="dental-layout"><section class="card chart-card"><div class="chart-head"><div><h2>${dentition === 'primary' ? 'Primary dentition' : 'Adult dentition'}</h2><p>FDI notation · select a tooth to record its current status.</p></div><div class="dentition-toggle"><button class="${dentition === 'adult' ? 'active' : ''}" data-action="set-dentition" data-dentition="adult">Adult</button><button class="${dentition === 'primary' ? 'active' : ''}" data-action="set-dentition" data-dentition="primary">Primary</button></div></div><div class="dental-arch-label">UPPER ARCH</div><div class="teeth-row large-teeth ${dentition === 'primary' ? 'primary-teeth' : ''}">${upperTeeth.map((tooth) => toothButton(tooth, statuses[tooth])).join('')}</div><div class="arch-divider"><span>Midline</span></div><div class="teeth-row large-teeth lower-teeth ${dentition === 'primary' ? 'primary-teeth' : ''}">${lowerTeeth.map((tooth) => toothButton(tooth, statuses[tooth])).join('')}</div><div class="dental-arch-label lower-label">LOWER ARCH</div><div class="chart-legend"><span><i class="legend-dot healthy"></i>No recorded status</span><span><i class="legend-dot caries"></i>Caries</span><span><i class="legend-dot filled"></i>Filled</span><span><i class="legend-dot missing"></i>Missing</span><span><i class="legend-dot treatment"></i>Treatment recorded</span></div></section><aside class="card tooth-detail-card">${ui.dentalTooth ? renderToothDetail(selectedPatient, ui.dentalTooth, statuses[ui.dentalTooth]) : `<div class="tooth-placeholder">${icon('tooth', 32)}<h3>Select a tooth</h3><p>Choose a tooth from the chart to view or record its status and note.</p></div>`}</aside></div><section class="card chart-summary">${cardTitle('layers', 'Chart summary')}<div class="status-counts">${statusCounts.filter(([, count]) => count > 0).map(([label, count]) => `<div><strong>${count}</strong><span>${esc(label)}</span></div>`).join('') || '<p class="muted">No tooth statuses recorded yet. The chart starts clean by design.</p>'}</div></section>` : `<section class="card large-empty">${emptyState('tooth', 'Choose a patient to open the chart', 'Dental chart entries are always attached to a patient record. Add a patient first if the directory is empty.', state.patients.length ? '' : button('Add patient', 'open-patient', 'plus', 'primary'))}</section>`}</div>`;
-}
-function renderToothDetail(patient, tooth, status) {
-  const record = state.dentalRecords.find((r) => r.patientId === patient.id && String(r.tooth) === String(tooth));
-  return `<div class="tooth-detail-head"><span class="tooth-number">${tooth}</span><div><span class="eyebrow">TOOTH RECORD</span><h2>Tooth ${tooth}</h2></div><button class="icon-button" data-action="close-tooth" aria-label="Close tooth panel">${icon('close', 16)}</button></div><p class="muted">${esc(patient.fullName)} · Last updated ${record ? date(record.updatedAt?.slice(0, 10)) : 'not recorded'}</p><label class="field-label">Status<select data-change="tooth-status"><option value="">No recorded status</option>${['Healthy', 'Caries', 'Filled', 'Missing', 'Extracted', 'Root Canal', 'Crown', 'Bridge', 'Implant', 'Fracture', 'Other'].map((option) => `<option ${status === option ? 'selected' : ''}>${option}</option>`).join('')}</select></label><label class="field-label">Clinical note<textarea rows="5" data-input="tooth-note" placeholder="Record a concise note for this tooth...">${attr(record?.note || '')}</textarea></label><div class="tooth-detail-actions">${button('Save tooth record', 'save-tooth', 'check', 'primary')} ${record ? button('Remove record', 'remove-tooth', 'trash', 'link') : ''}</div>`;
-}
-
-function renderBilling() {
-  const invoices = active(state.invoices).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const total = sum(invoices, (i) => i.total);
-  const collected = sum(active(state.payments), paymentAmount);
-  const due = sum(invoices, (invoice) => invoicePaymentStatus(invoice).due);
-  return `<div class="page">${pageHeader('Billing', 'Invoices, estimates and balances with a clear source of truth.', `${button('Print statement', 'print-billing', 'printer', 'secondary')}${button('New invoice', 'open-invoice', 'plus', 'primary')}`)}<div class="finance-summary"><div><span>Total billed</span><strong>${currency(total)}</strong><small>${invoices.length} invoice${invoices.length === 1 ? '' : 's'}</small></div><div><span>Collected</span><strong class="text-success">${currency(collected)}</strong><small>Valid recorded payments</small></div><div><span>Outstanding</span><strong class="text-warning">${currency(due)}</strong><small>Requires follow-up</small></div><div><span>Paid rate</span><strong>${total ? Math.round((collected / total) * 100) : 0}%</strong><small>Collected ÷ billed</small></div></div><section class="card table-card">${invoices.length ? dataTable(['Invoice', 'Patient', 'Date', 'Items', 'Total', 'Due', 'Status', ''], invoices.map((i) => { const paymentState = invoicePaymentStatus(i); return `<tr><td><span class="code-label">${esc(i.invoiceNumber)}</span></td><td><div class="person-cell"><span class="avatar avatar-table">${initials(patientName(i.patientId))}</span><strong>${esc(patientName(i.patientId))}</strong></div></td><td>${date(i.date)}</td><td>${number(i.items?.length || 0)} item${i.items?.length === 1 ? '' : 's'}</td><td><strong>${currency(i.total)}</strong></td><td class="${paymentState.due > 0 ? 'text-warning' : ''}">${currency(paymentState.due)}</td><td>${statusBadge(paymentState.status)}</td><td><div class="row-actions">${button('Print', 'print-invoice', 'printer', 'link', `data-id="${i.id}"`)}<button class="icon-button tiny" data-action="open-payment" data-invoice-id="${i.id}">${icon('credit', 16)}</button></div></td></tr>`; }).join('')) : emptyState('receipt', 'No invoices created', 'Create an invoice after a visit or treatment plan. Payments will be linked to it.', button('New invoice', 'open-invoice', 'plus', 'primary'))}</section><section class="card financial-note"><span>${icon('shield', 18)}</span><p><strong>Financial integrity</strong> Totals are calculated from invoice line items, discounts, configured taxes and valid payments. Historical payments should be reversed with a new adjustment rather than silently edited.</p></section></div>`;
-}
-function renderPayments() {
-  const payments = active(state.payments).sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`));
-  return `<div class="page">${pageHeader('Payments', 'A traceable register of every collection and receipt.', button('Record payment', 'open-payment', 'plus', 'primary'))}<section class="payment-method-strip">${paymentMethods().map((method) => `<div><span class="payment-method-icon">${icon(method === 'Cash' ? 'dollar' : method === 'Card' ? 'credit' : 'layers', 17)}</span><div><strong>${currency(sum(payments.filter((p) => p.method === method), paymentAmount))}</strong><small>${method}</small></div></div>`).join('')}</section><section class="card table-card">${payments.length ? dataTable(['Receipt', 'Date', 'Patient', 'Invoice', 'Method', 'Reference', 'Amount', 'Status', ''], payments.map((p) => `<tr><td><span class="code-label">${esc(p.receiptNumber || 'Receipt')}</span></td><td>${date(p.date)}</td><td><div class="person-cell"><span class="avatar avatar-table">${initials(patientName(p.patientId))}</span><strong>${esc(patientName(p.patientId))}</strong></div></td><td>${esc(byId(state.invoices, p.invoiceId)?.invoiceNumber || 'On account')}</td><td>${esc(p.method || '—')}</td><td>${esc(p.reference || p.transactionId || '—')}</td><td><strong>${currency(paymentAmount(p))}</strong>${paymentRefundedAmount(p) ? `<small class="cell-sub">Refunded ${currency(paymentRefundedAmount(p))}</small>` : ''}</td><td>${statusBadge(p.status || 'Recorded')}</td><td><div class="row-actions">${button('Print', 'print-payment', 'printer', 'link', `data-id="${p.id}"`)}${paymentAmount(p) > 0 ? button('Refund', 'refund-payment', 'refresh', 'link', `data-id="${p.id}"`) : ''}</div></td></tr>`).join('')) : emptyState('credit', 'No payments recorded', 'Record cash, bank, card or mobile financial service payments here.', button('Record payment', 'open-payment', 'plus', 'primary'))}</section></div>`;
-}
-
-function renderInventory() {
-  const items = active(state.inventory).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  const low = items.filter((item) => Number(item.currentStock) <= Number(item.minimumStock || state.settings.lowStockThreshold));
-  const expired = items.filter((item) => item.expiryDate && item.expiryDate < today());
-  return `<div class="page">${pageHeader('Inventory', 'Keep materials, medicines and consumables accountable.', `${button('Add stock item', 'open-stock', 'plus', 'secondary')}${button('Adjust stock', 'open-stock-adjustment', 'refresh', 'primary')}${button('Export CSV', 'export-inventory', 'download', 'secondary')}`)}<div class="inventory-alerts"><div class="inventory-alert ${low.length ? 'has-alert' : ''}"><span>${icon('box', 18)}</span><div><strong>${low.length ? `${low.length} low-stock item${low.length > 1 ? 's' : ''}` : 'Stock levels look good'}</strong><small>${low.length ? 'Review reorder levels below.' : 'No reorder action is needed.'}</small></div></div><div class="inventory-alert ${expired.length ? 'has-alert danger-alert' : ''}"><span>${icon('clock', 18)}</span><div><strong>${expired.length ? `${expired.length} expired item${expired.length > 1 ? 's' : ''}` : 'No expired stock'}</strong><small>${expired.length ? 'Quarantine and record a movement.' : 'Expiry dates are within range.'}</small></div></div></div><section class="card table-card">${items.length ? dataTable(['Item', 'Category', 'Supplier', 'Current stock', 'Reorder at', 'Expiry', 'Batch / lot', 'Status', ''], items.map((item) => { const alert = Number(item.currentStock) <= Number(item.minimumStock || state.settings.lowStockThreshold); const expiredItem = item.expiryDate && item.expiryDate < today(); return `<tr><td><div class="item-cell"><span class="item-icon">${icon('box', 16)}</span><div><strong>${esc(item.name)}</strong><small>${esc(item.itemCode || '')} · ${esc(item.unit || 'unit')}</small></div></div></td><td>${esc(item.category || 'Uncategorised')}</td><td>${esc(byId(state.suppliers, item.supplierId)?.name || '—')}</td><td><strong class="${alert ? 'text-warning' : ''}">${number(item.currentStock)}</strong> ${esc(item.unit || '')}</td><td>${number(item.minimumStock || 0)}</td><td class="${expiredItem ? 'text-danger' : ''}">${item.expiryDate ? date(item.expiryDate) : '—'}</td><td>${esc(item.batch || '—')}</td><td>${statusBadge(expiredItem ? 'Expired' : alert ? 'Low stock' : 'In stock')}</td><td><div class="row-actions"><button class="icon-button tiny" data-action="edit-stock" data-id="${item.id}">${icon('edit', 16)}</button><button class="icon-button tiny" data-action="open-stock-adjustment" data-id="${item.id}">${icon('refresh', 16)}</button></div></td></tr>`; }).join('')) : emptyState('box', 'Inventory is empty', 'Add your first medicine, material or consumable to start tracking stock.', button('Add stock item', 'open-stock', 'plus', 'primary'))}</section></div>`;
-}
-function supplierStats(supplier) {
-  const itemIds = new Set(active(state.inventory).filter((item) => item.supplierId === supplier.id).map((item) => item.id));
-  const movements = active(state.stockMovements || []).filter((movement) => itemIds.has(movement.itemId) && movement.type === 'Purchase');
-  return { items: itemIds.size, purchases: movements.length, value: sum(movements, (movement) => Math.abs(numeric(movement.quantity)) * numeric(movement.unitPrice)) };
-}
-function renderSuppliers() {
-  const suppliers = active(state.suppliers).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  return `<div class="page">${pageHeader('Suppliers', 'Keep purchasing contacts and stock relationships in one place.', button('Add supplier', 'open-supplier', 'plus', 'primary'))}<section class="card supplier-grid">${suppliers.length ? suppliers.map((s) => `<article class="supplier-card"><div class="supplier-avatar">${initials(s.name)}</div><div class="supplier-card-head"><div><h3>${esc(s.name)}</h3><span>${esc(s.contactPerson || 'Contact not recorded')}</span></div><button class="icon-button tiny" data-action="edit-supplier" data-id="${s.id}">${icon('more', 17)}</button></div><div class="supplier-details">${s.phone ? `<span>${icon('phone', 13)}${esc(s.phone)}</span>` : ''}${s.email ? `<span>${icon('mail', 13)}${esc(s.email)}</span>` : ''}${s.address ? `<span>${icon('map', 13)}${esc(s.address)}</span>` : ''}</div><div class="supplier-footer"><span>${number(supplierStats(s).items)} items · ${number(supplierStats(s).purchases)} purchases${supplierStats(s).value ? ` · ${currency(supplierStats(s).value)}` : ''}</span>${button('Edit supplier', 'edit-supplier', 'edit', 'link', `data-id="${s.id}"`)}</div></article>`).join('') : `<div class="supplier-empty">${emptyState('truck', 'No suppliers added', 'Store purchasing contacts here so inventory remains traceable.', button('Add supplier', 'open-supplier', 'plus', 'primary'))}</div>`}</section></div>`;
-}
-function renderStaff() {
-  const staff = active(state.staff).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  return `<div class="page">${pageHeader('Staff', 'A role-aware directory for dentists, assistants and the practice team.', button('Add staff member', 'open-staff', 'plus', 'primary'))}<section class="staff-toolbar card"><div><span class="eyebrow">ACCESS ARCHITECTURE</span><strong>Permissions stay configurable</strong><p>Keep clinical, reception and administrative responsibilities clear as your practice grows.</p></div><div class="role-pills"><span>Dentist</span><span>Receptionist</span><span>Manager</span><span>Assistant</span></div></section><section class="card table-card">${staff.length ? dataTable(['Staff ID', 'Team member', 'Role', 'Phone', 'Joining date', 'Status', ''], staff.map((person) => `<tr><td><span class="code-label">${esc(person.staffCode || '—')}</span></td><td><div class="person-cell"><span class="avatar avatar-table">${initials(person.name)}</span><div><strong>${esc(person.name)}</strong><small>${esc(person.email || 'Email not recorded')}</small></div></div></td><td>${badge(person.role || 'Other', 'neutral')}</td><td>${esc(person.phone || '—')}</td><td>${date(person.joiningDate)}</td><td>${statusBadge(person.status || 'Active')}</td><td><button class="icon-button tiny" data-action="edit-staff" data-id="${person.id}">${icon('edit', 16)}</button></td></tr>`).join('')) : emptyState('briefcase', 'No staff members yet', 'Add the people who help your practice run safely and consistently.', button('Add staff member', 'open-staff', 'plus', 'primary'))}</section></div>`;
-}
-
-function renderTreatments() {
-  const treatments = active(state.treatments).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  return `<div class="page">${pageHeader('Treatment catalog', 'Keep procedure names, prices and chair time consistent across your practice.', button('Add treatment', 'open-treatment', 'plus', 'primary'))}<section class="clinical-intro"><div class="clinical-intro-icon purple-bg">${icon('layers', 22)}</div><div><strong>Your catalog, your clinical language</strong><p>Customize the treatments you offer. Prices remain editable on each invoice and are never silently applied to historical records.</p></div><span class="soft-label">Configurable</span></section><section class="card table-card">${treatments.length ? dataTable(['Code', 'Treatment', 'Category', 'Default price', 'Duration', 'Tooth required', 'Status', ''], treatments.map((t) => `<tr><td><span class="code-label">${esc(t.code || '—')}</span></td><td><strong>${esc(t.name)}</strong><small class="cell-sub">${esc(t.description || '')}</small></td><td>${esc(t.category || 'General')}</td><td>${currency(t.defaultPrice)}</td><td>${number(t.duration || 0)} min</td><td>${t.toothRequired ? 'Yes' : 'No'}</td><td>${statusBadge(t.active === false ? 'Inactive' : 'Active')}</td><td><button class="icon-button tiny" data-action="edit-treatment" data-id="${t.id}">${icon('edit', 16)}</button></td></tr>`).join('')) : emptyState('layers', 'Treatment catalog is empty', 'Add the procedures your practice provides. This list stays separate from patient-specific treatment history.', button('Add treatment', 'open-treatment', 'plus', 'primary'))}</section></div>`;
-}
-function renderAccounting() {
-  const expenses = active(state.expenses).sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`));
-  const collected = sum(active(state.payments), paymentAmount);
-  const billed = sum(active(state.invoices), (i) => i.total);
-  const costs = sum(expenses, (e) => e.amount);
-  const categories = [...new Set(expenses.map((e) => e.category).filter(Boolean))];
-  return `<div class="page">${pageHeader('Accounting & finance', 'A dedicated financial workspace—separate from the clinical dashboard.', `${button('Add expense', 'open-expense', 'plus', 'secondary')}${button('New invoice', 'open-invoice', 'plus', 'primary')}`)}<div class="finance-summary accounting-summary"><div><span>Collected</span><strong class="text-success">${currency(collected)}</strong><small>Valid patient payments</small></div><div><span>Invoiced</span><strong>${currency(billed)}</strong><small>Active invoice totals</small></div><div><span>Operating expenses</span><strong class="text-warning">${currency(costs)}</strong><small>${number(expenses.length)} expense entries</small></div><div><span>Net operating result</span><strong class="${collected - costs >= 0 ? 'text-success' : 'text-danger'}">${currency(collected - costs)}</strong><small>Collected minus expenses</small></div></div><section class="accounting-grid"><section class="card accounting-breakdown">${cardTitle('chart', 'Expense categories')} ${categories.length ? `<div class="category-bars">${categories.map((category) => { const amount = sum(expenses.filter((e) => e.category === category), (e) => e.amount); const width = costs ? Math.max(4, Math.round((amount / costs) * 100)) : 0; return `<div class="category-bar"><div><span>${esc(category)}</span><strong>${currency(amount)}</strong></div><div class="bar-track"><i style="width:${width}%"></i></div></div>`; }).join('')}</div>` : emptyState('chart', 'No expenses recorded', 'Add clinic operating costs to see a transparent breakdown.', button('Add expense', 'open-expense', 'plus', 'secondary'))}</section><section class="card accounting-shortcuts">${cardTitle('receipt', 'Finance shortcuts')}<div class="finance-links"><button data-action="navigate" data-page="billing">${icon('receipt', 17)}<span><strong>Billing & invoices</strong><small>View totals and outstanding</small></span>${icon('arrow', 14)}</button><button data-action="navigate" data-page="payments">${icon('credit', 17)}<span><strong>Payments</strong><small>Trace collections and receipts</small></span>${icon('arrow', 14)}</button><button data-action="navigate" data-page="reports">${icon('chart', 17)}<span><strong>Financial reports</strong><small>Revenue, expenses and net result</small></span>${icon('arrow', 14)}</button></div></section></section><section class="card table-card">${expenses.length ? dataTable(['Date', 'Description', 'Category', 'Method', 'Reference', 'Amount', ''], expenses.map((e) => `<tr><td>${date(e.date)}</td><td><strong>${esc(e.description)}</strong><small class="cell-sub">${esc(e.notes || '')}</small></td><td>${esc(e.category || 'Other')}</td><td>${esc(e.method || '—')}</td><td>${esc(e.reference || '—')}</td><td><strong>${currency(e.amount)}</strong></td><td><button class="icon-button tiny" data-action="print-expense" data-id="${e.id}">${icon('printer', 16)}</button></td></tr>`).join('')) : emptyState('dollar', 'No expenses recorded', 'Record rent, supplies, salaries and other operating costs here.', button('Add expense', 'open-expense', 'plus', 'primary'))}</section></div>`;
-}
-
-function renderReports() {
-  const report = buildReport(ui.reportType, ui.reportsRange);
-  const reportOptions = [['revenue', 'Revenue & collections'], ['patients', 'Patient register'], ['visits', 'Visit activity'], ['appointments', 'Appointments'], ['outstanding', 'Outstanding balances'], ['inventory', 'Inventory status'], ['expenses', 'Expenses']];
-  return `<div class="page">${pageHeader('Reports', 'Accurate operational and financial views built from your records.', `${button('Print report', 'print-report', 'printer', 'secondary')}${button('Export PDF', 'export-report-pdf', 'file', 'secondary')}${button('Export CSV', 'export-report', 'download', 'primary')}`)}<section class="card report-controls"><label><span>Report</span><select data-change="report-type">${reportOptions.map(([id, label]) => `<option value="${id}" ${ui.reportType === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Date range</span><select data-change="report-range"><option value="day" ${ui.reportsRange === 'day' ? 'selected' : ''}>Today</option><option value="7d" ${ui.reportsRange === '7d' ? 'selected' : ''}>Last 7 days</option><option value="month" ${ui.reportsRange === 'month' ? 'selected' : ''}>This month</option><option value="quarter" ${ui.reportsRange === 'quarter' ? 'selected' : ''}>Last 3 months</option><option value="6m" ${ui.reportsRange === '6m' ? 'selected' : ''}>Last 6 months</option><option value="year" ${ui.reportsRange === 'year' ? 'selected' : ''}>This year</option><option value="custom" ${ui.reportsRange === 'custom' ? 'selected' : ''}>Custom period</option><option value="all" ${ui.reportsRange === 'all' ? 'selected' : ''}>All records</option></select></label>${ui.reportsRange === 'custom' ? `<label><span>From</span><input type="date" value="${attr(ui.reportFrom)}" data-change="report-from"></label><label><span>To</span><input type="date" value="${attr(ui.reportTo)}" data-change="report-to"></label>` : ''}<div class="report-date-note">${icon('clock', 15)} ${report.from ? `${date(report.from)} — ${date(report.to)}` : 'All available records'}</div></section><section class="report-kpi-grid">${report.kpis.map((kpi) => `<div class="report-kpi"><span>${icon(kpi.icon, 17)}${esc(kpi.label)}</span><strong>${esc(kpi.value)}</strong><small>${esc(kpi.note)}</small></div>`).join('')}</section><section class="report-grid"><div class="card report-main">${cardTitle('chart', report.title, badge(report.from ? `${date(report.from, { month: 'short', day: 'numeric' })} – ${date(report.to, { month: 'short', day: 'numeric' })}` : 'All time', 'neutral'))}${report.body}</div><div class="card report-side">${cardTitle('activity', 'Report notes')}<ul class="report-notes"><li>Amounts use the same invoice and payment calculations as Billing.</li><li>Clinical reports are record-keeping tools, not medical advice.</li><li>Exported CSV files use UTF-8 encoding for Bengali compatibility.</li></ul>${button('Open data management', 'navigate', 'arrow', 'link', 'data-page="backup"')}</div></section></div>`;
-}
-function dateRange(range) {
-  const to = range === 'custom' && ui.reportTo ? ui.reportTo : today();
-  const end = new Date(`${to}T00:00:00`); let start = null;
-  if (range === 'day') start = end;
-  if (range === '7d') start = new Date(end.getTime() - 6 * 86400000);
-  if (range === 'month') start = new Date(end.getFullYear(), end.getMonth(), 1);
-  if (range === 'quarter') start = new Date(end.getFullYear(), end.getMonth() - 2, 1);
-  if (range === '6m') start = new Date(end.getFullYear(), end.getMonth() - 5, 1);
-  if (range === 'year') start = new Date(end.getFullYear(), 0, 1);
-  if (range === 'custom' && ui.reportFrom) start = new Date(`${ui.reportFrom}T00:00:00`);
-  const from = start ? start.toISOString().slice(0, 10) : null;
-  return { from, to, invalid: range === 'custom' && (!from || to < from) };
-}
-
-function inRange(value, range) { if (!value || range.from === null) return true; return value >= range.from && value <= range.to; }
-function buildReport(type, rangeKey) {
-  const range = dateRange(rangeKey);
-  const payments = active(state.payments).filter((p) => inRange(p.date, range));
-  const invoices = active(state.invoices).filter((i) => inRange(i.date, range));
-  const visits = active(state.visits).filter((v) => inRange(v.date, range));
-  const appointments = active(state.appointments).filter((a) => inRange(a.date, range));
-  const expenses = active(state.expenses).filter((e) => inRange(e.date, range));
-  const base = { from: range.from, to: range.to, kpis: [], title: '', body: '' };
-  if (type === 'patients') {
-    const patients = active(state.patients).filter((p) => inRange(p.registrationDate, range));
-    base.title = 'Patient register'; base.kpis = [{ label: 'Patients in range', value: number(patients.length), note: 'New registrations', icon: 'users' }, { label: 'Total directory', value: number(active(state.patients).length), note: 'All active patients', icon: 'book' }, { label: 'With phone', value: number(patients.filter((p) => p.phone).length), note: 'Contact completeness', icon: 'phone' }, { label: 'Upcoming visit', value: number(active(state.patients).filter((p) => p.nextVisit && p.nextVisit >= today()).length), note: 'Future appointments', icon: 'calendar' }]; base.body = reportTable(['Patient code', 'Patient', 'Registration', 'Phone', 'Status'], patients.map((p) => [p.patientCode, p.fullName, date(p.registrationDate), p.phone || '—', p.status || 'Active']));
-  } else if (type === 'visits') {
-    base.title = 'Visit activity'; base.kpis = [{ label: 'Visits', value: number(visits.length), note: 'Recorded encounters', icon: 'activity' }, { label: 'Patients seen', value: number(new Set(visits.map((v) => v.patientId)).size), note: 'Unique patients', icon: 'users' }, { label: 'With follow-up', value: number(visits.filter((v) => v.followUpDate).length), note: 'Continuity of care', icon: 'flag' }, { label: 'Treatments noted', value: number(visits.filter((v) => v.treatmentPerformed).length), note: 'Treatment documentation', icon: 'tooth' }]; base.body = reportTable(['Date', 'Patient', 'Reason', 'Diagnosis', 'Follow-up'], visits.map((v) => [date(v.date), patientName(v.patientId), v.reason || '—', v.diagnosis || '—', v.followUpDate ? date(v.followUpDate) : '—']));
-  } else if (type === 'appointments') {
-    base.title = 'Appointment activity'; base.kpis = [{ label: 'Appointments', value: number(appointments.length), note: 'In selected period', icon: 'calendar' }, { label: 'Completed', value: number(appointments.filter((a) => a.status === 'Completed').length), note: 'Completed visits', icon: 'check' }, { label: 'No-shows', value: number(appointments.filter((a) => a.status === 'No Show').length), note: 'Needs review', icon: 'warning' }, { label: 'Completion rate', value: `${appointments.length ? Math.round((appointments.filter((a) => a.status === 'Completed').length / appointments.length) * 100) : 0}%`, note: 'Completed ÷ scheduled', icon: 'chart' }]; base.body = reportTable(['Date', 'Time', 'Patient', 'Reason', 'Status'], appointments.map((a) => [date(a.date), time(a.time), patientName(a.patientId), a.reason || '—', a.status || 'Scheduled']));
-  } else if (type === 'outstanding') {
-    const dueInvoices = invoices.map((i) => ({ ...i, ...invoicePaymentStatus(i) })).filter((i) => Number(i.due) > 0); const due = sum(dueInvoices, (i) => i.due); base.title = 'Outstanding balances'; base.kpis = [{ label: 'Outstanding', value: currency(due), note: 'Open invoice balance', icon: 'credit' }, { label: 'Open invoices', value: number(dueInvoices.length), note: 'Require collection', icon: 'receipt' }, { label: 'Partially paid', value: number(dueInvoices.filter((i) => i.paid > 0).length), note: 'Partially collected', icon: 'activity' }, { label: 'Unpaid', value: number(dueInvoices.filter((i) => !i.paid).length), note: 'No payment recorded', icon: 'warning' }]; base.body = reportTable(['Invoice', 'Patient', 'Date', 'Total', 'Paid', 'Due'], dueInvoices.map((i) => [i.invoiceNumber, patientName(i.patientId), date(i.date), currency(i.total), currency(i.paid), currency(i.due)]));
-  } else if (type === 'inventory') {
-    const items = active(state.inventory); const low = items.filter((i) => Number(i.currentStock) <= Number(i.minimumStock || state.settings.lowStockThreshold)); base.title = 'Inventory status'; base.kpis = [{ label: 'Items tracked', value: number(items.length), note: 'Active stock items', icon: 'box' }, { label: 'Low stock', value: number(low.length), note: 'At or below reorder', icon: 'warning' }, { label: 'Expired', value: number(items.filter((i) => i.expiryDate && i.expiryDate < today()).length), note: 'Requires action', icon: 'clock' }, { label: 'Units on hand', value: number(sum(items, (i) => i.currentStock)), note: 'Across all units', icon: 'layers' }]; base.body = reportTable(['Item', 'Category', 'Current stock', 'Reorder at', 'Expiry', 'Status'], items.map((i) => [i.name, i.category || '—', `${i.currentStock} ${i.unit || ''}`, i.minimumStock || 0, i.expiryDate ? date(i.expiryDate) : '—', Number(i.currentStock) <= Number(i.minimumStock || state.settings.lowStockThreshold) ? 'Low stock' : 'In stock']));
-  } else if (type === 'expenses') {
-    const total = sum(expenses, (e) => e.amount); base.title = 'Expense report'; base.kpis = [{ label: 'Expenses', value: currency(total), note: 'Recorded operating costs', icon: 'dollar' }, { label: 'Transactions', value: number(expenses.length), note: 'Expense entries', icon: 'receipt' }, { label: 'Categories', value: number(new Set(expenses.map((e) => e.category)).size), note: 'Categories used', icon: 'layers' }, { label: 'Average', value: currency(expenses.length ? total / expenses.length : 0), note: 'Per transaction', icon: 'chart' }]; base.body = reportTable(['Date', 'Category', 'Description', 'Method', 'Amount'], expenses.map((e) => [date(e.date), e.category || 'Other', e.description || '—', e.method || '—', currency(e.amount)]));
+async function renderAppointments() {
+  let data;
+  if (ui.apptView === 'day') {
+    const day = await q('appointmentDay', { date: ui.calendarDate });
+    data = day.appointments || [];
   } else {
-    const collected = sum(payments, paymentAmount); const billed = sum(invoices, (i) => i.total); const expenseTotal = sum(expenses, (e) => e.amount); base.title = 'Revenue & collections'; base.kpis = [{ label: 'Collected', value: currency(collected), note: 'Valid payments', icon: 'credit' }, { label: 'Billed', value: currency(billed), note: 'Invoice totals', icon: 'receipt' }, { label: 'Expenses', value: currency(expenseTotal), note: 'Operating expenses', icon: 'dollar' }, { label: 'Net operating', value: currency(collected - expenseTotal), note: 'Collected minus expenses', icon: 'chart' }]; base.body = reportTable(['Date', 'Patient', 'Invoice', 'Method', 'Amount'], payments.map((p) => [date(p.date), patientName(p.patientId), byId(state.invoices, p.invoiceId)?.invoiceNumber || 'On account', p.method || '—', currency(paymentAmount(p))]));
+    const from = ui.calendarDate;
+    const to = ui.apptView === 'week' ? shiftDate(ui.calendarDate, 6) : shiftDate(ui.calendarDate, 30);
+    const result = await q('appointmentsBetween', { from, to, query: listState.appointments.query });
+    data = result.rows || [];
   }
-  return base;
+  const viewControls = `<div class="view-switch">${[['day', 'Day'], ['week', 'Week'], ['agenda', 'Agenda']].map(([key, label]) => `<button class="btn ${ui.apptView === key ? 'btn-primary' : 'btn-secondary'}" data-action="set-appt-view" data-view="${key}">${esc(localized(label))}</button>`).join('')}</div>`;
+  const nav = ui.apptView === 'day'
+    ? `<div class="cal-nav"><button class="icon-button" data-action="cal-step" data-step="-1" aria-label="Previous day">${icon('left', 16)}</button><strong>${dateFull(ui.calendarDate)}</strong><button class="icon-button" data-action="cal-step" data-step="1" aria-label="Next day">${icon('right', 16)}</button></div>`
+    : `<div class="cal-nav"><button class="icon-button" data-action="cal-step" data-step="${ui.apptView === 'week' ? -7 : -30}" aria-label="Previous">${icon('left', 16)}</button><strong>${date(ui.calendarDate)} → ${date(shiftDate(ui.calendarDate, ui.apptView === 'week' ? 6 : 29))}</strong><button class="icon-button" data-action="cal-step" data-step="${ui.apptView === 'week' ? 7 : 30}" aria-label="Next">${icon('right', 16)}</button></div>`;
+  return `<div class="page">
+    ${pageHeader('Appointments', 'Schedule, reschedule and track every visit.', `${viewControls}${button('Print queue', 'print-queue', 'printer', 'secondary')}${button('Book appointment', 'open-appointment', 'plus', 'primary')}`)}
+    ${nav}
+    ${ui.apptView === 'day' ? appointmentViewDay(data) : ui.apptView === 'week' ? appointmentViewWeek(data) : appointmentViewAgenda(data)}
+  </div>`;
 }
-function reportTable(headers, rows) { return rows.length ? `<div class="report-table-wrap">${dataTable(headers, rows.map((row) => `<tr>${row.map((value) => `<td>${esc(value)}</td>`).join('')}</tr>`).join(''))}</div>` : emptyState('chart', 'No records in this range', 'Change the date range or create records to populate this report.'); }
-
-function renderAnalytics() {
-  const snapshot = analyticsSnapshot(state, ui.analyticsRange || 'month', new Date(), ui.analyticsFrom, ui.analyticsTo);
-  const methods = snapshot.byMethod;
-  const maxMethod = Math.max(1, ...methods.map((entry) => entry.value));
-  const recentMonths = Array.from({ length: 6 }, (_, index) => {
-    const point = new Date();
-    point.setDate(1);
-    point.setMonth(point.getMonth() - (5 - index));
-    const key = point.toISOString().slice(0, 7);
-    const revenue = active(state.payments).filter((record) => record.date?.startsWith(key)).reduce((total, record) => total + paymentAmount(record), 0);
-    const visits = active(state.visits).filter((record) => record.date?.startsWith(key)).length;
-    return { label: point.toLocaleDateString(state.settings.language === 'Bengali' ? 'bn-BD' : 'en-US', { month: 'short' }), revenue, visits };
-  });
-  const maxRevenue = Math.max(1, ...recentMonths.map((point) => point.revenue));
-  return `<div class="page analytics-page">${pageHeader('Analytics', 'Meaningful practice signals based on the records you actually keep.', `<label class="period-picker"><span>${icon('calendar', 15)}</span><select data-change="analytics-range"><option value="today" ${ui.analyticsRange === 'today' ? 'selected' : ''}>Today</option><option value="7d" ${ui.analyticsRange === '7d' ? 'selected' : ''}>Last 7 days</option><option value="month" ${ui.analyticsRange === 'month' ? 'selected' : ''}>Last 1 month</option><option value="quarter" ${ui.analyticsRange === 'quarter' ? 'selected' : ''}>Last 3 months</option><option value="6m" ${ui.analyticsRange === '6m' ? 'selected' : ''}>Last 6 months</option><option value="year" ${ui.analyticsRange === 'year' ? 'selected' : ''}>This year</option><option value="all" ${ui.analyticsRange === 'all' ? 'selected' : ''}>All records</option></select>${icon('down', 14)}</label>`)}<div class="analytics-kpi-grid"><div class="analytics-kpi accent"><span>${icon('credit', 16)}Collected</span><strong>${currency(snapshot.revenue)}</strong><small>${number(snapshot.counts.appointments)} appointments in range</small></div><div class="analytics-kpi"><span>${icon('receipt', 16)}Billed</span><strong>${currency(snapshot.billed)}</strong><small>${number(snapshot.counts.patients)} new patient records</small></div><div class="analytics-kpi"><span>${icon('dollar', 16)}Operating result</span><strong class="${snapshot.net >= 0 ? 'text-success' : 'text-danger'}">${currency(snapshot.net)}</strong><small>${currency(snapshot.expenses)} recorded expenses</small></div><div class="analytics-kpi"><span>${icon('chart', 16)}Completion</span><strong>${snapshot.completionRate}%</strong><small>${snapshot.noShowRate}% no-show rate</small></div></div><div class="analytics-grid"><section class="card analytics-chart-card">${cardTitle('chart', 'Revenue and visit trend', badge(snapshot.bounds.from ? `${date(snapshot.bounds.from)} – ${date(snapshot.bounds.to)}` : 'All time', 'neutral'))}<div class="trend-chart" aria-label="Revenue and visit trend">${recentMonths.map((point) => `<div class="trend-column"><div class="trend-bars"><i class="trend-bar revenue" style="height:${Math.max(5, Math.round((point.revenue / maxRevenue) * 100))}%" title="${attr(currency(point.revenue))}"></i><i class="trend-bar visits" style="height:${Math.max(5, Math.min(100, point.visits * 12))}%" title="${attr(`${point.visits} visits`)}"></i></div><strong>${esc(point.label)}</strong><small>${number(point.visits)} visits</small></div>`).join('')}</div><div class="chart-legend"><span><i class="legend-dot filled"></i>Collected</span><span><i class="legend-dot healthy"></i>Visits</span></div></section><section class="card analytics-chart-card">${cardTitle('credit', 'Payment mix', badge(`${methods.length} methods`, 'neutral'))}${methods.length ? `<div class="analytics-bars">${methods.map((entry) => `<div class="analytics-bar-row"><div><span>${esc(entry.label)}</span><strong>${currency(entry.value)}</strong></div><div class="bar-track"><i style="width:${Math.max(4, Math.round((entry.value / maxMethod) * 100))}%"></i></div></div>`).join('')}</div>` : emptyState('credit', 'No payment data', 'Recorded payments will reveal collection patterns for your practice.')}</section></div><section class="card analytics-insight-grid"><div>${cardTitle('users', 'Clinical activity')}<div class="insight-list"><div><span>Patients registered</span><strong>${number(snapshot.counts.patients)}</strong></div><div><span>Visits recorded</span><strong>${number(snapshot.counts.visits)}</strong></div><div><span>Appointments completed</span><strong>${number(snapshot.counts.completed)}</strong></div></div></div><div>${cardTitle('shield', 'Commercial review')}<p class="muted">Analytics never invents targets or diagnoses. It summarizes saved records so a clinic can make operational decisions with a clear source of truth.</p>${button('Open reports', 'navigate', 'arrow', 'link', 'data-page="reports"')}</div></section></div>`;
+function shiftDate(value, days) {
+  const d = new Date(`${value}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
-function renderNotifications() {
-  const items = notificationItems();
-  return `<div class="page notifications-page">${pageHeader('Notifications', 'Actionable reminders for queue, follow-up, stock, balances and backup health.', button('Mark all read', 'mark-notifications-read', 'check', 'secondary'))}<section class="card notification-center">${items.length ? items.map((item) => `<article class="notification-row ${item.read ? 'read' : ''}"><span class="notification-type ${item.type || 'info'}">${icon(item.type === 'inventory' || item.type === 'warning' ? 'warning' : item.type === 'backup' ? 'backup' : item.type === 'clinical' || item.type === 'followup' ? 'flag' : 'bell', 16)}</span><div><strong>${esc(item.title)}</strong><p>${esc(item.message)}</p><small>${item.date ? date(item.date) : 'Now'}${item.page ? ` · ${esc(item.page)}` : ''}</small></div><div class="notification-actions">${item.page ? button('Open', 'notification-open', 'arrow', 'link', `data-id="${attr(item.id)}"`) : ''}${item.persisted ? `<button class="icon-button tiny" data-action="dismiss-notification" data-id="${attr(item.id)}" aria-label="Dismiss notification">${icon('close', 15)}</button>` : ''}</div></article>`).join('') : emptyState('bell', 'No notifications', 'The workspace will surface actionable reminders here as records need attention.')}</section></div>`;
+async function renderQueue() {
+  const day = await q('appointmentDay', { date: today() });
+  const queue = (day.appointments || []).filter((a) => a.status !== 'Cancelled' && a.status !== 'No Show').sort((a, b) => a.time.localeCompare(b.time));
+  const waiting = queue.filter((a) => ['Checked In', 'Waiting', 'In Treatment'].includes(a.status));
+  return `<div class="page">
+    ${pageHeader("Today's Queue", 'Check patients in and keep the chair moving.', `${button('Print queue', 'print-queue', 'printer', 'secondary')}${button('Book appointment', 'open-appointment', 'plus', 'primary')}`)}
+    <div class="queue-metrics"><div class="queue-ring big"><strong>${waiting.length}</strong><span>waiting now</span></div><div class="queue-copy"><strong>${queue.length} scheduled today</strong><p>Click a card to check in, start or complete. Serials are assigned automatically at check-in.</p></div></div>
+    <div class="queue-list">${queue.map((a) => `<div class="queue-card ${a.status === 'Completed' ? 'is-done' : ''}" data-id="${attr(a.id)}">
+      <div class="queue-card-top"><span class="queue-serial">${esc(a.serial || `Q-${String(queue.indexOf(a) + 1).padStart(3, '0')}`)}</span>${statusBadge(a.status)}</div>
+      <strong>${esc(patientName(a.patientId))}</strong><small>${time(a.time)} · ${esc(a.reason || '—')}${a.chair ? ` · ${esc(a.chair)}` : ''}</small>
+      <div class="queue-card-actions">
+        ${['Checked In', 'Waiting', 'In Treatment', 'Completed'].map((status) => `<button class="chip-button ${a.status === status ? 'selected' : ''}" data-action="queue-status" data-id="${attr(a.id)}" data-status="${attr(status)}" ${can('appointments.queue') ? '' : 'disabled'}>${esc(status)}</button>`).join('')}
+        ${can('appointments.cancel') ? `<button class="chip-button danger" data-action="cancel-appointment" data-id="${attr(a.id)}">Cancel</button>` : ''}
+      </div>
+    </div>`).join('') || emptyState('clipboard', 'No appointments in today’s queue', 'Check in patients as they arrive.', button('Book appointment', 'open-appointment', 'plus', 'secondary'))}
+  </div></div>`;
 }
 
-function renderDiagnostics() {
-  const relationshipErrors = validateRelationships(state);
-  const attachmentIssues = active(state.attachments).filter((attachment) => !validateAttachmentFile(attachment).allowed);
-  const storageInfo = globalThis.dentivaDesktop?.storeInfo?.() || { storage: 'Browser preview', bytes: new Blob([JSON.stringify(state)]).size, source: 'local preview' };
-  const health = relationshipErrors.length || attachmentIssues.length ? 'Needs attention' : 'Healthy';
-  return `<div class="page diagnostics-page">${pageHeader('Diagnostics', 'A transparent health view for the local database, attachments, backups and access model.', button('Run integrity check', 'integrity-check', 'refresh', 'primary'))}<section class="diagnostic-hero ${health === 'Healthy' ? 'healthy' : 'attention'}"><div class="diagnostic-status-mark">${icon(health === 'Healthy' ? 'check' : 'warning', 25)}</div><div><span class="eyebrow">WORKSPACE HEALTH</span><h2>${health}</h2><p>${health === 'Healthy' ? 'Relationship, attachment and schema checks found no current issues.' : `${relationshipErrors.length + attachmentIssues.length} issue(s) need review before a restore or export.`}</p></div><span class="soft-label">Schema v${state.schemaVersion} · ${APP_VERSION}</span></section><div class="diagnostic-grid"><section class="card diagnostic-card">${cardTitle('database', 'Database health')}<dl class="diagnostic-list"><div><dt>Storage</dt><dd>${esc(storageInfo.storage || 'Local')}</dd></div><div><dt>Database size</dt><dd>${formatBytes(storageInfo.bytes || 0)}</dd></div><div><dt>Source</dt><dd>${esc(storageInfo.source || 'Preview')}</dd></div><div><dt>Records</dt><dd>${number(totalRecords())}</dd></div><div><dt>Last backup</dt><dd>${state.lastBackupAt ? date(state.lastBackupAt.slice(0, 10)) : 'Not recorded'}</dd></div></dl></section><section class="card diagnostic-card">${cardTitle('shield', 'Access health')}<dl class="diagnostic-list"><div><dt>Active users</dt><dd>${number(active(state.users).length)}</dd></div><div><dt>Administrator</dt><dd>${active(state.users).some((user) => user.role === 'Administrator') ? 'Protected' : 'Missing'}</dd></div><div><dt>Application lock</dt><dd>${state.settings.applicationLock ? 'Enabled' : 'Not enabled'}</dd></div><div><dt>Audit events</dt><dd>${number(state.audit.length)}</dd></div></dl></section></div><section class="card diagnostic-issues">${cardTitle('warning', 'Integrity results')}${relationshipErrors.length || attachmentIssues.length ? `<ul>${[...relationshipErrors.slice(0, 12), ...attachmentIssues.slice(0, 12).map((item) => `Attachment ${item.name || item.id} has invalid metadata.`)].map((issue) => `<li>${esc(issue)}</li>`).join('')}</ul>` : emptyState('check', 'No current integrity issues', 'Run this check again after importing or restoring data.')}</section></div>`;
+/* ------------------------------- clinical ------------------------------ */
+async function renderClinical() {
+  const result = await listQuery('visits', { patientId: ui.patientId || undefined });
+  const rows = (result.rows || []).map((v) => `<tr class="clickable-row" data-action="open-visit" data-id="${attr(v.id)}">
+    <td>${esc(v.visitCode || '—')}</td><td><strong>${esc(patientName(v.patientId))}</strong></td><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${v.followUpDate ? relativeDate(v.followUpDate) : '<span class="muted">—</span>'}</td><td>${statusBadge(v.status || 'Completed')}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Clinical Records', 'Every visit, diagnosis and treatment note, patient by patient.', `${button('Record visit', 'open-visit', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search visits or patient" value="${attr(listState.visits.query)}" data-input="list-query" data-collection="visits" aria-label="Search visits"></label>`, '')}
+    ${dataTable(['Visit', 'Patient', 'Date', 'Reason', 'Diagnosis', 'Follow-up', 'Status'], rows, emptyState('clipboard', 'No matching records', 'Record a visit or adjust your search.', button('Record visit', 'open-visit', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.visits.page, 'visits')}
+  </div>`;
 }
 
-function renderBackup() {
-  const storageBytes = new Blob([JSON.stringify(state)]).size;
-  const last = state.lastBackupAt;
-  const backupHistory = active(state.audit || []).filter((entry) => entry.entity === 'Backup' && ['Backup created', 'Backup restored'].includes(entry.action)).slice(0, 8);
+async function renderPrescriptions() {
+  const result = await listQuery('prescriptions');
+  const rows = (result.rows || []).map((rx) => `<tr class="clickable-row" data-action="open-prescription" data-id="${attr(rx.id)}">
+    <td>${esc(rx.prescriptionCode || '—')}</td><td><strong>${esc(patientName(rx.patientId))}</strong></td><td>${date(rx.date)}</td><td>${esc(rx.doctor || '—')}</td><td>${(rx.medications || []).slice(0, 3).map((m) => esc(m.medicine)).join(', ') || '—'}</td><td class="row-actions">${button('Print', 'print-prescription', 'printer', 'link', `data-id="${attr(rx.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Prescriptions', 'Clinician-authored medicine lists, ready to print.', `${button('New prescription', 'open-prescription', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search code, doctor or patient" value="${attr(listState.prescriptions.query)}" data-input="list-query" data-collection="prescriptions" aria-label="Search prescriptions"></label>`, '')}
+    ${dataTable(['Code', 'Patient', 'Date', 'Prescriber', 'Medicines', ''], rows, emptyState('file', 'No prescriptions yet', 'Prescriptions written for patients appear here.', button('New prescription', 'open-prescription', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.prescriptions.page, 'prescriptions')}
+  </div>`;
+}
+
+async function renderDental() {
+  const patients = appState.directory.patients.slice(0, 200);
+  return `<div class="page">
+    ${pageHeader('Dental Chart', 'Tooth-level records with preserved history.', button('Open from a patient', 'navigate', 'arrow', 'secondary', 'data-page="patients"'))}
+    <section class="card"><div class="card-title"><div class="card-title-text">${icon('tooth', 17)}<h2>Choose a patient</h2></div></div>
+      <div class="dental-patient-picker"><label class="field-label">Patient<select data-change="dental-patient">${['', 'Choose patient...'].map((v) => `<option value="${v}"></option>`).join('')}${patients.map((p) => `<option value="${attr(p.id)}">${esc(`${p.patientCode || ''} · ${p.fullName}`)}</option>`).join('')}</select></label></div>
+      <p class="form-note">${icon('shield', 14)} Every tooth keeps its full history — new records supersede, they never overwrite. Dentiva Pro records what you enter; it does not recommend treatment.</p>
+    </section>
+  </div>`;
+}
+
+async function renderTreatments() {
+  const result = await listQuery('treatments');
+  const rows = (result.rows || []).map((t) => `<tr class="clickable-row" data-action="open-treatment" data-id="${attr(t.id)}">
+    <td>${esc(t.code || '—')}</td><td><strong>${esc(t.name)}</strong></td><td>${esc(t.category || 'General')}</td><td>${currency(t.defaultPrice || 0)}</td><td>${t.duration || 30} min</td><td>${t.toothRequired ? badge('Tooth required', 'neutral') : ''}</td><td>${statusBadge(t.active === false ? 'Inactive' : 'Active')}</td><td class="row-actions">${button('Edit', 'open-treatment', 'edit', 'link', `data-id="${attr(t.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Treatment Catalog', 'Consistent names, prices and durations across the practice.', `${button('Add treatment', 'open-treatment', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search treatments" value="${attr(listState.treatments.query)}" data-input="list-query" data-collection="treatments" aria-label="Search treatments"></label>`, '')}
+    ${dataTable(['Code', 'Treatment', 'Category', 'Price', 'Duration', 'Tooth', 'Status', ''], rows, emptyState('layers', 'No treatments yet', 'Add the treatments you perform to speed up invoices and plans.', button('Add treatment', 'open-treatment', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.treatments.page, 'treatments')}
+  </div>`;
+}
+
+async function renderBilling() {
+  const result = await listQuery('invoices');
+  const rows = (result.rows || []).map((inv) => `<tr class="clickable-row" data-action="open-invoice" data-id="${attr(inv.id)}">
+    <td>${esc(inv.invoiceNumber || '—')}</td><td><strong>${esc(patientName(inv.patientId))}</strong></td><td>${date(inv.date)}</td><td>${currency(centsToMoney(inv.totalCents ?? inv.total))}</td><td>${currency(centsToMoney(inv.paidCents ?? inv.paid))}</td><td class="${(inv.dueCents ?? inv.due ?? 0) > 0 ? 'text-warning' : ''}"><strong>${currency(centsToMoney(inv.dueCents ?? inv.due))}</strong></td><td>${statusBadge(inv.status)}</td><td class="row-actions">${button('Print', 'print-invoice', 'printer', 'link', `data-id="${attr(inv.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Billing', 'Invoices with payments, adjustments and refunds kept exact to the taka.', `${button('Print billing', 'print-billing', 'printer', 'secondary')}${button('New invoice', 'open-invoice', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search invoice or patient" value="${attr(listState.invoices.query)}" data-input="list-query" data-collection="invoices" aria-label="Search invoices"></label>
+      <select data-change="invoice-status-filter" aria-label="Invoice status"><option value="" ${!listState.invoices.filters.status ? 'selected' : ''}>All statuses</option>${['Draft', 'Issued', 'Partially Paid', 'Paid', 'Refunded', 'Adjusted', 'Cancelled'].map((s) => `<option value="${s}" ${listState.invoices.filters.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>`, '')}
+    ${dataTable(['Invoice', 'Patient', 'Date', 'Total', 'Paid', 'Due', 'Status', ''], rows, emptyState('receipt', 'No matching records', 'Create invoices from patient billing or the quick actions.', button('New invoice', 'open-invoice', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.invoices.page, 'invoices')}
+  </div>`;
+}
+
+async function renderPayments() {
+  const result = await listQuery('payments');
+  const rows = (result.rows || []).map((payment) => `<tr class="clickable-row" data-action="open-payment-detail" data-id="${attr(payment.id)}">
+    <td>${esc(payment.receiptNumber || '—')}</td><td><strong>${esc(patientName(payment.patientId))}</strong></td><td>${date(payment.date)}</td><td>${money(payment)}</td><td>${esc(payment.method || '—')}</td><td>${payment.refundedAmount ? badge(`Refunded ${currency(payment.refundedAmount)}`, 'warning') : ''}</td><td>${statusBadge(payment.status || 'Recorded')}</td><td class="row-actions">${can('payments.refund') ? button('Refund', 'open-refund', 'undo', 'link', `data-id="${attr(payment.id)}"`) : ''}${button('Print receipt', 'print-payment', 'printer', 'link', `data-id="${attr(payment.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Payments', 'Receipts, refunds and adjustments with an exact money trail.', `${button('Record payment', 'open-payment', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search receipt, reference or patient" value="${attr(listState.payments.query)}" data-input="list-query" data-collection="payments" aria-label="Search payments"></label>`, '')}
+    ${dataTable(['Receipt', 'Patient', 'Date', 'Amount', 'Method', 'Refund', 'Status', ''], rows, emptyState('credit', 'No matching records', 'Record a payment to see it here.', button('Record payment', 'open-payment', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.payments.page, 'payments')}
+  </div>`;
+}
+
+async function renderAccounting() {
+  const summary = await q('accountingSummary', { rangeKey: 'all' });
+  const methodRows = (summary.byMethod || []).map((m) => `<div class="mix-row"><span>${esc(m.label)}</span><div class="mix-bar"><span style="width:${summary.collectedCents ? Math.max(2, (m.cents / summary.collectedCents) * 100) : 0}%"></span></div><strong>${currency(m.cents)}</strong><small>${m.count} tx</small></div>`).join('');
+  const agingRows = (summary.aging || []).map((bucket) => `<tr><td>${esc(bucket.label)}</td><td><strong>${currency(bucket.cents)}</strong></td><td>${number(bucket.count)} invoice(s)</td></tr>`).join('');
+  const categoryRows = (summary.expenseCategories || []).map((c) => `<tr><td>${esc(c.label)}</td><td><strong>${currency(c.cents)}</strong></td><td>${number(c.count)}</td></tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Accounting', 'Operating money in one honest place — no guessing.', `${button('Record expense', 'open-expense', 'plus', 'primary')}`)}
+    <div class="metric-grid">
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Collected (all time)</span><span class="metric-icon soft-purple">${icon('credit', 18)}</span></div><strong>${currency(summary.collectedCents)}</strong><small>${currency(summary.refundedCents)} refunded</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Expenses (all time)</span><span class="metric-icon soft-amber">${icon('dollar', 18)}</span></div><strong>${currency(summary.expensesCents)}</strong><small>${(summary.expenseCategories || []).length} categories</small></div>
+      <div class="metric-card ${summary.netOperatingCents < 0 ? 'metric-negative' : ''}"><div class="metric-top"><span class="metric-label">Net operating</span><span class="metric-icon">${icon('chart', 18)}</span></div><strong>${currency(summary.netOperatingCents)}</strong><small>Collected − expenses</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Receivables</span><span class="metric-icon soft-blue">${icon('receipt', 18)}</span></div><strong>${currency(summary.receivablesCents)}</strong><small>Outstanding invoice balance</small></div>
+    </div>
+    <div class="accounting-grid">
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('credit', 17)}<h2>Payment mix</h2></div></div>${methodRows || emptyState('credit', 'No payment data', 'Recorded payments build this mix.')}</section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('clock', 17)}<h2>Receivables aging</h2></div></div>${dataTable(['Age bucket', 'Outstanding', 'Invoices'], agingRows) || emptyState('clock', 'Nothing outstanding', 'Every invoice is settled.')}</section>
+      <section class="card card-wide"><div class="card-title"><div class="card-title-text">${icon('dollar', 17)}<h2>Expense categories</h2></div>${button('Record expense', 'open-expense', 'plus', 'secondary')}</div>${dataTable(['Category', 'Total', 'Entries'], categoryRows, emptyState('dollar', 'No expenses yet', 'Operating costs appear here by category.'))}</section>
+    </div>
+  </div>`;
+}
+
+async function renderInventory() {
+  const result = await listQuery('inventory');
+  const rows = (result.rows || []).map((item) => `<tr class="clickable-row" data-action="open-inventory-item" data-id="${attr(item.id)}">
+    <td>${esc(item.itemCode || '—')}</td><td><strong>${esc(item.name)}</strong>${item.batch ? `<small>batch ${esc(item.batch)}</small>` : ''}</td><td>${esc(item.category || 'Other')}</td><td><strong class="${Number(item.currentStock) <= Number(item.minimumStock || 0) ? 'text-warning' : ''}">${number(item.currentStock)} ${esc(item.unit || '')}</strong></td><td>${currency(item.purchasePrice || 0)}</td><td>${currency(item.salePrice || 0)}</td><td>${item.expiryDate ? badge(date(item.expiryDate), item.expiryDate < today() ? 'danger' : 'neutral') : '<span class="muted">—</span>'}</td><td>${Number(item.currentStock) <= Number(item.minimumStock || 0) ? badge('Low stock', 'warning') : statusBadge('In stock')}</td>
+    <td class="row-actions">${button('Move stock', 'open-stock-adjustment', 'swap', 'link', `data-id="${attr(item.id)}"`)}</td>
+  </tr>`).join('');
+  const filters = listState.inventory.filters;
+  return `<div class="page">
+    ${pageHeader('Inventory', 'Stock, movements and expiry — always accurate, never negative.', `${button('Add stock', 'open-stock', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search item, code or batch" value="${attr(listState.inventory.query)}" data-input="list-query" data-collection="inventory" aria-label="Search inventory"></label>
+      <select data-change="inventory-category-filter" aria-label="Category"><option value="" ${!filters.category ? 'selected' : ''}>All categories</option>${['Consumable', 'Material', 'Equipment', 'Chemical', 'Other'].map((c) => `<option value="${c}" ${filters.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <label class="check-label"><input type="checkbox" data-change="inventory-lowstock" ${filters.lowStock ? 'checked' : ''}> Low stock</label>
+      <label class="check-label"><input type="checkbox" data-change="inventory-expiring" ${filters.expiringBefore ? 'checked' : ''}> Expiring soon</label>`, '')}
+    ${dataTable(['Code', 'Item', 'Category', 'On hand', 'Purchase', 'Sale', 'Expiry', 'Status', ''], rows, emptyState('box', 'No matching records', 'Add stock items to track purchases and usage.', button('Add stock', 'open-stock', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.inventory.page, 'inventory')}
+  </div>`;
+}
+
+async function renderSuppliers() {
+  const result = await listQuery('suppliers');
+  const rows = (result.rows || []).map((supplier) => `<tr class="clickable-row" data-action="open-supplier" data-id="${attr(supplier.id)}">
+    <td>${esc(supplier.code || '—')}</td><td><strong>${esc(supplier.name)}</strong></td><td>${esc(supplier.contactPerson || '—')}</td><td>${esc(supplier.phone || '—')}</td><td>${esc(supplier.email || '—')}</td><td class="row-actions">${button('Edit', 'open-supplier', 'edit', 'link', `data-id="${attr(supplier.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Suppliers', 'Purchasing contacts behind your inventory.', `${button('Add supplier', 'open-supplier', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search suppliers" value="${attr(listState.suppliers.query)}" data-input="list-query" data-collection="suppliers" aria-label="Search suppliers"></label>`, '')}
+    ${dataTable(['Code', 'Supplier', 'Contact', 'Phone', 'Email', ''], rows, emptyState('truck', 'No suppliers yet', 'Connect the vendors you purchase from.', button('Add supplier', 'open-supplier', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.suppliers.page, 'suppliers')}
+  </div>`;
+}
+
+async function renderStaff() {
+  const result = await listQuery('staff');
+  const rows = (result.rows || []).map((member) => `<tr class="clickable-row" data-action="open-staff" data-id="${attr(member.id)}">
+    <td><div class="person-cell"><span class="avatar avatar-small">${initials(member.name)}</span><div><strong>${esc(member.name)}</strong><small>${esc(member.specialization || '')}</small></div></div></td><td>${esc(member.role || 'Other')}</td><td>${esc(member.phone || '—')}</td><td>${esc(member.email || '—')}</td><td>${date(member.joinDate || member.joiningDate)}</td><td>${statusBadge(member.active === false ? 'Inactive' : 'Active')}</td><td class="row-actions">${button('Edit', 'open-staff', 'edit', 'link', `data-id="${attr(member.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('Staff', 'The people behind the practice.', `${button('Add staff member', 'open-staff', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search staff" value="${attr(listState.staff.query)}" data-input="list-query" data-collection="staff" aria-label="Search staff"></label>`, '')}
+    ${dataTable(['Staff', 'Role', 'Phone', 'Email', 'Joined', 'Status', ''], rows, emptyState('briefcase', 'No staff yet', 'Add the team members who work in the practice.', button('Add staff member', 'open-staff', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.staff.page, 'staff')}
+  </div>`;
+}
+
+async function renderReports() {
+  const type = ui.reportType;
+  const report = await q('report', { type, rangeKey: ui.reportsRange === 'custom' ? 'custom' : ui.reportsRange, from: ui.rangeFrom || undefined, to: ui.rangeTo || undefined, page: listState.expenses.page === 1 ? 1 : 1, pageSize: 15 });
+  const kpis = report.kpis || {};
+  const rows = report.rows || {};
+  const kpiCard = (label, value, sub = '') => `<div class="metric-card"><div class="metric-top"><span class="metric-label">${esc(label)}</span></div><strong>${value}</strong>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+  let kpiMarkup = '';
+  let rowMarkup = '';
+  if (type === 'revenue') {
+    kpiMarkup = kpiCard('Collected', currency(kpis.collectedCents), `${kpis.paymentCount ?? 0} payments`) + kpiCard('Billed', currency(kpis.billedCents), `${kpis.invoiceCount ?? 0} invoices`) + kpiCard('Expenses', currency(kpis.expensesCents), `${kpis.expenseCount ?? 0} entries`);
+    rowMarkup = dataTable(['Receipt', 'Patient', 'Date', 'Method', 'Amount'], (rows.rows || []).map((p) => `<tr><td>${esc(p.receiptNumber || '—')}</td><td>${esc(patientName(p.patientId))}</td><td>${date(p.date)}</td><td>${esc(p.method || '—')}</td><td>${money(p)}</td></tr>`).join(''));
+  } else if (type === 'patients') {
+    kpiMarkup = kpiCard('Registered', number(kpis.registered ?? 0)) + kpiCard('With phone', number(kpis.withPhone ?? 0)) + kpiCard('Upcoming visits', number(kpis.upcoming ?? 0));
+    rowMarkup = dataTable(['Patient', 'Phone', 'Registered', 'Balance'], (rows.rows || []).map((p) => `<tr><td>${esc(p.fullName)}</td><td>${esc(p.phone || '—')}</td><td>${date(p.registrationDate)}</td><td>${currency(centsToMoney(p.balanceCents || 0))}</td></tr>`).join(''));
+  } else if (type === 'visits') {
+    kpiMarkup = kpiCard('Visits', number(kpis.visits ?? 0)) + kpiCard('Unique patients', number(kpis.uniquePatients ?? 0)) + kpiCard('With follow-up', number(kpis.withFollowUp ?? 0));
+    rowMarkup = dataTable(['Visit', 'Patient', 'Date', 'Reason', 'Diagnosis'], (rows.rows || []).map((v) => `<tr><td>${esc(v.visitCode || '—')}</td><td>${esc(patientName(v.patientId))}</td><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td></tr>`).join(''));
+  } else if (type === 'appointments') {
+    kpiMarkup = kpiCard('Appointments', number(kpis.appointments ?? 0)) + kpiCard('Completed', number(kpis.completed ?? 0), `${kpis.completionPct ?? 0}% completion`) + kpiCard('No shows', number(kpis.noShows ?? 0));
+    rowMarkup = dataTable(['Code', 'Patient', 'Date', 'Time', 'Reason', 'Status'], (rows.rows || []).map((a) => `<tr><td>${esc(a.appointmentCode || '—')}</td><td>${esc(patientName(a.patientId))}</td><td>${date(a.date)}</td><td>${time(a.time)}</td><td>${esc(a.reason || '—')}</td><td>${statusBadge(a.status)}</td></tr>`).join(''));
+  } else if (type === 'outstanding') {
+    kpiMarkup = kpiCard('Outstanding', currency(kpis.dueCents ?? 0)) + kpiCard('Open invoices', number(kpis.openInvoices ?? 0)) + kpiCard('Partially paid', number(kpis.partiallyPaid ?? 0));
+    rowMarkup = dataTable(['Invoice', 'Patient', 'Date', 'Total', 'Due'], (rows.rows || []).map((i) => `<tr><td>${esc(i.invoiceNumber || '—')}</td><td>${esc(patientName(i.patientId))}</td><td>${date(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td class="text-warning"><strong>${currency(centsToMoney(i.dueCents ?? i.due))}</strong></td></tr>`).join(''));
+  } else if (type === 'inventory') {
+    kpiMarkup = kpiCard('Items tracked', number(kpis.itemsTracked ?? 0)) + kpiCard('Low stock', number(kpis.lowStock ?? 0)) + kpiCard('Expired', number(kpis.expired ?? 0)) + kpiCard('Stock value', currency(kpis.stockValueCents ?? 0));
+    rowMarkup = dataTable(['Item', 'Category', 'On hand', 'Value'], (rows.rows || []).map((i) => `<tr><td>${esc(i.name)}</td><td>${esc(i.category || 'Other')}</td><td>${number(i.currentStock)} ${esc(i.unit || '')}</td><td>${currency(centsToMoney(i.purchasePriceCents ?? 0) * Number(i.currentStock || 0))}</td></tr>`).join(''));
+  } else {
+    kpiMarkup = kpiCard('Total', currency(kpis.totalCents ?? 0)) + kpiCard('Transactions', number(kpis.transactions ?? 0)) + kpiCard('Average', currency(kpis.averageCents ?? 0));
+    rowMarkup = dataTable(['Date', 'Description', 'Category', 'Method', 'Amount'], (rows.rows || []).map((e) => `<tr><td>${date(e.date)}</td><td>${esc(e.description)}</td><td>${esc(e.category || 'Other')}</td><td>${esc(e.method || '—')}</td><td>${money(e)}</td></tr>`).join(''));
+  }
+  return `<div class="page">
+    ${pageHeader('Reports', 'Honest numbers for any range — every figure traces to a record.', button('Print report', 'print-report', 'printer', 'secondary'))}
+    ${toolbar(`
+      <select data-change="report-type" aria-label="Report type">${[['revenue', 'Revenue'], ['patients', 'Patients'], ['visits', 'Visits'], ['appointments', 'Appointments'], ['outstanding', 'Outstanding'], ['inventory', 'Inventory'], ['expenses', 'Expenses']].map(([key, label]) => `<option value="${key}" ${type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
+      ${periodPicker('reports-range', ui.reportsRange)}`, '')}
+    <div class="metric-grid">${kpiMarkup}</div>
+    ${rowMarkup || emptyState('chart', 'No records in this range', 'Change the date range or create records to populate this report.')}
+  </div>`;
+}
+
+async function renderAnalytics() {
+  const analytics = await q('analytics', { rangeKey: ui.analyticsRange === 'custom' ? 'month' : ui.analyticsRange });
+  const totals = analytics.totals || {};
+  const counts = analytics.counts || {};
+  const maxMonthly = Math.max(1, ...(analytics.monthly || []).map((m) => m.cents));
+  const monthBars = (analytics.monthly || []).slice(-12).map((m) => `<div class="bar-col" title="${m.month} · ${currency(m.cents)}"><span class="bar" style="height:${Math.max(3, (m.cents / maxMonthly) * 100)}%"></span><small>${String(m.month).slice(5)}${String(m.month).slice(0, 3)}</small></div>`).join('');
+  const maxVisits = Math.max(1, ...(analytics.visitMonthly || []).map((m) => m.count));
+  const visitBars = (analytics.visitMonthly || []).slice(-12).map((m) => `<div class="bar-col" title="${m.month} · ${m.count} visits"><span class="bar bar-blue" style="height:${Math.max(3, (m.count / maxVisits) * 100)}%"></span><small>${String(m.month).slice(5)}${String(m.month).slice(0, 3)}</small></div>`).join('');
+  return `<div class="page">
+    ${pageHeader('Analytics', 'Where your practice is heading, month by month.', periodPicker('analytics-range', ui.analyticsRange))}
+    <div class="metric-grid">
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Collected</span></div><strong>${currency(totals.collectedCents || 0)}</strong></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Billed</span></div><strong>${currency(totals.billedCents || 0)}</strong></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Visits</span></div><strong>${number(counts.visits || 0)}</strong></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">New patients</span></div><strong>${number(counts.newPatients || 0)}</strong></div>
+    </div>
+    <div class="analytics-grid">
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('chart', 17)}<h2>Revenue trend</h2></div></div><div class="bar-chart">${monthBars || emptyState('chart', 'No payment data', 'Revenue bars appear once payments are recorded.')}</div></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Clinical activity</h2></div></div><div class="bar-chart">${visitBars || emptyState('activity', 'No visit data', 'Visit bars appear once clinical visits are recorded.')}</div></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('credit', 17)}<h2>Payment mix</h2></div></div>${(analytics.byMethod || []).map((m) => `<div class="mix-row"><span>${esc(m.label)}</span><strong>${currency(m.cents)}</strong></div>`).join('') || emptyState('credit', 'No payment data', 'Method mix appears once payments are recorded.')}</section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('users', 17)}<h2>Top dentists</h2></div></div>${(analytics.topDentists || []).map((d) => `<div class="mix-row"><span>${esc(d.label)}</span><strong>${number(d.count)} visits</strong></div>`).join('') || emptyState('users', 'No visit data', 'Dentist workload appears once visits are recorded.')}</section>
+    </div>
+  </div>`;
+}
+
+async function renderNotifications() {
+  const notes = notificationItems();
+  return `<div class="page">
+    ${pageHeader('Notifications', 'Meaningful signals from your workspace.', `${button('Mark all read', 'mark-notifications-read', 'check', 'secondary')}`)}
+    <section class="card notification-center">
+      ${notes.length ? notes.map((n) => `<button class="notification-row ${n.read ? '' : 'unread'}" data-action="notification-open" data-id="${attr(n.id)}"><span class="notification-icon">${icon(n.type === 'warning' ? 'warning' : n.type === 'backup' ? 'backup' : n.type === 'queue' ? 'clock' : 'bell', 16)}</span><span class="notification-body"><strong>${esc(n.title)}</strong><p>${esc(n.message)}</p><small>${date(n.date || today())}</small></span>${icon('arrow', 14)}</button>`).join('') : emptyState('bell', 'No notifications', 'Appointment, follow-up, stock and backup signals will appear here.')}
+    </section>
+  </div>`;
+}
+
+/* -------------------------------- backup ------------------------------- */
+const RESTORE_MODULE_GROUPS = {
+  clinical: ['visits', 'dentalRecords', 'prescriptions', 'treatmentPlans', 'treatments', 'attachments', 'followUpTasks', 'referrals'],
+  finance: ['invoices', 'payments', 'paymentAdjustments', 'expenses'],
+  operations: ['inventory', 'stockMovements', 'suppliers', 'staff', 'appointments'],
+  patients: ['patients']
+};
+function buildRestorePlanView(candidate) {
+  const modules = [];
+  if (ui.restoreCandidate && ui.restoreCandidate.selectedModules) {
+    ui.restoreCandidate.selectedModules.forEach((key) => {
+      if (key === 'patients') modules.push('patients');
+      if (key === 'clinical') modules.push('clinical');
+      if (key === 'finance') modules.push('finance');
+      if (key === 'operations') modules.push('operations');
+    });
+  }
+  if (!modules.length) modules.push('patients', 'clinical', 'finance', 'operations');
+  const plan = candidate && candidate.state ? buildRestorePlan({}, candidate.state, { modules, strategy: ui.restoreCandidate?.strategy || 'Replace' }) : null;
+  return { modules, plan };
+}
+async function renderBackup() {
+  const [list, info] = await Promise.all([api.listBackups().catch(() => ({ ok: true, backups: [] })), api.workspaceInfo().catch(() => null)]);
+  const backups = list.backups || [];
+  const storage = info?.storage || appState.storage || {};
   const candidate = ui.restoreCandidate;
-  return `<div class="page">${pageHeader('Backup & restore', 'Protect the complete local record, including settings and relationships.', `${button('Export full backup', 'export-backup', 'download', 'primary')}${button('Import backup', 'trigger-import', 'upload', 'secondary')}`)}<div class="backup-hero"><div class="backup-hero-icon">${icon('shield', 27)}</div><div><span class="eyebrow">LOCAL-FIRST PROTECTION</span><h2>Your records belong to your practice</h2><p>Backups are structured JSON packages with schema version, record counts and audit metadata. Keep copies on a trusted device or encrypted drive.</p></div><div class="backup-status">${last ? `<span class="status-check">${icon('check', 15)}</span><strong>Verified</strong><small>${date(last.slice(0, 10))}</small>` : `<span class="status-check neutral">${icon('backup', 15)}</span><strong>Not yet backed up</strong><small>Start with an export</small>`}</div></div><div class="backup-grid"><section class="card backup-card">${cardTitle('download', 'Create a backup') }<p>Exports all clinical, financial, operational and configuration records in one portable package.</p><div class="backup-facts"><div><span>Records</span><strong>${number(totalRecords())}</strong></div><div><span>Storage</span><strong>${formatBytes(storageBytes)}</strong></div><div><span>Schema</span><strong>v${state.schemaVersion}</strong></div></div>${button('Export verified backup', 'export-backup', 'download', 'primary')} ${button('Export patients CSV', 'export-patients', 'file', 'link')}</section><section class="card backup-card">${cardTitle('upload', 'Restore or import') }<p>Validate a Dentiva Pro backup before committing. Existing records are never silently overwritten.</p><div class="restore-drop" data-action="trigger-import"><span>${icon('upload', 22)}</span><strong>Choose a backup file</strong><small>JSON backup · exported from Dentiva Pro</small></div><input id="backup-file" type="file" accept=".json,.dentiva" class="visually-hidden" data-input="backup-file">${candidate ? renderRestoreCandidate(candidate) : ''}</section></div><section class="card data-health">${cardTitle('activity', 'Data management') }<div class="health-list"><div><span>${icon('database', 17)}</span><div><strong>Database health</strong><small>Local store schema v${state.schemaVersion} · ${number(state.audit.length)} audit entries</small></div><span class="health-ok">Healthy</span></div><div><span>${icon('box', 17)}</span><div><strong>Attachment storage</strong><small>Managed file references: ${number(state.attachments.length)}</small></div><span class="health-ok">Ready</span></div><div><span>${icon('history', 17)}</span><div><strong>Backup history</strong><small>${backupHistory.length ? `${number(backupHistory.length)} recent local operation${backupHistory.length === 1 ? '' : 's'}` : 'No backup operations recorded yet'}</small></div><span class="health-ok">${backupHistory.length ? 'Tracked' : 'Ready'}</span></div><div><span>${icon('refresh', 17)}</span><div><strong>Last operation</strong><small>${state.audit[0] ? `${esc(state.audit[0].action)} · ${date(state.audit[0].at.slice(0, 10))}` : 'No operations recorded yet'}</small></div>${button('View audit trail', 'open-audit-log', 'arrow', 'link')}<button class="text-button" data-action="integrity-check">Run check${icon('arrow', 14)}</button></div></div></section></div>`;
+  const candidateSection = candidate ? renderRestoreCandidate(candidate) : '';
+  return `<div class="page">
+    ${pageHeader('Backup & Restore', 'Your practice data stays on this device — backups are explicit and verified.', `${button('Create secure backup', 'create-backup', 'backup', 'primary')}${button('Choose backup folder…', 'restore-from-folder', 'folder', 'secondary')}${button('Import JSON backup…', 'restore-from-file', 'upload', 'secondary')}`)}
+    ${candidateSection}
+    <section class="card backup-summary">
+      <div class="backup-stat"><span class="backup-icon">${icon('database', 20)}</span><div><small>Database</small><strong>${formatBytes(storage.bytes || 0)}</strong></div></div>
+      <div class="backup-stat"><span class="backup-icon">${icon('paperclip', 20)}</span><div><small>Attachments</small><strong>${formatBytes(storage.attachmentBytes || 0)} · ${number(storage.attachmentFiles || 0)} files</strong></div></div>
+      <div class="backup-stat"><span class="backup-icon">${icon('users', 20)}</span><div><small>Records</small><strong>${number(Object.values(storage.recordCounts || {}).reduce((a, b) => a + b, 0))}</strong></div></div>
+      <div class="backup-stat"><span class="backup-icon">${icon('backup', 20)}</span><div><small>Last backup</small><strong>${storage.lastBackupAt ? date(storage.lastBackupAt.slice(0, 10)) : 'Never'}</strong></div></div>
+    </section>
+    <section class="card">
+      <div class="card-title"><div class="card-title-text">${icon('backup', 17)}<h2>Backups on this device</h2></div></div>
+      ${backups.length ? backups.map((backup) => `<div class="record-row"><div><strong>${backup.name}</strong><small>${backup.createdAt ? dateFull(backup.createdAt.slice(0, 10)) : '—'}${backup.label ? ` · ${esc(backup.label)}` : ''} · ${formatBytes(backup.bytes || 0)} · ${number(Object.values(backup.recordCounts || {}).reduce((a, b) => a + b, 0))} records${backup.valid ? '' : ' · manifest unreadable'}</small></div><div class="row-actions">${button('Validate and restore selection', 'validate-backup', 'check', 'secondary', `data-id="${attr(backup.name)}"`)}${can('backup.restore') ? button('Restore', 'restore-backup', 'upload', 'primary', `data-id="${attr(backup.name)}"`) : ''}${can('backup.restore') ? button('Delete', 'delete-backup', 'trash', 'link', `data-id="${attr(backup.name)}"`) : ''}</div></div>`).join('') : emptyState('backup', 'No backups yet', 'Create a secure backup to protect this workspace. Restores always keep a pre-restore safety backup.')}
+      <p class="form-note">${icon('shield', 14)} Restores are validated first (checksums + integrity), then a safety backup of the current workspace is written before anything is swapped. Keep verified backups off this device for true disaster protection.</p>
+    </section>
+  </div>`;
 }
-function totalRecords() { return arrayKeys.reduce((total, key) => total + state[key].length, 0); }
-function formatBytes(bytes) { if (!bytes) return '0 B'; const units = ['B', 'KB', 'MB', 'GB']; const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`; }
 function renderRestoreCandidate(candidate) {
-  const patients = candidate.data?.patients || [];
-  const selectedPatients = new Set(candidate.selectedPatientIds || []);
-  const patientScope = Boolean(candidate.patientScope);
-  const patientPicker = patients.length ? `<details class="restore-patient-picker" open><summary>Select patients for a patient-scoped restore (${patientScope ? selectedPatients.size : 'all'} selected)</summary><div class="restore-patient-actions"><button type="button" class="text-button" data-action="select-all-restore-patients">Select all</button><button type="button" class="text-button" data-action="clear-restore-patients">Clear selection</button></div><div class="restore-patient-list">${patients.slice(0, 200).map((patient) => `<label class="check-line"><input type="checkbox" value="${attr(patient.id)}" ${!patientScope || selectedPatients.has(patient.id) ? 'checked' : ''} data-change="restore-patient"><span>${esc(patient.patientCode || '')} · ${esc(patient.fullName || 'Unnamed patient')}</span></label>`).join('')}</div>${patients.length > 200 ? `<small class="field-hint">Showing the first 200 patients. Use module-only restore for a larger import.</small>` : ''}</details>` : '';
-  return `<div class="restore-preview"><div class="restore-preview-head"><div><span class="eyebrow">IMPORT PREVIEW</span><strong>${esc(candidate.name)}</strong><small>${esc(candidate.product || 'Unknown product')} · schema ${esc(candidate.schemaVersion || '?')}</small></div><button class="icon-button" data-action="clear-restore">${icon('close', 15)}</button></div><div class="restore-summary"><div><strong>${number(candidate.total)}</strong><span>records detected</span></div><div><strong>${number(candidate.conflicts)}</strong><span>possible conflicts</span></div><div><strong>${number(candidate.errors?.length || 0)}</strong><span>validation errors</span></div></div>${candidate.warnings?.length ? `<div class="restore-warnings">${candidate.warnings.map((warning) => `<p>${icon('warning', 13)}${esc(warning)}</p>`).join('')}</div>` : ''}<div class="restore-options"><label>Conflict strategy<select data-change="restore-strategy"><option ${candidate.strategy === 'Keep Existing' ? 'selected' : ''}>Keep Existing</option><option ${candidate.strategy === 'Skip' ? 'selected' : ''}>Skip</option><option ${candidate.strategy === 'Replace' ? 'selected' : ''}>Replace</option><option ${candidate.strategy === 'Create New Copy' ? 'selected' : ''}>Create New Copy</option></select></label><label class="check-line"><input type="checkbox" ${candidate.restorePatients !== false ? 'checked' : ''} data-change="restore-patients"> Patients (${candidate.counts.patients || 0})</label><label class="check-line"><input type="checkbox" ${candidate.restoreClinical !== false ? 'checked' : ''} data-change="restore-clinical"> Clinical & appointments</label><label class="check-line"><input type="checkbox" ${candidate.restoreFinance !== false ? 'checked' : ''} data-change="restore-finance"> Billing & finance</label><label class="check-line"><input type="checkbox" ${candidate.restoreOperations !== false ? 'checked' : ''} data-change="restore-operations"> Inventory, suppliers & staff</label><label class="check-line"><input type="checkbox" ${candidate.restoreSettings !== false ? 'checked' : ''} data-change="restore-settings"> Settings & audit</label></div>${patientPicker}${candidate.errors?.length ? `<p class="inline-error">${candidate.errors.slice(0, 4).map((error) => esc(error)).join(' ')}</p>` : ''}${button('Validate and restore selection', 'restore-confirm', 'check', 'primary')}</div>`;
+  const { modules, plan } = buildRestorePlanView(candidate);
+  const stats = plan ? plan.stats || {} : {};
+  return `<section class="card restore-candidate">
+    <div class="card-title"><div class="card-title-text">${icon('upload', 17)}<h2>Validate and restore selection</h2></div>${button('Close', 'close-restore-candidate', 'close', 'link')}</div>
+    <p class="form-note">Source: <strong>${esc(candidate.sourceLabel || 'backup')}</strong> · ${candidate.validated ? badge('Validated', 'success') : badge('Validation pending', 'warning')}</p>
+    <div class="restore-modules">${Object.entries({ patients: 'Patients & identities', clinical: 'Clinical records', finance: 'Finance & billing', operations: 'Operations & scheduling' }).map(([key, label]) => `<label class="module-option"><input type="checkbox" data-change="restore-module" data-module="${key}" ${modules.includes(key) ? 'checked' : ''}><span>${esc(label)}</span><small>${(RESTORE_MODULE_GROUPS[key] || []).join(' · ')}</small></label>`).join('')}</div>
+    <div class="restore-strategy"><span class="eyebrow">CONFLICT STRATEGY</span>${['Keep Existing', 'Replace', 'Create New Copy'].map((strategy) => `<label class="radio-option"><input type="radio" name="restore-strategy" data-change="restore-strategy" value="${attr(strategy)}" ${(ui.restoreCandidate?.strategy || 'Replace') === strategy ? 'checked' : ''}><span>${esc(strategy)}</span></label>`).join('')}</div>
+    ${plan ? `<p class="form-note">${number(stats.toInsert ?? 0)} to insert · ${number(stats.toSkip ?? 0)} skipped by strategy · relationships are re-linked automatically.</p>` : ''}
+    <div class="restore-actions">${button('Cancel restore', 'close-restore-candidate', 'close', 'secondary')}${button('Restore now', 'confirm-restore', 'upload', 'primary', `data-source="${attr(candidate.sourceKind || 'folder')}"`)}
+  </section>`;
 }
 
-function renderSettings() {
-  const s = state.settings;
-  return `<div class="page settings-page">${pageHeader('Settings', 'Configure the practice once, then keep the workflow consistent.', button('Save settings', 'save-settings', 'check', 'primary'))}<div class="settings-layout"><nav class="settings-nav"><div class="active">${icon('grid', 16)}General</div><div>${icon('users', 16)}Clinic & doctor</div><div>${icon('calendar', 16)}Appointments</div><div>${icon('receipt', 16)}Billing & payments</div><div>${icon('box', 16)}Inventory</div><div>${icon('printer', 16)}Printing</div><div>${icon('shield', 16)}Security</div><div>${icon('bell', 16)}Notifications</div></nav><section class="settings-content"><section class="card settings-card"><div class="settings-section-head"><div><span class="eyebrow">CLINIC IDENTITY</span><h2>Make every document feel like your practice</h2><p>Your clinic name and contact details appear on printable documents.</p></div>${safeLogoSource(s.logo) ? `<img class="logo-preview" src="${attr(safeLogoSource(s.logo))}" alt="Clinic logo">` : `<div class="logo-placeholder">${icon('tooth', 20)}</div>`}</div><div class="logo-controls">${button('Upload clinic logo', 'choose-logo', 'upload', 'secondary')}<input id="clinic-logo-file" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" data-input="clinic-logo-file">${s.logo ? button('Remove logo', 'remove-logo', 'trash', 'link') : ''}</div><div class="form-grid two"><label class="field-label">Clinic / practice name<input name="clinicName" value="${attr(s.clinicName)}" data-settings></label><label class="field-label">Chamber / branch<input name="chamberName" value="${attr(s.chamberName)}" data-settings></label><label class="field-label">Dentist name<input name="dentistName" value="${attr(s.dentistName)}" data-settings></label><label class="field-label">Professional title<input name="professionalTitle" value="${attr(s.professionalTitle)}" data-settings></label><label class="field-label">Phone<input name="phone" value="${attr(s.phone)}" data-settings></label><label class="field-label">Email<input name="email" value="${attr(s.email)}" data-settings></label><label class="field-label full">Address<textarea name="address" rows="2" data-settings>${attr(s.address)}</textarea></label><label class="field-label">City<input name="city" value="${attr(s.city)}" data-settings></label><label class="field-label">District<input name="district" value="${attr(s.district)}" data-settings></label></div></section><section class="card settings-card"><div class="settings-section-head"><div><span class="eyebrow">LOCALIZATION</span><h2>Use the language your team understands</h2><p>Data remains language-neutral; only labels and formatting change.</p></div></div><div class="form-grid two"><label class="field-label">Default language<select name="language" data-settings><option ${s.language === 'English' ? 'selected' : ''}>English</option><option ${s.language === 'Bengali' ? 'selected' : ''}>Bengali</option></select></label><label class="field-label">Currency<select name="currency" data-settings><option ${s.currency === 'BDT' ? 'selected' : ''}>BDT</option><option ${s.currency === 'USD' ? 'selected' : ''}>USD</option></select></label><label class="field-label">Timezone<select name="timezone" data-settings><option ${s.timezone === 'Asia/Dhaka' ? 'selected' : ''}>Asia/Dhaka</option><option ${s.timezone === 'Asia/Kolkata' ? 'selected' : ''}>Asia/Kolkata</option><option ${s.timezone === 'UTC' ? 'selected' : ''}>UTC</option></select></label><label class="field-label">Date format<select name="dateFormat" data-settings><option ${s.dateFormat === 'dd MMM yyyy' ? 'selected' : ''}>dd MMM yyyy</option><option ${s.dateFormat === 'dd/MM/yyyy' ? 'selected' : ''}>dd/MM/yyyy</option><option ${s.dateFormat === 'yyyy-MM-dd' ? 'selected' : ''}>yyyy-MM-dd</option></select></label><label class="field-label">Time format<select name="timeFormat" data-settings><option ${s.timeFormat === '12-hour' ? 'selected' : ''}>12-hour</option><option ${s.timeFormat === '24-hour' ? 'selected' : ''}>24-hour</option></select></label><label class="field-label full">Payment methods<input name="paymentMethodsText" value="${attr((s.paymentMethods || []).join(', '))}" data-settings placeholder="Cash, Bank, Card, bKash, Nagad, Rocket, Upay"><small class="field-hint">Separate methods with commas. Cash, Bank and Card are always available.</small></label><label class="field-label full">Expense categories<input name="expenseCategoriesText" value="${attr((s.expenseCategories || []).join(', '))}" data-settings placeholder="Rent, Supplies, Maintenance"><small class="field-hint">Keep operating categories consistent for accounting and reports.</small></label><label class="field-label full">Inventory categories<input name="inventoryCategoriesText" value="${attr((s.inventoryCategories || []).join(', '))}" data-settings placeholder="Medicine, Dental material, Consumable"><small class="field-hint">Categories are local configuration; existing items keep their saved category.</small></label><label class="field-label full">Rooms / chairs<input name="roomsText" value="${attr((s.rooms || ['Room 1']).join(', '))}" data-settings placeholder="Room 1, Room 2"><small class="field-hint">Use room names for appointment conflict detection.</small></label><label class="field-label full">Custom patient fields<input name="customPatientFieldsText" value="${attr((s.customPatientFields || []).map((field) => field.label || field).join(', '))}" data-settings placeholder="Insurance number, Preferred language"><small class="field-hint">Comma-separated fields appear in the patient registration form.</small></label><label class="field-label">Print layout<select name="printPageSize" data-settings><option value="A4" ${s.printPageSize === 'A4' ? 'selected' : ''}>A4 document</option><option value="A5" ${s.printPageSize === 'A5' ? 'selected' : ''}>A5 document</option><option value="Letter" ${s.printPageSize === 'Letter' ? 'selected' : ''}>Letter document</option><option value="Receipt" ${s.printPageSize === 'Receipt' ? 'selected' : ''}>80 mm receipt</option></select></label><label class="field-label full">Document footer<input name="documentFooter" value="${attr(s.documentTemplate?.footer || '')}" data-settings-template="footer"><small class="field-hint">Shown on printable invoices, receipts, prescriptions, statements and reports.</small></label><label class="toggle-line"><input type="checkbox" ${s.documentTemplate?.showLogo !== false ? 'checked' : ''} data-settings-template="showLogo"><span class="toggle-ui"></span><span><strong>Show clinic logo in documents</strong><small>Use the logo configured above when a print layout supports it.</small></span></label><label class="toggle-line"><input type="checkbox" ${s.documentTemplate?.showClinicContact !== false ? 'checked' : ''} data-settings-template="showClinicContact"><span class="toggle-ui"></span><span><strong>Show clinic contact in documents</strong><small>Include dentist, phone and address in the document header.</small></span></label><label class="toggle-line"><input type="checkbox" ${s.taxEnabled ? 'checked' : ''} data-settings-checkbox="taxEnabled"><span class="toggle-ui"></span><span><strong>Apply default invoice tax</strong><small>Use the configured rate on new invoices; historical invoices remain unchanged.</small></span></label><label class="field-label">Default tax rate (%)<input type="number" min="0" max="100" step="0.01" name="taxRate" value="${attr(s.taxRate)}" data-settings></label></div></section><section class="card settings-card"><div class="settings-section-head"><div><span class="eyebrow">NUMBERING & CONTROL</span><h2>Keep records identifiable</h2><p>Prefixes apply to future records and do not rewrite history.</p></div></div><div class="form-grid three"><label class="field-label">Patient code prefix<input name="patientPrefix" value="${attr(s.patientPrefix)}" data-settings></label><label class="field-label">Invoice prefix<input name="invoicePrefix" value="${attr(s.invoicePrefix)}" data-settings></label><label class="field-label">Appointment prefix<input name="appointmentPrefix" value="${attr(s.appointmentPrefix)}" data-settings></label><label class="field-label">Queue serial prefix<input name="serialPrefix" value="${attr(s.serialPrefix)}" data-settings></label><label class="field-label">Default duration (min)<input type="number" min="5" name="defaultDuration" value="${attr(s.defaultDuration)}" data-settings></label><label class="field-label">Low-stock threshold<input type="number" min="0" name="lowStockThreshold" value="${attr(s.lowStockThreshold)}" data-settings></label></div></section><section class="card settings-card"><div class="settings-section-head"><div><span class="eyebrow">PRIVACY & SECURITY</span><h2>Keep the workspace private</h2><p>Local data never leaves this device through Dentiva Pro.</p></div><span class="security-pill">${icon('lock', 14)} Protected</span></div><div class="security-options"><label class="toggle-line"><input type="checkbox" ${s.notifications ? 'checked' : ''} data-settings-checkbox="notifications"><span class="toggle-ui"></span><span><strong>In-app notifications</strong><small>Show meaningful appointment, follow-up and stock signals.</small></span></label><div class="notification-rule-grid"><span class="field-hint">Notification categories</span>${NOTIFICATION_RULES.map(([kind, label]) => `<label class="toggle-line compact"><input type="checkbox" data-settings-rule="${kind}" ${notificationRuleEnabled(kind) ? 'checked' : ''}><span class="toggle-ui"></span><span><strong>${label}</strong></span></label>`).join('')}</div><div class="security-control"><div><strong>Session timeout</strong><small>Lock the workspace after inactivity.</small></div><label class="field-label compact-field"><input type="number" min="1" max="240" name="autoLockMinutes" value="${attr(s.autoLockMinutes || 30)}" data-settings><small class="field-hint">minutes</small></label></div><div class="security-control"><div><strong>Application lock</strong><small>${s.applicationLock ? 'A local PIN is required when this workspace is locked.' : 'Protect this workspace with a local administrator PIN.'}</small></div><div class="security-control-actions">${s.applicationLock ? '<span class="soft-label">Enabled</span>' : ''}${button(s.applicationLock ? 'Change PIN' : 'Set application PIN', 'open-security', 'lock', 'secondary')}${s.applicationLock ? button('Disable', 'disable-lock', 'close', 'link') : ''}</div></div></div></section></section></div></div>`;
+/* ----------------------------- diagnostics ----------------------------- */
+async function renderDiagnostics() {
+  const diag = await api.diagnostics().catch(() => null);
+  if (!diag) return `<div class="page">${pageHeader('Diagnostics', 'Workspace health in one glance.')}<div class="empty-state"><h3>Diagnostics unavailable</h3><p>The health report could not be produced. Your data is unaffected.</p></div></div>`;
+  const storage = diag.storage || {};
+  const issues = diag.issues || [];
+  return `<div class="page">
+    ${pageHeader('Diagnostics', 'Workspace health in one glance.', button('Run integrity check', 'run-integrity-check', 'refresh', 'primary'))}
+    <div class="metric-grid">
+      <div class="metric-card ${diag.ok ? '' : 'metric-negative'}"><div class="metric-top"><span class="metric-label">Integrity</span><span class="metric-icon">${icon('shield', 18)}</span></div><strong>${diag.ok ? 'Healthy' : 'Needs attention'}</strong><small>${diag.integrity?.integrity || '—'} · ${diag.integrity?.foreignKeyViolationCount ?? 0} FK issue(s)</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Database</span></div><strong>${formatBytes(storage.bytes || 0)}</strong><small>${esc(storage.journalMode || '')} journal</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Attachments</span></div><strong>${formatBytes(storage.attachmentBytes || 0)}</strong><small>${number(storage.attachmentFiles || 0)} files</small></div>
+      <div class="metric-card"><div class="metric-top"><span class="metric-label">Free disk</span></div><strong>${diag.freeDiskBytes ? formatBytes(diag.freeDiskBytes) : '—'}</strong></div>
+    </div>
+    <section class="card"><div class="card-title"><div class="card-title-text">${icon('warning', 17)}<h2>Integrity results</h2></div></div>
+      ${issues.length ? issues.map((entry) => `<div class="signal-item ${entry.severity === 'error' ? 'signal-danger' : entry.severity === 'warning' ? 'signal-warning' : ''}"><span class="signal-icon">${icon(entry.severity === 'error' ? 'warning' : 'info', 16)}</span><div><strong>${esc(entry.code)}</strong><small>${esc(entry.message)}</small></div>${badge(entry.severity, entry.severity === 'error' ? 'danger' : entry.severity === 'warning' ? 'warning' : 'neutral')}</div>`).join('') : emptyState('check', 'No current integrity issues', 'Structure, relationships and money fields pass every check.')}
+    </section>
+    <section class="card"><div class="card-title"><div class="card-title-text">${icon('database', 17)}<h2>Record counts</h2></div></div>
+      <div class="count-grid">${Object.entries(storage.recordCounts || {}).map(([collection, count]) => `<div class="count-cell"><small>${esc(collection)}</small><strong>${number(count)}</strong></div>`).join('')}</div>
+    </section>
+  </div>`;
 }
-function renderUsers() {
-  if (!can('users.manage')) return permissionDeniedPage('User accounts');
-  const users = state.users || [];
-  const activeCount = users.filter((user) => user.active !== false).length;
-  return `<div class="page-content"><div class="page-heading"><div><span class="eyebrow">ACCESS CONTROL</span><h1>User accounts</h1><p>Secure local accounts, staff associations and effective permissions.</p></div><div class="heading-actions">${button('Add user account', 'open-user-account', 'plus', 'primary')}</div></div><section class="stats-grid stats-grid-4"><div class="stat-card"><span class="stat-label">Total accounts</span><strong>${number(users.length)}</strong><small>Local identities</small></div><div class="stat-card"><span class="stat-label">Active accounts</span><strong>${number(activeCount)}</strong><small>Allowed to sign in</small></div><div class="stat-card"><span class="stat-label">Signed in before</span><strong>${number(users.filter((user) => user.lastLogin).length)}</strong><small>Known sessions</small></div><div class="stat-card"><span class="stat-label">Current role</span><strong>${esc(currentUser()?.role || '—')}</strong><small>${esc(currentUser()?.name || '')}</small></div></section><section class="card table-card"><div class="card-head"><div><span class="eyebrow">ACCOUNT DIRECTORY</span><h2>Who can access this workspace</h2></div><span class="count-pill">${number(users.length)} accounts</span></div><div class="table-scroll"><table><thead><tr><th>Name</th><th>Role</th><th>Staff association</th><th>Status</th><th>Last login</th><th></th></tr></thead><tbody>${users.length ? users.map((user) => `<tr><td><div class="person-cell"><span class="avatar avatar-small">${initials(user.name)}</span><div><strong>${esc(user.name)}</strong><small>${user.pinHash ? 'PIN protected' : 'PIN not configured'}</small></div></div></td><td>${esc(user.role || 'Custom Role')}</td><td>${esc(user.staffId ? staffName(user.staffId) : 'Not linked')}</td><td>${statusBadge(user.active === false ? 'Inactive' : 'Active')}</td><td>${user.lastLogin ? `${date(user.lastLogin.slice(0, 10))} ${esc(user.lastLogin.slice(11, 16) || '')}` : 'Never'}</td><td class="table-actions">${button('Edit', 'open-user-account', 'edit', 'link', `data-id="${user.id}"`)}${user.id !== currentUser()?.id ? button(user.active === false ? 'Activate' : 'Deactivate', 'toggle-user-active', user.active === false ? 'check' : 'lock', 'link', `data-id="${user.id}"`) : ''}</td></tr>`).join('') : `<tr><td colspan="6">${emptyState('users', 'No user accounts yet', 'Create an account for each person who uses this workspace.')}</td></tr>`}</tbody></table></div></section><section class="info-grid"><div class="info-card">${icon('shield', 18)}<div><strong>Underlying authorization</strong><p>Buttons are not the security boundary. Every protected operation checks the signed-in account before changing clinical, financial, staff or backup data.</p></div></div><div class="info-card">${icon('lock', 18)}<div><strong>Local credential protection</strong><p>PINs use salted PBKDF2 hashes. Failed attempts temporarily lock the account, and inactive accounts cannot sign in.</p></div></div></section></div>`;
+
+/* ------------------------------- settings ------------------------------ */
+async function renderSettings() {
+  const s = appState.settings;
+  const logo = safeLogoSource(s.logo);
+  return `<div class="page">
+    ${pageHeader('Settings', 'The practice identity behind every document and screen.', '')}
+    <form data-form="settings" class="settings-form">
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('building', 17)}<h2>Clinic identity</h2></div></div>
+        <div class="form-grid two">
+          <div class="logo-block">${logo ? `<img class="logo-preview" src="${logo}" alt="Clinic logo">` : `<span class="logo-placeholder">${icon('building', 26)}</span>`}<button type="button" class="btn btn-secondary" data-action="upload-logo">${logo ? 'Change logo' : 'Upload clinic logo'}</button>${logo ? `<button type="button" class="link-button" data-action="remove-logo">Remove logo</button>` : ''}</div>
+          ${field('Clinic / practice name', 'clinicName', s.clinicName)}
+          ${field('Chamber / branch', 'chamberName', s.chamberName)}
+          ${field('Dentist name', 'dentistName', s.dentistName)}
+          ${field('Professional title', 'professionalTitle', s.professionalTitle)}
+          ${field('Phone', 'phone', s.phone, 'tel')}
+          ${field('Secondary phone', 'secondaryPhone', s.secondaryPhone, 'tel')}
+          ${field('Email', 'email', s.email, 'email')}
+          ${field('Address', 'address', s.address, 'textarea', 'rows="2"')}
+          <div class="field-split">${field('City', 'city', s.city)}${field('District', 'district', s.district)}</div>
+          ${field('Country', 'country', s.country, 'text', 'value="Bangladesh"')}
+        </div>
+      </section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('globe', 17)}<h2>Language & formats</h2></div></div>
+        <div class="form-grid two">
+          ${selectField('Default language', 'language', [['English', 'English'], ['Bengali', 'Bengali']], s.language || 'English')}
+          ${selectField('Currency', 'currency', [['BDT', 'BDT (৳)'], ['USD', 'USD ($)'], ['EUR', 'EUR (€)'], ['INR', 'INR (₹)']], s.currency || 'BDT')}
+          ${field('Date format', 'dateFormat', s.dateFormat || 'DD/MM/YYYY')}
+          ${selectField('Time format', 'timeFormat', [['12', '12-hour'], ['24', '24-hour']], s.timeFormat || '12')}
+          ${selectField('Print page size', 'printPageSize', [['A4', 'A4'], ['Letter', 'Letter'], ['Legal', 'Legal'], ['A5', 'A5']], s.printPageSize || 'A4')}
+          ${selectField('Timezone', 'timezone', [['Asia/Dhaka', 'Asia/Dhaka (GMT+6)']], s.timezone || 'Asia/Dhaka')}
+        </div>
+      </section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('hash', 17)}<h2>Numbering</h2></div></div>
+        <div class="form-grid two">
+          ${field('Patient code prefix', 'patientPrefix', s.patientPrefix || 'PT')}
+          ${field('Invoice prefix', 'invoicePrefix', s.invoicePrefix || 'INV')}
+          ${field('Appointment prefix', 'appointmentPrefix', s.appointmentPrefix || 'APT')}
+          ${field('Queue serial prefix', 'serialPrefix', s.serialPrefix || 'Q')}
+          ${field('Receipt prefix', 'receiptPrefix', s.receiptPrefix || 'RCP')}
+          ${field('Visit prefix', 'visitPrefix', s.visitPrefix || 'VIS')}
+        </div>
+      </section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('credit', 17)}<h2>Commerce</h2></div></div>
+        <div class="form-grid two">
+          <label class="check-label"><input type="checkbox" name="taxEnabled" ${s.taxEnabled ? 'checked' : ''}> Enable tax on invoices</label>
+          ${field('Tax rate (%)', 'taxRate', s.taxRate ?? 0, 'number', 'min="0" max="100" step="0.01"')}
+          ${field('Default appointment duration (minutes)', 'defaultDuration', s.defaultDuration || 30, 'number', 'min="5" max="480" step="5"')}
+          <label class="field-label">Payment methods (comma separated)<input type="text" name="paymentMethods" value="${attr((s.paymentMethods || []).join(', '))}" placeholder="Cash, Bank, bKash, Nagad"></label>
+          <label class="field-label">Expense categories (comma separated)<input type="text" name="expenseCategories" value="${attr((s.expenseCategories || []).join(', '))}" placeholder="Rent, Utilities, Supplies"></label>
+          <label class="field-label">Inventory categories (comma separated)<input type="text" name="inventoryCategories" value="${attr((s.inventoryCategories || []).join(', '))}"></label>
+          <label class="field-label">Chairs (comma separated)<input type="text" name="chairs" value="${attr((s.chairs || []).join(', '))}"></label>
+          <label class="field-label">Rooms (comma separated)<input type="text" name="rooms" value="${attr((s.rooms || []).join(', '))}"></label>
+          ${field('Low stock threshold', 'lowStockThreshold', s.lowStockThreshold || 5, 'number', 'min="0"')}
+          ${field('Document footer (printed documents)', 'documentFooter', (s.documentTemplate || {}).footer || '', 'textarea', 'rows="2"')}
+        </div>
+      </section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('backup', 17)}<h2>Backup behaviour</h2></div></div>
+        <div class="form-grid two">
+          <label class="check-label"><input type="checkbox" name="backupEnabled" ${s.backupEnabled !== false ? 'checked' : ''}> Recommend backups after 7 days</label>
+          <label class="check-label"><input type="checkbox" name="notifications" ${s.notifications !== false ? 'checked' : ''}> Enable operational notifications</label>
+        </div>
+      </section>
+      <div class="form-actions-bar"><div class="form-note">${icon('shield', 14)} No cloud required — settings apply to this device only.</div>${button('Cancel', 'close-modal', 'close', 'link')}${button('Save settings', 'submit', 'check', 'primary')}</div>
+    </form>
+  </div>`;
 }
-function permissionDeniedPage(title) {
-  return `<div class="page-content"><section class="empty-page"><div class="empty-icon">${icon('shield', 30)}</div><span class="eyebrow">ACCESS RESTRICTED</span><h1>${esc(title)} is protected</h1><p>Your account does not have permission to open this workspace area. Ask an Administrator to update your role.</p></section></div>`;
+
+/* -------------------------------- users -------------------------------- */
+const USER_ROLE_OPTIONS = [['Administrator', 'Administrator'], ['Dentist', 'Dentist'], ['Receptionist', 'Receptionist'], ['Dental Assistant', 'Dental Assistant'], ['Accountant', 'Accountant'], ['Custom Role', 'Custom Role']];
+function effectivePermissions(user) {
+  if (!user) return [];
+  return permissionsForRole(user.role, user.permissions || []);
 }
+async function renderUsers() {
+  const result = await listQuery('users');
+  const rows = (result.rows || []).map((user) => `<tr class="clickable-row" data-action="open-user-account" data-id="${attr(user.id)}">
+    <td><div class="person-cell"><span class="avatar avatar-small">${initials(user.name)}</span><div><strong>${esc(user.name)}</strong><small>${user.pinHash || user.hasPin ? 'PIN protected' : 'PIN not configured'}${user.failedAttempts ? ` · ${user.failedAttempts} failed attempt(s)` : ''}${Number(user.lockedUntil || 0) > Date.now() ? ' · locked' : ''}</small></div></div></td>
+    <td>${esc(user.role || 'Custom Role')}</td>
+    <td>${esc(staffName(user.staffId))}</td>
+    <td>${user.lastLogin ? `${date(user.lastLogin.slice(0, 10))} ${time(user.lastLogin.slice(11, 16))}` : 'Never'}</td>
+    <td>${statusBadge(user.active === false ? 'Inactive' : 'Active')}</td>
+    <td class="row-actions">${button('Edit', 'open-user-account', 'edit', 'link', `data-id="${attr(user.id)}"`)}</td>
+  </tr>`).join('');
+  return `<div class="page">
+    ${pageHeader('User Accounts', 'Secure local accounts with explicit access.', `${button('Add user account', 'open-user-account', 'plus', 'primary')}`)}
+    ${toolbar(`<label class="search-field"><span>${icon('search', 16)}</span><input type="search" placeholder="Search accounts" value="${attr(listState.users.query)}" data-input="list-query" data-collection="users" aria-label="Search user accounts"></label>`, '')}
+    ${dataTable(['Account', 'Role', 'Staff', 'Last sign-in', 'Status', ''], rows, emptyState('users', 'No user accounts yet', 'Create an account for each person who uses the workspace.', button('Add user account', 'open-user-account', 'plus', 'secondary')))}
+    ${tablePager(result.total || 0, listState.users.page, 'users')}
+    <p class="form-note">${icon('shield', 14)} PINs are protected with PBKDF2 hashing. Failed attempts temporarily lock the account, and inactive accounts cannot sign in. Authorization is enforced by the application core — hiding a button never grants access (users.manage boundary).</p>
+  </div>`;
+}
+
 function renderHelp() {
-  return `<div class="page">${pageHeader('Help centre', 'Clear answers for the work you do every day.', button('Open quick search', 'open-search', 'search', 'secondary'))}<section class="help-hero"><div><span class="eyebrow">DENTIVA PRO GUIDANCE</span><h2>Care for the record.<br>Keep the practice moving.</h2><p>Short, practical guidance for setting up your local workspace and building a dependable routine.</p></div><div class="help-hero-mark">${icon('tooth', 70)}</div></section><div class="help-grid"><article class="card help-card"><span class="help-card-icon">${icon('sparkle', 19)}</span><h3>Start with setup</h3><p>Add your clinic identity, prefixes and working preferences before creating documents.</p><button class="text-button" data-action="open-setup">Open setup${icon('arrow', 14)}</button></article><article class="card help-card"><span class="help-card-icon">${icon('backup', 19)}</span><h3>Protect your data</h3><p>Export verified backups regularly. Keep one copy away from the workstation.</p><button class="text-button" data-action="navigate" data-page="backup">Backup guide${icon('arrow', 14)}</button></article><article class="card help-card"><span class="help-card-icon">${icon('book', 19)}</span><h3>Use patient workspaces</h3><p>Start from a patient profile to keep encounters, dental records and balances connected.</p><button class="text-button" data-action="navigate" data-page="patients">Open patients${icon('arrow', 14)}</button></article><article class="card help-card"><span class="help-card-icon">${icon('shield', 19)}</span><h3>Clinical safety</h3><p>Dentiva Pro records professional input. Clinical judgement always remains with the dentist.</p><button class="text-button" data-action="navigate" data-page="settings">Privacy settings${icon('arrow', 14)}</button></article></div><section class="card faq-card"><div><span class="eyebrow">FREQUENTLY ASKED</span><h2>Keep the essentials close</h2></div><div class="faq-list"><details open><summary>Where is my data stored?</summary><p>In this browser or desktop profile on the local device. Dentiva Pro does not require a cloud account or send patient data to an external service.</p></details><details><summary>How do I print a document?</summary><p>Use the Print action on an invoice, payment, prescription, report or patient summary. The system opens a clean print preview where you can choose a Windows printer or Save as PDF.</p></details><details><summary>Can I use Bengali labels?</summary><p>Yes. Choose Bengali under Settings. Records remain structured and are not altered when the interface language changes.</p></details></div></section></div>`;
+  return `<div class="page">
+    ${pageHeader('Help centre', 'Everything Dentiva Pro does, explained briefly.', '')}
+    <div class="help-grid">
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('users', 17)}<h2>Patients & scheduling</h2></div></div><p>Add patients, book appointments (conflicts are flagged, not silently accepted), run the daily queue with serials, and keep follow-ups on a due date that becomes an actionable task.</p></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('tooth', 17)}<h2>Clinical</h2></div></div><p>Record visits, update the tooth-level chart with preserved history, write clinician-authored prescriptions and treatment plans. Dentiva Pro never diagnoses or recommends treatment — it records what you enter.</p></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('receipt', 17)}<h2>Billing & money</h2></div></div><p>Invoices, payments, partial refunds and adjustments keep an exact, integer-taka balance. Re-pricing a paid invoice is blocked by design; every figure traces to a record.</p></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('box', 17)}<h2>Inventory</h2></div></div><p>Stock moves only through recorded movements (purchase, usage, correction) and can never go negative. Low stock and expiry surface on the dashboard and in reports.</p></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('shield', 17)}<h2>Security & backup</h2></div></div><p>Local accounts use PBKDF2-hashed PINs with lockout. Backups are validated before restore, and every restore keeps a safety copy. No cloud, no telemetry — No cloud required, ever.</p></section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('search', 17)}<h2>Fast actions</h2></div></div><p>Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> for the command palette: open patients, book appointments, record payments, run reports — without hunting through menus.</p></section>
+    </div>
+  </div>`;
 }
 function renderAbout() {
-  return `<div class="page about-page">${pageHeader('About Dentiva Pro', 'Professional dental practice management for Bangladesh.', button('Open settings', 'navigate', 'settings', 'secondary', 'data-page="settings"'))}<section class="about-hero"><div class="about-brand"><div class="about-symbol">${icon('tooth', 38)}</div><div><span class="eyebrow">DENTIVA PRO</span><h2>Calm software for serious care.</h2><p>Offline-first practice management designed for the daily rhythm of a modern dental clinic.</p></div></div><div class="version-block"><span>Version</span><strong>${APP_VERSION}</strong><small>Build 2026.09.22 · Windows x64 ready</small></div></section><div class="about-grid"><section class="card"><div class="card-heading-with-icon">${icon('layers', 18)}<h2>Built for the whole practice</h2></div><p>Patients, appointments, clinical records, dental charts, prescriptions, billing, inventory, finance, reports and verified backup workflows share one local source of truth.</p><div class="about-pills"><span>Offline-first</span><span>Light mode</span><span>Local privacy</span><span>English + Bengali</span></div></section><section class="card creator-card"><div class="creator-avatar">SK</div><div><span class="eyebrow">CREATOR</span><h2>Md. Shohan Khan</h2><p>${icon('mail', 14)} helloiamshohan@gmail.com</p><p>${icon('phone', 14)} WhatsApp · 01516591935</p></div></section></div><section class="card legal-card"><div><span class="eyebrow">LOCAL DATA PROMISE</span><h2>Your practice data stays yours.</h2><p>No paid APIs. No mandatory account. No hidden patient-data telemetry. Keep your backups under your own control.</p></div><div class="legal-mark">${icon('shield', 34)}</div></section></div>`;
+  const s = appState.settings;
+  return `<div class="page">
+    ${pageHeader('About Dentiva Pro', 'Professional dental practice management for Bangladesh.', '')}
+    <section class="card about-card">
+      <div class="about-brand">${icon('tooth', 34)}<div><h2>Dentiva Pro <span>v${APP_VERSION}</span></h2><p>Offline-first · Light mode · Local privacy</p></div></div>
+      <div class="about-grid">
+        <div class="info-card"><h3>Your practice data stays yours.</h3><p>Everything is stored on this device in a relational local database. No cloud required — no account, no sync, no telemetry.</p></div>
+        <div class="info-card"><h3>Built with care in Dhaka.</h3><p>Created by Md. Shohan Khan · helloiamshohan@gmail.com</p></div>
+        <div class="info-card"><h3>Clinician-in-control.</h3><p>Dentiva Pro records clinical decisions made by qualified professionals. It does not diagnose, prescribe or recommend treatment.</p></div>
+        <div class="info-card"><h3>Made for Bangladesh.</h3><p>Full Bengali + English interface, BDT by default, and the payment methods practices actually use.</p></div>
+      </div>
+      <p class="form-note">${s.clinicName ? `${esc(s.clinicName)} · ` : ''}Workspace on this device · last backup ${appState.storage?.lastBackupAt ? date(appState.storage.lastBackupAt.slice(0, 10)) : 'never'}</p>
+    </section>
+  </div>`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Modals                                                              */
+/* ------------------------------------------------------------------ */
 function modal() {
-  const { type, data = {} } = ui.modal;
-  const modalMap = { setup: modalSetup, patient: modalPatient, appointment: modalAppointment, visit: modalVisit, prescription: modalPrescription, invoice: modalInvoice, payment: modalPayment, refund: modalRefund, stock: modalStock, stockAdjustment: modalStockAdjustment, supplier: modalSupplier, attachment: modalAttachment, attachmentPreview: modalAttachmentPreview, staff: modalStaff, expense: modalExpense, treatment: modalTreatment, referral: modalReferral, treatmentPlan: modalTreatmentPlan, security: modalSecurity, notifications: modalNotifications, auditLog: modalAuditLog, csvImport: modalCsvImport, search: modalSearch, user: modalUser, userAccount: modalUserAccount, dashboard: dashboardWidgetModal, saveFilter: modalSaveFilter, savedFilters: modalSavedFilters };
-  const content = modalMap[type] ? modalMap[type](data) : '';
-  return `<div class="modal-backdrop" data-action="close-modal"><section class="modal-window ${type === 'search' ? 'search-modal' : ''} ${type === 'setup' ? 'setup-modal' : ''}" role="dialog" aria-modal="true" aria-label="${esc(data.title || type)}" data-modal-window><div class="modal-content">${content}</div></section></div>`;
+  const type = ui.modal?.type;
+  const data = ui.modal?.data || {};
+  const builders = {
+    setup: modalSetup, patient: modalPatient, appointment: modalAppointment, appointmentDetail: modalAppointmentDetail,
+    visit: modalVisit, prescription: modalPrescription, dental: modalDentalTooth, invoice: modalInvoice, invoiceDetail: modalInvoiceDetail,
+    payment: modalPayment, refund: modalRefund, expense: modalExpense, stock: modalStock, 'stock-adjustment': modalStockAdjustment,
+    supplier: modalSupplier, staff: modalStaff, treatment: modalTreatment, 'treatment-plan': modalTreatmentPlan,
+    referral: modalReferral, followup: modalFollowup, attachment: modalAttachment, 'attachment-preview': modalAttachmentPreview,
+    'user-account': modalUserAccount, security: modalSecurity, 'csv-import': modalCsvImport, search: modalSearch,
+    'saved-filters': modalSavedFilters, 'dashboard-customizer': modalDashboardCustomizer, 'audit-log': modalAuditLog,
+    notifications: modalNotifications, merge: modalPatientMerge
+  };
+  const builder = builders[type] || (() => '');
+  return `<div class="modal-overlay" data-modal-window><div class="modal-window" role="dialog" aria-modal="true">${builder(data)}</div></div>`;
 }
-function modalHead(eyebrow, title, subtitle = '') { return `<div class="modal-head"><div><span class="eyebrow">${esc(eyebrow)}</span><h2>${esc(localized(title))}</h2>${subtitle ? `<p>${esc(localized(subtitle))}</p>` : ''}</div><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon('close', 18)}</button></div>`; }
-function modalFooter(cancel = 'Cancel', save = 'Save record', saveAction = 'submit-modal') { return `<div class="modal-footer"><button class="btn btn-link" data-action="close-modal">${esc(cancel)}</button><button class="btn btn-primary" type="submit" data-submit-action="${saveAction}">${icon('check', 16)}<span>${esc(save)}</span></button></div>`; }
-function field(label, name, value = '', type = 'text', extra = '') { return `<label class="field-label">${esc(localized(label))}${type === 'textarea' ? `<textarea name="${attr(name)}" ${extra}>${attr(value)}</textarea>` : `<input type="${type}" name="${attr(name)}" value="${attr(value)}" ${extra}>`}</label>`; }
-function selectField(label, name, options, value = '', extra = '') { return `<label class="field-label">${esc(localized(label))}<select name="${attr(name)}" ${extra}>${options.map(([val, label]) => `<option value="${attr(val)}" ${String(val) === String(value) ? 'selected' : ''}>${esc(localized(label))}</option>`).join('')}</select></label>`; }
-function patientOptions(value = '') { return active(state.patients).sort((a, b) => a.fullName.localeCompare(b.fullName)).map((p) => [p.id, `${p.patientCode || ''} · ${p.fullName}`]); }
-function dentistOptions(value = '') { return [['', state.settings.dentistName || 'Primary dentist'], ...active(state.staff).filter((s) => ['Dentist', 'Manager'].includes(s.role)).map((s) => [s.id, s.name])]; }
+function modalHead(eyebrow, title, subtitle = '') {
+  return `<div class="modal-head"><div><span class="eyebrow">${esc(eyebrow)}</span><h2>${esc(localized(title))}</h2>${subtitle ? `<p>${esc(localized(subtitle))}</p>` : ''}</div><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon('close', 18)}</button></div>`;
+}
+function modalFooter(cancel = 'Cancel', save = 'Save record', saveAction = 'submit-modal') {
+  return `<div class="modal-footer"><button class="btn btn-link" data-action="close-modal">${esc(cancel)}</button><button class="btn btn-primary" type="submit" data-submit-action="${saveAction}">${icon('check', 16)}<span>${esc(save)}</span></button></div>`;
+}
+function field(label, name, value = '', type = 'text', extra = '') {
+  return `<label class="field-label">${esc(localized(label))}${type === 'textarea' ? `<textarea name="${attr(name)}" ${extra}>${attr(value)}</textarea>` : `<input type="${type}" name="${attr(name)}" value="${attr(value)}" ${extra}>`}</label>`;
+}
+function selectField(label, name, options, value = '', extra = '') {
+  return `<label class="field-label">${esc(localized(label))}<select name="${attr(name)}" ${extra}>${options.map(([val, label]) => `<option value="${attr(val)}" ${String(val) === String(value) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
+}
+function patientOptions(value = '', onlyActive = true) {
+  const list = (onlyActive ? appState.directory.patients : appState.directory.patients).sort((a, b) => String(a.fullName).localeCompare(String(b.fullName)));
+  return [['', 'Choose patient...'], ...list.map((p) => [p.id, `${p.patientCode || ''} · ${p.fullName}`])];
+}
+function dentistOptions(value = '') {
+  return [['', appState.settings.dentistName || 'Primary dentist'], ...appState.directory.staff.filter((s) => ['Dentist', 'Manager'].includes(s.role)).map((s) => [s.id, s.name])];
+}
+function treatmentOptions(value = '') {
+  return [['', 'No catalog treatment'], ...appState.directory.treatments.filter((t) => t.active !== false).map((t) => [t.id, `${t.name} · ${currency(t.defaultPrice || 0)}`])];
+}
 
-function modalSaveFilter() {
-  return `<form data-form="saved-filter">${modalHead('SAVED SEARCH', 'Save this patient view', 'Keep the current search and patient filters available for the next visit.')}<div class="saved-filter-preview"><strong>${esc(ui.search || 'All patients')}</strong><small>${ui.patientStatusFilter || 'All statuses'}${ui.patientBalanceFilter && ui.patientBalanceFilter !== 'all' ? ` · ${ui.patientBalanceFilter}` : ''}${ui.patientToothStatus ? ` · ${ui.patientToothStatus}` : ''}</small></div>${field('View name', 'name', '', 'text', 'required maxlength="80" placeholder="e.g. Outstanding recalls"')}${modalFooter('Cancel', 'Save view')}</form>`;
+/* Form-level permissions: the UI refuses to even open forms the session
+ * cannot submit — the backend enforces the same rule on every call. */
+const formPermissions = {
+  patient: 'patients.create', appointment: 'appointments.create', visit: 'clinical.create',
+  prescription: 'prescriptions.create', invoice: 'billing.create', payment: 'payments.create',
+  refund: 'payments.refund', expense: 'accounting.create', stock: 'inventory.purchase',
+  supplier: 'inventory.purchase', staff: 'staff.create', treatment: 'clinical.create',
+  'treatment-plan': 'clinical.plan', referral: 'clinical.create', followup: 'clinical.create',
+  attachment: 'clinical.attachments', security: 'settings.edit', 'user-account': 'users.manage',
+  settings: 'settings.edit', merge: 'patients.edit', 'stock-adjustment': 'inventory.adjust'
+};
+function openModal(type, data = {}) {
+  const permission = formPermissions[type];
+  if (permission && !can(permission)) return requirePermission(permission);
+  ui.modal = { type, data };
+  render();
+  window.setTimeout(() => document.querySelector('[data-modal-window] input, [data-modal-window] select, [data-modal-window] textarea')?.focus(), 40);
 }
-function modalSavedFilters() {
-  const filters = (state.savedFilters || []).filter((filter) => filter.entity === 'patients');
-  return `${modalHead('SAVED SEARCHES', 'Patient views', filters.length ? 'Load a saved search or remove an old view.' : 'Save a patient search to reuse it here.')}<div class="saved-filter-list">${filters.length ? filters.map((filter) => `<div class="saved-filter-row"><div><strong>${esc(filter.name)}</strong><small>${esc(filter.query || 'All patients')} · ${esc(filter.status || 'All statuses')}</small></div><div class="row-actions">${button('Load', 'load-saved-filter', 'arrow', 'link', `data-id="${filter.id}"`)}<button class="icon-button tiny" data-action="delete-saved-filter" data-id="${filter.id}" aria-label="Delete saved search">${icon('trash', 15)}</button></div></div>`).join('') : emptyState('search', 'No saved searches', 'Use Save view after applying a patient search or filter.')}</div><div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
+function closeModal() {
+  if (ui.modal?.type === 'csv-import' && ui.csvImport) ui.csvImport = null;
+  ui.modal = null;
+  render();
 }
+
+/* ------------------------------ setup ------------------------------ */
 function modalSetup(data = {}) {
-  const s = state.settings; const step = data.step || 1;
-  const steps = [['01', 'Practice'], ['02', 'Preferences'], ['03', 'Ready']];
-  if (step === 3) return `${modalHead('SETUP COMPLETE', 'Your workspace is ready', 'Your practice identity is saved locally. You can refine every preference later in Settings.')}<div class="setup-complete"><div class="setup-complete-mark">${icon('check', 30)}</div><h3>Welcome to Dentiva Pro</h3><p>${esc(s.clinicName || 'Your practice')} is ready for its first record. Start with a patient, appointment or treatment.</p><div class="setup-next-steps"><div>${icon('users', 17)}<span>Register patients safely</span></div><div>${icon('calendar', 17)}<span>Build today’s schedule</span></div><div>${icon('backup', 17)}<span>Back up at any time</span></div></div></div><div class="modal-footer"><button class="btn btn-primary" data-action="finish-setup">Enter workspace ${icon('arrow', 16)}</button></div>`;
-  return `<form data-form="setup">${modalHead('FIRST-RUN SETUP', 'Set up your practice', 'A few essentials now. Everything remains editable from Settings.')}<div class="setup-steps">${steps.map(([num, label], i) => `<div class="setup-step ${i + 1 === step ? 'active' : i + 1 < step ? 'done' : ''}"><span>${i + 1 < step ? icon('check', 13) : num}</span><small>${label}</small></div>`).join('')}</div>${step === 1 ? `<div class="form-grid two">${field('Clinic / practice name', 'clinicName', s.clinicName, 'text', 'required placeholder="e.g. Lakeview Dental Care"')}${field('Dentist name', 'dentistName', s.dentistName, 'text', 'required placeholder="e.g. Dr. Ayesha Rahman"')}${field('Professional title', 'professionalTitle', s.professionalTitle)}${field('Chamber / branch', 'chamberName', s.chamberName)}${field('Phone', 'phone', s.phone, 'tel', 'required placeholder="01XXXXXXXXX"')}${field('Secondary phone', 'secondaryPhone', s.secondaryPhone, 'tel')}${field('Email', 'email', s.email, 'email')}${field('Address', 'address', s.address, 'textarea', 'rows="2"')}${field('City', 'city', s.city)}${field('District', 'district', s.district)}<div class="form-full setup-default-note">${icon('map', 16)} Bangladesh defaults are already applied for country, currency and timezone.</div></div>` : `<div class="form-grid two">${selectField('Country', 'country', [['Bangladesh', 'Bangladesh']], s.country)}${selectField('Currency', 'currency', [['BDT', 'BDT / ৳'], ['USD', 'USD / $']], s.currency)}${selectField('Timezone', 'timezone', [['Asia/Dhaka', 'Asia/Dhaka (UTC+6)'], ['Asia/Kolkata', 'Asia/Kolkata (UTC+5:30)'], ['UTC', 'UTC']], s.timezone)}${selectField('Default language', 'language', [['English', 'English'], ['Bengali', 'বাংলা (Bengali)']], s.language)}${field('Invoice prefix', 'invoicePrefix', s.invoicePrefix, 'text', 'required')}${field('Patient code prefix', 'patientPrefix', s.patientPrefix, 'text', 'required')}${field('Appointment prefix', 'appointmentPrefix', s.appointmentPrefix, 'text', 'required')}${field('Queue serial prefix', 'serialPrefix', s.serialPrefix, 'text', 'required')}${field('Administrator PIN', 'adminPin', '', 'password', 'required minlength="4" maxlength="12" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"')}${field('Confirm administrator PIN', 'adminPinConfirm', '', 'password', 'required minlength="4" maxlength="12" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="Repeat the PIN"')}<div class="form-full setup-default-note">${icon('shield', 16)} Dentiva Pro is offline-first. No cloud account or paid service is required. The Administrator PIN is salted and hashed locally.</div></div>`}${modalFooter(step === 1 ? 'Skip for now' : 'Back', step === 1 ? 'Continue' : 'Save & continue', 'setup-next')}</form>`;
+  const step = data.step || 1;
+  if (step === 3) {
+    return `<div class="modal-window-inner">${modalHead('FIRST RUN', 'All set', 'Your workspace is ready. Enter to start the day.')}
+      <div class="setup-success">${icon('check', 34)}<p>${esc(data.clinicName || 'Your clinic')} · ${esc(data.dentistName || 'Dentist')} · ${esc(data.language || 'English')} · ${esc(data.currency || 'BDT')}</p><p class="form-note">The administrator account now has a local PIN. You can add team accounts any time from User Accounts.</p></div>
+      <div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Review settings</button><button class="btn btn-primary" type="button" data-action="finish-setup">${icon('arrow', 16)}<span>Enter workspace</span></button></div>
+    </div>`;
+  }
+  if (step === 1) {
+    return `<form data-form="setup"><input type="hidden" name="setupStep" value="1">${modalHead('FIRST RUN', 'Welcome to Dentiva Pro', 'Set your clinic identity. Everything stays on this device.')}
+      <div class="form-grid two">
+        ${field('Clinic / practice name', 'clinicName', data.clinicName, 'text', 'required')}
+        ${field('Dentist name', 'dentistName', data.dentistName)}
+        ${field('Professional title', 'professionalTitle', data.professionalTitle || 'Dr.')}
+        ${field('Phone', 'phone', data.phone, 'tel')}
+        ${field('Email', 'email', data.email, 'email')}
+        ${field('Address', 'address', data.address, 'textarea', 'rows="2"')}
+      </div>
+      ${modalFooter('Exit', 'Continue')}
+    </form>`;
+  }
+  return `<form data-form="setup"><input type="hidden" name="setupStep" value="2">${modalHead('FIRST RUN', 'Finalise the workspace', 'Choose language, currency and create the first Administrator account.')}
+    <div class="form-grid two">
+      ${selectField('Default language', 'language', [['English', 'English'], ['Bengali', 'Bengali']], data.language || 'English')}
+      ${selectField('Currency', 'currency', [['BDT', 'BDT (৳)'], ['USD', 'USD ($)'], ['INR', 'INR (₹)']], data.currency || 'BDT')}
+      ${field('Administrator PIN', 'adminPin', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"')}
+      ${field('Confirm PIN', 'adminPinConfirm', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password"')}
+    </div>
+    <p class="form-note">${icon('shield', 14)} The PIN is hashed locally with PBKDF2 and never stored as readable text.</p>
+    <div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">${icon('check', 16)}<span>Finish setup</span></button><button class="btn btn-secondary" type="button" data-action="finish-setup">${icon('arrow', 16)}<span>Enter workspace</span></button></div>
+  </form>`;
 }
+
+/* ----------------------------- patient ----------------------------- */
 function modalPatient(data = {}) {
-  const p = data.patient || {}; const editing = Boolean(p.id);
-  const customFields = (state.settings.customPatientFields || []).map((definition) => field(definition.label, `custom_${definition.key}`, p.customFields?.[definition.key] || '', definition.type === 'date' ? 'date' : 'text', `placeholder="${attr(definition.placeholder || '')}"`)).join('');
-  return `<form data-form="patient"><input type="hidden" name="id" value="${attr(p.id || '')}">${modalHead(editing ? 'PATIENT RECORD' : 'NEW PATIENT', editing ? 'Edit patient details' : 'Register a patient', 'Keep identity, contact, alerts and clinical context together.')}<div class="form-grid two">${field('Full name', 'fullName', p.fullName, 'text', 'required placeholder="Patient full name"')}${field('Preferred name', 'preferredName', p.preferredName)}${field('Phone', 'phone', p.phone, 'tel', 'required placeholder="01XXXXXXXXX"')}${field('Alternative phone', 'alternativePhone', p.alternativePhone, 'tel')}${field('Email', 'email', p.email, 'email')}${selectField('Preferred contact method', 'preferredContact', [['Phone', 'Phone'], ['WhatsApp', 'WhatsApp'], ['SMS', 'SMS'], ['Email', 'Email'], ['No preference', 'No preference']], p.preferredContact || 'Phone')}${field('Date of birth', 'dateOfBirth', p.dateOfBirth, 'date')}${selectField('Gender', 'gender', [['', 'Not recorded'], ['Female', 'Female'], ['Male', 'Male'], ['Other', 'Other'], ['Prefer not to say', 'Prefer not to say']], p.gender)}${selectField('Blood group', 'bloodGroup', [['', 'Not recorded'], ['A+', 'A+'], ['A-', 'A−'], ['B+', 'B+'], ['B-', 'B−'], ['AB+', 'AB+'], ['AB-', 'AB−'], ['O+', 'O+'], ['O-', 'O−']], p.bloodGroup)}${field('Address', 'address', p.address, 'textarea', 'rows="2"')}${field('Emergency contact', 'emergencyContact', p.emergencyContact)}${field('Emergency phone', 'emergencyPhone', p.emergencyPhone, 'tel')}${field('Occupation', 'occupation', p.occupation)}${field('Allergies', 'allergies', p.allergies, 'textarea', 'rows="2" placeholder="Record known allergies or write None recorded"')}${field('Chronic conditions', 'chronicConditions', p.chronicConditions, 'textarea', 'rows="2"')}${field('Current medications', 'currentMedications', p.currentMedications, 'textarea', 'rows="2"')}${field('Previous dental history', 'previousDentalHistory', p.previousDentalHistory, 'textarea', 'rows="2"')}${field('Referral source', 'referralSource', p.referralSource)}${field('Tags', 'tagsText', normaliseTags(p.tags).join(', '), 'text', 'placeholder="e.g. Recall, High priority, Insurance"')}${field('Important alerts', 'importantAlerts', p.importantAlerts, 'textarea', 'rows="2" placeholder="Clinical or communication alerts"')}${field('Notes', 'notes', p.notes, 'textarea', 'rows="2"')}${selectField('Patient status', 'status', [['Active', 'Active'], ['Inactive', 'Inactive'], ['Archived', 'Archived']], p.status || 'Active')}${customFields ? `<div class="form-full custom-fields-block"><div class="eyebrow">CUSTOM PATIENT FIELDS</div>${customFields}</div>` : ''}</div><p class="form-note">${icon('shield', 14)} Patient code is generated automatically and stays unique. Custom fields are stored locally with this record.</p>${modalFooter('Cancel', editing ? 'Save changes' : 'Create patient')}</form>`;
+  const p = data.patient || {};
+  const editing = Boolean(p.id);
+  return `<form data-form="patient"><input type="hidden" name="id" value="${attr(p.id || '')}">${modalHead('PATIENT', editing ? 'Edit patient' : 'Add patient', 'One clear identity per person — search matches name, code and phone.')}
+    <div class="form-grid two">
+      ${field('Full name', 'fullName', p.fullName, 'text', 'required')}
+      ${field('Preferred name', 'preferredName', p.preferredName)}
+      ${field('Phone', 'phone', p.phone, 'tel', 'required')}
+      ${field('Email', 'email', p.email, 'email')}
+      ${selectField('Gender', 'gender', [['', '—'], ['Female', 'Female'], ['Male', 'Male'], ['Other', 'Other']], p.gender)}
+      ${field('Date of birth', 'dateOfBirth', p.dateOfBirth, 'date')}
+      ${field('Blood group', 'bloodGroup', p.bloodGroup, 'text', 'placeholder="e.g. B+"')}
+      ${field('Address', 'address', p.address, 'textarea', 'rows="2"')}
+      <div class="field-split">${field('City', 'city', p.city)}${field('District', 'district', p.district)}</div>
+      ${field('Occupation', 'occupation', p.occupation)}
+      ${field('Marital status', 'maritalStatus', p.maritalStatus)}
+      ${field('Emergency contact name', 'emergencyName', p.emergencyName)}
+      ${field('Emergency contact phone', 'emergencyPhone', p.emergencyPhone, 'tel')}
+      ${field('Tags (comma separated)', 'tags', Array.isArray(p.tags) ? p.tags.join(', ') : p.tags)}
+      ${field('Allergies', 'allergies', p.allergies, 'textarea', 'rows="2"')}
+      ${field('Medical history', 'medicalHistory', p.medicalHistory, 'textarea', 'rows="2"')}
+      ${field('Important alerts', 'importantAlerts', p.importantAlerts, 'textarea', 'rows="2"')}
+      ${field('Communication notes', 'communicationNotes', p.communicationNotes, 'textarea', 'rows="2"')}
+      ${field('Notes', 'notes', p.notes, 'textarea', 'rows="3"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save patient' : 'Add patient')}
+  </form>`;
+}
+function modalPatientMerge(data = {}) {
+  const p = data.patient || {};
+  return `<form data-form="merge"><input type="hidden" name="primaryId" value="${attr(p.id || '')}">${modalHead('MERGE PATIENTS', 'Merge duplicate into this patient', 'Every record from the duplicate moves here; the duplicate is archived. Codes and history are preserved.')}
+    <div class="form-grid">
+      ${selectField('Duplicate patient to merge', 'duplicateId', appState.directory.patients.filter((x) => x.id !== p.id).map((x) => [x.id, `${x.patientCode || ''} · ${x.fullName}`]), '')}
+      <p class="form-note">Review the two records before confirming. This cannot be undone without a restore.</p>
+    </div>
+    ${modalFooter('Cancel', 'Merge records', 'merge-patients')}
+  </form>`;
 }
 
-function modalAttachmentPreview(data = {}) {
-  const a = data.attachment || byId(state.attachments, data.id);
-  if (!a) return `${modalHead('ATTACHMENT', 'Preview unavailable', 'This file no longer exists in the local record.')}<div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Close</button></div>`;
-  const isImage = a.type?.startsWith('image/');
-  const preview = isImage ? `<img class="attachment-preview-image" src="${attr(a.data)}" alt="${attr(a.name)}">` : `<div class="attachment-no-preview">${icon('file', 30)}<strong>Safe inline preview is not available for ${esc(a.type || 'this file type')}.</strong><p>Download the original file to open it with a trusted local application. PDF active content is never embedded in the workspace.</p></div>`;
-  return `<div class="attachment-preview-modal">${modalHead('ATTACHMENT PREVIEW', a.name, `${a.category || 'Clinical document'} · ${formatBytes(a.size)}`)}<div class="attachment-preview-stage">${preview}</div><div class="modal-footer">${button('Download original', 'download-attachment', 'download', 'secondary', `data-id="${a.id}"`)}<button class="btn btn-primary" data-action="close-modal">Done</button></div></div>`;
-}
-function modalAttachment(data = {}) {
-  const a = data.attachment || data;
-  const editing = Boolean(a.id);
-  const visits = active(state.visits).filter((visit) => visit.patientId === (a.patientId || ui.patientId)).sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-  return `<form data-form="attachment"><input type="hidden" name="id" value="${attr(a.id || '')}"><input type="hidden" name="patientId" value="${attr(a.patientId || ui.patientId || '')}"><input type="hidden" name="type" value="${attr(a.type || '')}"><input type="hidden" name="size" value="${attr(a.size || 0)}">${modalHead('PATIENT ATTACHMENT', editing ? 'Edit attachment details' : 'Save attachment', 'Keep clinical files labelled, searchable and connected to the right encounter.')}<div class="attachment-upload-preview"><span class="attachment-icon">${icon(a.type?.startsWith('image/') ? 'eye' : 'file', 22)}</span><div><strong>${esc(a.name || 'Attachment')}</strong><small>${esc(a.type || 'Unknown file')} · ${formatBytes(a.size || 0)}</small></div></div><div class="form-grid two">${field('Display name', 'name', a.name || '', 'text', 'required maxlength="180"')}${selectField('Category', 'category', [['Image / X-ray', 'Image / X-ray'], ['PDF report', 'PDF report'], ['Prescription', 'Prescription'], ['Clinical document', 'Clinical document'], ['Other', 'Other']], a.category || (a.type === 'application/pdf' ? 'PDF report' : a.type?.startsWith('image/') ? 'Image / X-ray' : 'Clinical document'))}${selectField('Linked visit', 'visitId', [['', 'Not linked to a specific visit'], ...visits.map((visit) => [visit.id, `${date(visit.date)} · ${visit.reason || 'Clinical visit'}`])], a.visitId || '')}${field('Notes', 'notes', a.notes || '', 'textarea', 'rows="3" placeholder="Optional context for this file"')}</div>${modalFooter('Cancel', editing ? 'Save attachment' : 'Add attachment')}</form>`;
-}
+/* --------------------------- appointment --------------------------- */
 function modalAppointment(data = {}) {
-  const a = data.appointment || {}; const patients = patientOptions(a.patientId); const editing = Boolean(a.id); const dateValue = a.date || today();
-  return `<form data-form="appointment"><input type="hidden" name="id" value="${attr(a.id || '')}">${modalHead(editing ? 'APPOINTMENT' : 'NEW APPOINTMENT', editing ? 'Edit appointment' : 'Book an appointment', 'Protect time, chair and patient context.')}<div class="form-grid two">${selectField('Patient', 'patientId', [['', patients.length ? 'Choose patient...' : 'Add a patient first'], ...patients], a.patientId, 'required')}${field('Date', 'date', dateValue, 'date', 'required')}${field('Time', 'time', a.time || '09:00', 'time', 'required')}${field('Duration (minutes)', 'duration', a.duration || state.settings.defaultDuration, 'number', 'min="5" step="5" required')}${selectField('Dentist', 'dentistId', dentistOptions(), a.dentistId)}${field('Chair', 'chair', a.chair || 'Chair 1')}${selectField('Room', 'room', [['', 'No room assigned'], ...(state.settings.rooms || ['Room 1']).map((room) => [room, room])], a.room || '')}${field('Reason for visit', 'reason', a.reason, 'text', 'required placeholder="Consultation, cleaning, follow-up..."')}${selectField('Status', 'status', [['Scheduled', 'Scheduled'], ['Checked In', 'Checked In'], ['Waiting', 'Waiting'], ['In Treatment', 'In Treatment'], ['Completed', 'Completed'], ['Cancelled', 'Cancelled'], ['No Show', 'No Show']], a.status || 'Scheduled')}${field('Notes', 'notes', a.notes, 'textarea', 'rows="3"')}${field('Reminder note', 'reminder', a.reminder, 'text')}</div>${patients.length ? '' : `<div class="inline-warning">${icon('warning', 15)} Add a patient before booking an appointment. <button type="button" class="text-button" data-action="open-patient">Open patient form${icon('arrow', 13)}</button></div>`}${modalFooter('Cancel', editing ? 'Save appointment' : 'Book appointment')}</form>`;
+  const a = data.appointment || {};
+  const editing = Boolean(a.id);
+  return `<form data-form="appointment"><input type="hidden" name="id" value="${attr(a.id || '')}">${modalHead('APPOINTMENT', editing ? 'Edit appointment' : 'Book appointment', 'Conflicts with the same chair or dentist are flagged before you confirm.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(a.patientId || ui.patientId), a.patientId || ui.patientId, 'required')}
+      ${field('Date', 'date', a.date || today(), 'date', 'required')}
+      ${field('Time', 'time', a.time || '10:00', 'time', 'required')}
+      ${field('Duration (minutes)', 'duration', a.duration || appState.settings.defaultDuration || 30, 'number', 'min="5" max="480" step="5"')}
+      ${selectField('Dentist', 'dentistId', dentistOptions(a.dentistId), a.dentistId)}
+      <div class="field-split">${selectField('Chair', 'chair', (appState.settings.chairs || ['Chair 1']).map((c) => [c, c]), a.chair || 'Chair 1')}${selectField('Room', 'room', (appState.settings.rooms || ['Room 1']).map((r) => [r, r]), a.room || 'Room 1')}</div>
+      ${field('Reason', 'reason', a.reason, 'text', 'required')}
+      ${field('Planned treatment', 'treatment', a.treatment)}
+      ${field('Notes', 'notes', a.notes, 'textarea', 'rows="2"')}
+      ${selectField('Status', 'status', [['Scheduled', 'Scheduled'], ['Confirmed', 'Confirmed'], ['Checked In', 'Checked In'], ['Waiting', 'Waiting'], ['In Treatment', 'In Treatment'], ['Completed', 'Completed']], a.status || 'Scheduled')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save appointment' : 'Book appointment')}
+  </form>`;
 }
-function modalVisit(data = {}) {
-  const v = data.visit || {}; const patients = patientOptions(v.patientId); const editing = Boolean(v.id); const patientId = v.patientId || data.patientId || '';
-  return `<form data-form="visit"><input type="hidden" name="id" value="${attr(v.id || '')}">${modalHead(editing ? 'CLINICAL ENCOUNTER' : 'NEW VISIT', editing ? 'Edit clinical visit' : 'Record a visit', 'Record professional input without automating clinical judgement.')}<div class="form-grid two">${selectField('Patient', 'patientId', [['', 'Choose patient...'], ...patients], patientId, 'required')}${field('Date', 'date', v.date || today(), 'date', 'required')}${field('Time', 'time', v.time || '', 'time')}${field('Chief complaint / reason', 'reason', v.reason || v.chiefComplaint, 'text', 'required')}${field('Symptoms', 'symptoms', v.symptoms, 'textarea', 'rows="3"')}${field('Clinical findings', 'clinicalFindings', v.clinicalFindings, 'textarea', 'rows="3"')}${field('Diagnosis', 'diagnosis', v.diagnosis, 'textarea', 'rows="2"')}${field('Treatment plan', 'treatmentPlan', v.treatmentPlan, 'textarea', 'rows="2"')}${field('Treatment performed', 'treatmentPerformed', v.treatmentPerformed, 'textarea', 'rows="2"')}${field('Tooth number(s)', 'teeth', v.teeth, 'text', 'placeholder="e.g. 16, 26"')}${field('Anesthesia information', 'anesthesia', v.anesthesia, 'text')}${field('Follow-up date', 'followUpDate', v.followUpDate, 'date')}${field('Doctor / additional notes', 'notes', v.notes, 'textarea', 'rows="3"')}</div><div class="form-note">${icon('tooth', 14)} Multiple teeth and treatments can be recorded as comma-separated clinical notes. Use the Dental Chart for tooth-level status history.</div>${modalFooter('Cancel', editing ? 'Save visit' : 'Record visit')}</form>`;
-}
-function modalPrescription(data = {}) {
-  const p = data.prescription || {}; const editing = Boolean(p.id); const first = p.medications?.[0] || p;
-  const medicationLines = (p.medications || []).length ? p.medications.map((medication) => [medication.medicine, medication.strength || '', medication.dosage || '', medication.frequency || '', medication.duration || '', medication.route || 'Oral', medication.instructions || ''].join(' | ')).join('\n') : '';
-  return `<form data-form="prescription"><input type="hidden" name="id" value="${attr(p.id || '')}">${modalHead(editing ? 'PRESCRIPTION' : 'NEW PRESCRIPTION', editing ? 'Edit prescription' : 'Create a prescription', 'Clear instructions, multiple medicines and a print-ready record.')}<div class="form-grid two"><label class="field-label">Saved medication<select data-change="prescription-template"><option value="">Choose a saved medicine...</option>${(state.medicationCatalog || []).filter((item) => item.active !== false).map((item) => `<option value="${attr(item.id)}">${esc(item.name)}${item.strength ? ` · ${esc(item.strength)}` : ''}</option>`).join('')}</select></label>${selectField('Patient', 'patientId', [['', 'Choose patient...'], ...patientOptions(p.patientId)], p.patientId, 'required')}${field('Date', 'date', p.date || today(), 'date', 'required')}${field('Doctor', 'doctor', p.doctor || state.settings.dentistName, 'text', 'required')}${field('Medicine', 'medicine', first.medicine, 'text', 'required placeholder="Medicine name"')}${field('Strength', 'strength', first.strength, 'text', 'placeholder="e.g. 500 mg"')}${field('Dosage', 'dosage', first.dosage, 'text', 'placeholder="e.g. 1 tablet"')}${field('Frequency', 'frequency', first.frequency, 'text', 'placeholder="e.g. Twice daily"')}${field('Duration', 'duration', first.duration, 'text', 'placeholder="e.g. 5 days"')}${field('Route', 'route', first.route || 'Oral')}${field('Instructions', 'instructions', first.instructions, 'textarea', 'rows="3" placeholder="How and when to take this medicine"')}</div><div class="medication-tools form-full"><button type="button" class="text-button" data-action="save-medication-template">${icon('plus', 14)} Save current medicine to catalog</button><small class="field-hint">Saved locally for repeat prescriptions; it never makes a clinical recommendation.</small></div><label class="field-label form-full">Additional medicines <textarea name="medicationsText" rows="4" placeholder="One medicine per line: medicine | strength | dosage | frequency | duration | route | instructions">${attr(medicationLines)}</textarea><small class="field-hint">The first medicine above is included automatically. Add more lines for a complete prescription.</small></label>${field('Prescription notes', 'notes', p.notes, 'textarea', 'rows="3"')}<div class="form-note">${icon('shield', 14)} The medicine and instructions reflect the prescriber’s input. Dentiva Pro does not generate medical recommendations.</div>${modalFooter('Cancel', editing ? 'Save prescription' : 'Create prescription')}</form>`;
+function modalAppointmentDetail(data = {}) {
+  const a = data.appointment || {};
+  return `${modalHead('APPOINTMENT', `${a.appointmentCode || 'Appointment'}`, `${dateFull(a.date)} · ${time(a.time)}`)}
+    <div class="detail-list">
+      <div><dt>Patient</dt><dd>${button(patientName(a.patientId), 'open-patient-profile', 'arrow', 'link', `data-id="${attr(a.patientId)}"`)}</dd></div>
+      <div><dt>Reason</dt><dd>${esc(a.reason || '—')}</dd></div>
+      <div><dt>Treatment</dt><dd>${esc(a.treatment || '—')}</dd></div>
+      <div><dt>Dentist</dt><dd>${esc(staffName(a.dentistId))}</dd></div>
+      <div><dt>Chair / Room</dt><dd>${esc(a.chair || '—')} · ${esc(a.room || '—')}</dd></div>
+      <div><dt>Status</dt><dd>${statusBadge(a.status || 'Scheduled')}</dd></div>
+      ${a.notes ? `<div><dt>Notes</dt><dd>${esc(a.notes)}</dd></div>` : ''}
+    </div>
+    <div class="queue-card-actions">
+      ${['Checked In', 'Waiting', 'In Treatment', 'Completed', 'No Show'].map((status) => `<button class="chip-button ${a.status === status ? 'selected' : ''}" data-action="queue-status" data-id="${attr(a.id)}" data-status="${attr(status)}">${esc(status)}</button>`).join('')}
+      ${can('appointments.cancel') ? `<button class="chip-button danger" data-action="cancel-appointment" data-id="${attr(a.id)}">Cancel</button>` : ''}
+      ${can('appointments.edit') ? `<button class="chip-button" data-action="open-appointment" data-id="${attr(a.id)}">Edit</button>` : ''}
+    </div>
+    <div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
 }
 
-function modalInvoice(data = {}) {
-  const i = data.invoice || {}; const editing = Boolean(i.id); const item = i.items?.[0] || {};
-  return `<form data-form="invoice"><input type="hidden" name="id" value="${attr(i.id || '')}">${modalHead(editing ? 'INVOICE' : 'NEW INVOICE', editing ? 'Edit invoice' : 'Create an invoice', 'Line items, discounts and taxes remain transparent.')}<div class="form-grid two">${selectField('Patient', 'patientId', [['', 'Choose patient...'], ...patientOptions(i.patientId)], i.patientId, 'required')}${field('Invoice date', 'date', i.date || today(), 'date', 'required')}${field('Item / treatment', 'itemName', item.name || '', 'text', 'required placeholder="Treatment or service"')}${field('Quantity', 'quantity', item.quantity || 1, 'number', 'min="1" step="1" required')}${field('Unit price', 'unitPrice', item.unitPrice || '', 'number', 'min="0" step="0.01" required')}${field('Discount', 'discount', i.discount || 0, 'number', 'min="0" step="0.01"')}${field('Tax rate (%)', 'taxRate', i.taxRate ?? (state.settings.taxEnabled ? state.settings.taxRate : 0), 'number', 'min="0" step="0.01"')}<div class="field-label"><span>Payment status</span><div class="calculated-status">${statusBadge(i.id ? invoicePaymentStatus(i).status : 'Unpaid')}<small>Calculated from recorded payments and refunds.</small></div></div>${field('Notes', 'notes', i.notes, 'textarea', 'rows="2"')}</div><div class="invoice-preview-line"><span>Calculated total</span><strong id="invoice-modal-total">${currency(i.total || 0)}</strong><small>subtotal − discount + configured tax</small></div>${modalFooter('Cancel', editing ? 'Save invoice' : 'Create invoice')}</form>`;
+/* ------------------------------ visit ------------------------------ */
+function modalVisit(data = {}) {
+  const v = data.visit || {};
+  const editing = Boolean(v.id);
+  return `<form data-form="visit"><input type="hidden" name="id" value="${attr(v.id || '')}">${modalHead('CLINICAL RECORD', editing ? 'Edit visit' : 'Record visit', 'What happened, what was found, what was done — and when to follow up.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(v.patientId || ui.patientId), v.patientId || ui.patientId, 'required')}
+      ${field('Date', 'date', v.date || today(), 'date', 'required')}
+      ${field('Reason', 'reason', v.reason, 'text')}
+      ${field('Chief complaint', 'chiefComplaint', v.chiefComplaint, 'textarea', 'rows="2"')}
+      ${field('Symptoms', 'symptoms', v.symptoms, 'textarea', 'rows="2"')}
+      ${field('Findings', 'findings', v.findings, 'textarea', 'rows="2"')}
+      ${field('Diagnosis', 'diagnosis', v.diagnosis, 'textarea', 'rows="2')}
+      ${field('Treatment performed', 'treatmentPerformed', v.treatmentPerformed, 'textarea', 'rows="2"')}
+      ${field('Procedures (comma separated)', 'procedures', v.procedures)}
+      ${field('Tooth number(s)', 'teeth', v.teeth)}
+      ${selectField('Dentist', 'dentistId', dentistOptions(v.dentistId), v.dentistId)}
+      ${field('Follow-up date', 'followUpDate', v.followUpDate, 'date')}
+      <p class="form-note full">A follow-up date automatically creates an actionable follow-up task.</p>
+      ${field('Notes', 'notes', v.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save visit' : 'Record visit')}
+  </form>`;
 }
+
+/* --------------------------- prescription --------------------------- */
+function modalPrescription(data = {}) {
+  const rx = data.prescription || {};
+  const editing = Boolean(rx.id);
+  const first = (rx.medications || [])[0] || {};
+  const medicationLines = (rx.medications || []).slice(1).map((m) => [m.medicine, m.strength, m.dosage, m.frequency, m.duration, m.route, m.instructions].filter(Boolean).join('|')).join('\n');
+  return `<form data-form="prescription"><input type="hidden" name="id" value="${attr(rx.id || '')}">${modalHead('PRESCRIPTION', editing ? 'Edit prescription' : 'New prescription', 'Clear instructions, multiple medicines and a print-ready record.')}
+    <div class="form-grid two">
+      ${selectField('Saved medication', 'prescriptionTemplate', [['', 'Choose a saved medicine...'], ...((appState.medicationCatalog || []).filter((item) => item.active !== false).map((item) => [item.id, `${item.name}${item.strength ? ` · ${item.strength}` : ''}`]))], '')}
+      ${selectField('Patient', 'patientId', patientOptions(rx.patientId || ui.patientId), rx.patientId || ui.patientId, 'required')}
+      ${field('Date', 'date', rx.date || today(), 'date', 'required')}
+      ${field('Doctor', 'doctor', rx.doctor || appState.settings.dentistName, 'text', 'required')}
+      ${field('Medicine', 'medicine', first.medicine, 'text', 'required placeholder="Medicine name"')}
+      ${field('Strength', 'strength', first.strength, 'text', 'placeholder="e.g. 500 mg"')}
+      ${field('Dosage', 'dosage', first.dosage, 'text', 'placeholder="e.g. 1 tablet"')}
+      ${field('Frequency', 'frequency', first.frequency, 'text', 'placeholder="e.g. Twice daily"')}
+      ${field('Duration', 'duration', first.duration, 'text', 'placeholder="e.g. 5 days"')}
+      ${field('Route', 'route', first.route || 'Oral')}
+      ${field('Instructions', 'instructions', first.instructions, 'textarea', 'rows="3" placeholder="How and when to take this medicine"')}
+    </div>
+    <div class="medication-tools form-full"><button type="button" class="text-button" data-action="save-medication-template">${icon('plus', 14)} Save current medicine to catalog</button><small class="field-hint">Saved locally for repeat prescriptions; it never makes a clinical recommendation.</small></div>
+    <label class="field-label form-full">Additional medicines <textarea name="medicationsText" rows="4" placeholder="One medicine per line: medicine | strength | dosage | frequency | duration | route | instructions">${attr(medicationLines)}</textarea><small class="field-hint">The first medicine above is included automatically. Add more lines for a complete prescription.</small></label>
+    ${field('Prescription notes', 'notes', rx.notes, 'textarea', 'rows="2"')}
+    <div class="form-note">${icon('shield', 14)} The medicine and instructions reflect the prescriber’s input. Dentiva Pro does not generate medical recommendations.</div>
+    ${modalFooter('Cancel', editing ? 'Save prescription' : 'Create prescription')}
+  </form>`;
+}
+
+/* ----------------------------- dental tooth ----------------------------- */
+function modalDentalTooth(data = {}) {
+  const record = data.record || {};
+  return `${modalHead('DENTAL CHART', `Tooth ${data.tooth} (${data.dentition || 'adult'})`, 'Status, procedure and notes — previous records stay in history.')}
+    <div class="form-grid">
+      <div class="tooth-status-row">${['', 'Missing', 'Caries', 'Restored', 'Crown', 'Root canal', 'Extracted', 'Implant'].map((status) => `<button type="button" class="chip-button ${record.status === status ? 'selected' : ''}" data-action="set-tooth-status" data-status="${attr(status)}">${esc(status || 'Clear')}</button>`).join('')}</div>
+      <label class="field-label">Procedure<textarea name="dental-procedure" rows="1" placeholder="e.g. Composite restoration">${attr(record.procedure || data.procedure || '')}</textarea></label>
+      <label class="field-label">Chart note<textarea name="dental-note" rows="3" placeholder="Clinical note for this tooth">${attr(record.note || data.note || '')}</textarea></label>
+    </div>
+    <div class="modal-footer"><button class="btn btn-link" data-action="remove-tooth">Clear record</button><button class="btn btn-primary" data-action="save-tooth">${icon('check', 16)}<span>Save chart note</span></button></div>`;
+}
+
+/* ------------------------------ invoice ------------------------------ */
+function invoiceTotals(data) {
+  const items = (Array.isArray(data.items) ? data.items : []).map((item) => ({ quantity: Number(item.quantity) || 1, unitPrice: Number(item.unitPrice) || 0, total: (Number(item.quantity) || 1) * (Number(item.unitPrice) || 0) })).filter((item) => item.total > 0);
+  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+  return calculateInvoice({ quantity: 1, unitPrice: subtotal, discount: data.discount || 0, taxRate: data.taxRate || 0 });
+}
+function modalInvoice(data = {}) {
+  const inv = data.invoice || {};
+  const editing = Boolean(inv.id);
+  const items = inv.items || [];
+  return `<form data-form="invoice"><input type="hidden" name="id" value="${attr(inv.id || '')}">${modalHead('INVOICE', editing ? `Edit invoice ${inv.invoiceNumber || ''}` : 'New invoice', 'Line items with catalog defaults; totals are exact to the taka.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(inv.patientId || ui.patientId), inv.patientId || ui.patientId, 'required')}
+      ${field('Date', 'date', inv.date || today(), 'date', 'required')}
+      ${selectField('Dentist', 'dentistId', dentistOptions(inv.dentistId), inv.dentistId)}
+      <label class="field-label">Treatment<select name="treatmentId" data-change="invoice-treatment">${treatmentOptions(inv.treatmentId)}</select></label>
+    </div>
+    <div class="invoice-lines">${items.map((item, index) => `<div class="invoice-line"><input type="text" name="items[${index}][name]" value="${attr(item.name)}" placeholder="Item / treatment" required><input type="number" name="items[${index}][quantity]" value="${attr(item.quantity || 1)}" min="1" step="1" aria-label="Quantity"><input type="number" name="items[${index}][unitPrice]" value="${attr(item.unitPrice || '')}" min="0" step="0.01" aria-label="Unit price"><button type="button" class="icon-button" data-action="remove-invoice-line" data-index="${index}" aria-label="Remove line">${icon('trash', 15)}</button></div>`).join('')}
+      <button type="button" class="btn btn-secondary" data-action="add-invoice-line">${icon('plus', 15)}<span>Add line</span></button></div>
+    <div class="invoice-totals">
+      ${field('Discount', 'discount', inv.discount || 0, 'number', 'min="0" step="0.01"')}
+      <label class="check-label"><input type="checkbox" name="taxEnabled" ${appState.settings.taxEnabled ? 'checked' : ''}> Apply tax</label>
+      ${field('Tax rate (%)', 'taxRate', inv.taxRate ?? (appState.settings.taxEnabled ? appState.settings.taxRate || 0 : 0), 'number', 'min="0" max="100" step="0.01"')}
+      <div class="totals-summary"><small>Subtotal</small><strong id="invoice-subtotal">—</strong><small>Discount</small><strong id="invoice-discount">—</strong><small>Tax</small><strong id="invoice-tax">—</strong><small>Total</small><strong class="total-main" id="invoice-total">—</strong></div>
+    </div>
+    ${field('Notes', 'notes', inv.notes, 'textarea', 'rows="2"')}
+    ${editing && Number(inv.paidCents ?? inv.paid ?? 0) > 0 ? `<div class="form-note warning-note">Payments exist on this invoice — pricing is locked. Only notes and status can change.</div>` : ''}
+    ${modalFooter('Cancel', editing ? 'Save invoice' : 'Create invoice')}
+  </form>`;
+}
+function modalInvoiceDetail(data = {}) {
+  const inv = data.invoice || {};
+  const payments = data.payments || [];
+  const adjustments = data.adjustments || [];
+  return `${modalHead('INVOICE', `${inv.invoiceNumber || ''} · ${patientName(inv.patientId)}`, `${dateFull(inv.date)} · ${statusBadge(inv.status)}`)}
+    <div class="invoice-detail-grid">
+      <div class="detail-list">
+        <div><dt>Total</dt><dd><strong>${currency(centsToMoney(inv.totalCents ?? inv.total))}</strong></dd></div>
+        <div><dt>Paid (net)</dt><dd><strong>${currency(centsToMoney(data.netPaidCents ?? 0))}</strong></dd></div>
+        <div><dt>Refunded</dt><dd>${currency(data.refundedCents ?? 0)}</dd></div>
+        <div><dt>Adjusted</dt><dd>${currency(data.adjustedCents ?? 0)}</dd></div>
+        <div><dt>Due</dt><dd><strong class="${(data.dueCents ?? 0) > 0 ? 'text-warning' : ''}">${currency(data.dueCents ?? 0)}</strong></dd></div>
+      </div>
+      <div>
+        <h3 class="section-sub">Payments</h3>
+        ${payments.map((payment) => `<div class="record-row"><div><strong>${esc(payment.receiptNumber || '—')} · ${money(payment)}</strong><small>${date(payment.date)} · ${esc(payment.method || '—')}</small></div><div class="row-actions">${statusBadge(payment.status || 'Recorded')}${can('payments.refund') ? button('Refund', 'open-refund', 'undo', 'link', `data-id="${attr(payment.id)}"`) : ''}</div></div>`).join('') || '<p class="muted">No payments.</p>'}
+        <h3 class="section-sub">Adjustments & refunds</h3>
+        ${adjustments.map((adjustment) => `<div class="record-row"><div><strong>${esc(adjustment.type)} · ${money(adjustment)}</strong><small>${date(adjustment.date)} · ${esc(adjustment.reason || '')}</small></div></div>`).join('') || '<p class="muted">None recorded.</p>'}
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-link" data-action="print-invoice" data-id="${attr(inv.id)}">${icon('printer', 15)}<span>Print invoice</span></button>${can('payments.adjust') ? `<button class="btn btn-secondary" data-action="open-adjustment" data-id="${attr(inv.id)}">${icon('swap', 15)}<span>Adjust balance</span></button>` : ''}${can('billing.void') && inv.status !== 'Cancelled' ? `<button class="btn btn-link danger" data-action="void-invoice" data-id="${attr(inv.id)}">${icon('trash', 15)}<span>Void invoice</span></button>` : ''}<button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
+}
+
+/* ------------------------------ payment ------------------------------ */
 function modalPayment(data = {}) {
-  const p = data.payment || {}; const invoice = data.invoiceId ? byId(state.invoices, data.invoiceId) : byId(state.invoices, p.invoiceId); const patientId = data.patientId || p.patientId || invoice?.patientId || ''; const choices = active(state.invoices).filter((i) => invoicePaymentStatus(i).due > 0);
-  return `<form data-form="payment"><input type="hidden" name="id" value="${attr(p.id || '')}">${modalHead('PAYMENT', 'Record a payment', 'Every collection receives its own receipt and audit entry.')}<div class="form-grid two">${selectField('Invoice', 'invoiceId', [['', choices.length ? 'On account / choose invoice' : 'No open invoices'], ...choices.map((i) => [i.id, `${i.invoiceNumber} · ${patientName(i.patientId)} · due ${currency(invoicePaymentStatus(i).due)}`])], invoice?.id || p.invoiceId, '')}${selectField('Patient', 'patientId', [['', 'Choose patient...'], ...patientOptions(patientId)], patientId, 'required')}${field('Amount', 'amount', p.amount || (invoice ? invoicePaymentStatus(invoice).due : '') || '', 'number', 'min="0.01" step="0.01" required')}${field('Payment date', 'date', p.date || today(), 'date', 'required')}${selectField('Method', 'method', paymentMethods().map((method) => [method, method]), p.method || 'Cash')}${field('Reference / transaction ID', 'reference', p.reference || p.transactionId)}${field('Bank / MFS provider', 'provider', p.provider)}${field('Notes', 'notes', p.notes, 'textarea', 'rows="2"')}</div><div class="form-note">${icon('shield', 14)} A payment cannot exceed the selected invoice balance. Use a separate adjustment for refunds or reversals.</div>${modalFooter('Cancel', 'Record payment')}</form>`;
+  const p = data.payment || {};
+  const inv = data.invoice || (data.invoiceId ? null : {});
+  return `<form data-form="payment"><input type="hidden" name="invoiceId" value="${attr(p.invoiceId || data.invoiceId || '')}">${modalHead('PAYMENT', 'Record payment', 'Overpayment is blocked; the receipt number stays sequential.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(p.patientId || ui.patientId), p.patientId || ui.patientId, 'required')}
+      ${selectField('Invoice (optional)', 'invoiceId', [['', 'Standalone payment'], ...((ui.invoiceOptions || []).map((i) => [i.id, `${i.invoiceNumber} · due ${currency(centsToMoney(i.dueCents ?? i.due))}`]))], p.invoiceId || data.invoiceId || '')}
+      ${field('Date', 'date', p.date || today(), 'date', 'required')}
+      ${selectField('Method', 'method', paymentMethodOptions(), p.method || 'Cash', 'required')}
+      ${field('Amount', 'amount', p.amount || '', 'number', 'min="0.01" step="0.01" required')}
+      ${field('Reference', 'reference', p.reference, 'text', 'placeholder="Transaction / cheque no."')}
+      ${field('Notes', 'notes', p.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${inv ? `<div class="form-note">Invoice ${esc(inv.invoiceNumber || '')} — total ${currency(centsToMoney(inv.totalCents ?? inv.total))}, due ${currency(centsToMoney(inv.dueCents ?? inv.due))}.</div>` : ''}
+    ${modalFooter('Cancel', 'Record payment')}
+  </form>`;
+}
+function paymentMethodOptions() {
+  const methods = [...new Set(['Cash', 'Bank', 'Card', ...(appState.settings.paymentMethods || [])].map((method) => String(method).trim()).filter(Boolean))];
+  return methods.map((method) => [method, method]);
 }
 function modalRefund(data = {}) {
-  const payment = data.payment || byId(state.payments, data.paymentId);
-  const remaining = payment ? paymentAmount(payment) : 0;
-  return `<form data-form="refund"><input type="hidden" name="paymentId" value="${attr(payment?.id || '')}">${modalHead('PAYMENT ADJUSTMENT', 'Refund or reverse payment', 'Financial adjustments are append-only and remain visible in the audit trail.')}<div class="adjustment-summary"><strong>${currency(remaining)}</strong><span>remaining refundable amount · ${esc(payment?.receiptNumber || 'Unknown receipt')}</span></div><div class="form-grid two">${field('Refund amount', 'amount', remaining, 'number', 'min="0.01" max="'+remaining+'" step="0.01" required')}${field('Refund date', 'date', today(), 'date', 'required')}${field('Reason', 'reason', '', 'textarea', 'rows="3" required placeholder="Document the reason for this adjustment"')}</div>${modalFooter('Cancel', 'Record refund')}</form>`;
+  const p = data.payment || {};
+  const remaining = Math.max(0, numeric(p.amount) - numeric(p.refundedAmount));
+  return `<form data-form="refund"><input type="hidden" name="paymentId" value="${attr(p.id || '')}">${modalHead('REFUND', `Refund payment ${p.receiptNumber || ''}`, 'The original payment is never mutated; a Refund entry keeps the trail exact.')}
+    <div class="form-grid">
+      ${field('Amount', 'amount', Math.min(remaining, numeric(p.amount)) || '', 'number', 'min="0.01" step="0.01" required')}
+      ${field('Date', 'date', today(), 'date', 'required')}
+      ${field('Reason', 'reason', '', 'text', 'required placeholder="Why is money going back?"')}
+    </div>
+    <p class="form-note">Remaining refundable: ${currency(remaining)}. A full refund reopens the invoice balance.</p>
+    ${modalFooter('Cancel', 'Record refund')}
+  </form>`;
+}
+function modalAdjustment(data = {}) {
+  const inv = data.invoice || {};
+  return `<form data-form="adjustment"><input type="hidden" name="invoiceId" value="${attr(inv.id || '')}">${modalHead('ADJUSTMENT', `Adjust ${inv.invoiceNumber || 'invoice balance'}`, 'Reduce the outstanding amount for a documented reason (waiver, correction). Capped at the current due.')}
+    <div class="form-grid">
+      ${field('Amount', 'amount', '', 'number', 'min="0.01" step="0.01" required')}
+      ${field('Reason', 'reason', '', 'text', 'required placeholder="e.g. Patient hardship — waived"')}
+    </div>
+    <p class="form-note">Current due: ${currency(centsToMoney(inv.dueCents ?? inv.due))}.</p>
+    ${modalFooter('Cancel', 'Apply adjustment')}
+  </form>`;
+}
+
+/* ------------------------------ expense ------------------------------ */
+function modalExpense(data = {}) {
+  const e = data.expense || {};
+  const editing = Boolean(e.id);
+  const categories = [...new Set([...(appState.settings.expenseCategories || []), 'Rent', 'Utilities', 'Supplies', 'Internet', 'Other'])];
+  return `<form data-form="expense"><input type="hidden" name="id" value="${attr(e.id || '')}">${modalHead('EXPENSE', editing ? 'Edit expense' : 'Record expense', 'Keep operating costs separate from patient billing.')}
+    <div class="form-grid two">
+      ${field('Description', 'description', e.description, 'text', 'required placeholder="e.g. Monthly clinic rent"')}
+      ${field('Amount', 'amount', e.amount || '', 'number', 'min="0.01" step="0.01" required')}
+      ${field('Date', 'date', e.date || today(), 'date', 'required')}
+      ${selectField('Category', 'category', categories.map((category) => [category, category]), e.category || 'Other')}
+      ${selectField('Method', 'method', [['Cash', 'Cash'], ['Bank', 'Bank'], ['Card', 'Card'], ['Other', 'Other']], e.method || 'Cash')}
+      ${field('Reference', 'reference', e.reference)}
+      ${field('Notes', 'notes', e.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save expense' : 'Record expense')}
+  </form>`;
+}
+
+/* ------------------------------ inventory ------------------------------ */
+function modalStock(data = {}) {
+  const item = data.item || {};
+  const editing = Boolean(item.id);
+  const categories = [...new Set([...(appState.settings.inventoryCategories || []), 'Consumable', 'Material', 'Equipment', 'Chemical', 'Other'])];
+  return `<form data-form="stock"><input type="hidden" name="id" value="${attr(item.id || '')}">${modalHead('STOCK ITEM', editing ? 'Edit stock item' : 'Add stock item', 'Opening stock is recorded as a purchase movement. Stock changes only through movements.')}
+    <div class="form-grid two">
+      ${field('Item name', 'name', item.name, 'text', 'required')}
+      <div class="field-split">${selectField('Category', 'category', categories.map((c) => [c, c]), item.category || 'Other')}${field('Unit', 'unit', item.unit || 'pcs')}</div>
+      ${selectField('Supplier', 'supplierId', [['', 'No supplier'], ...((ui.supplierOptions || []).map((supplier) => [supplier.id, supplier.name]))], item.supplierId)}
+      ${field('Brand', 'brand', item.brand)}
+      ${field('Batch / lot', 'batch', item.batch)}
+      ${field('Purchase price', 'purchasePrice', item.purchasePrice || '', 'number', 'min="0" step="0.01"')}
+      ${field('Sale price', 'salePrice', item.salePrice || '', 'number', 'min="0" step="0.01"')}
+      ${field('Minimum stock', 'minimumStock', item.minimumStock || '', 'number', 'min="0"')}
+      ${field('Expiry date', 'expiryDate', item.expiryDate, 'date')}
+      ${field('Location', 'location', item.location)}
+      ${field('Opening stock', 'openingStock', item.currentStock || '', 'number', 'min="0" step="0.01', 'disabled="', item.id ? 'disabled' : '')}
+      ${field('Notes', 'notes', item.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save item' : 'Add stock')}
+  </form>`;
 }
 function modalStockAdjustment(data = {}) {
-  const selected = data.item || byId(state.inventory, data.itemId);
-  return `<form data-form="stock-adjustment"><input type="hidden" name="id" value="${attr(selected?.id || '')}">${modalHead('INVENTORY MOVEMENT', 'Record stock movement', 'Purchases, usage, expiry and corrections remain visible in the movement ledger.')}<div class="form-grid two">${selectField('Item', 'itemId', [['', state.inventory.length ? 'Choose stock item...' : 'Add a stock item first'], ...active(state.inventory).map((item) => [item.id, `${item.name} · ${item.currentStock} ${item.unit || ''}`])], selected?.id || '', 'required')}${selectField('Movement type', 'movementType', [['Purchase', 'Purchase / received'], ['Usage', 'Usage / issued'], ['Stock-out', 'Stock-out'], ['Expired', 'Expired / quarantined'], ['Damaged', 'Damaged / lost'], ['Adjustment', 'Inventory correction']], data.movementType || 'Usage')}${field('Quantity', 'quantity', data.quantity || '', 'number', 'min="0.01" step="0.01" required')}${selectField('Correction direction', 'direction', [['increase', 'Increase'], ['decrease', 'Decrease']], data.direction || 'decrease')}${field('Date', 'date', today(), 'date', 'required')}${field('Batch / lot', 'batch', selected?.batch || '')}${field('Reason / note', 'reason', '', 'textarea', 'rows="3" required placeholder="Why did this movement occur?"')}</div>${modalFooter('Cancel', 'Record movement')}</form>`;
+  const item = data.item || {};
+  return `<form data-form="stock-adjustment"><input type="hidden" name="itemId" value="${attr(item.id || '')}">${modalHead('INVENTORY MOVEMENT', `Move stock — ${item.name || ''}`, 'Purchases, usage, expiry and corrections remain visible in the movement ledger.')}
+    <div class="form-grid two">
+      ${selectField('Movement type', 'movementType', [['Purchase', 'Purchase / received'], ['Usage', 'Usage / issued'], ['Return', 'Return to stock'], ['Expiry', 'Expired / quarantined'], ['Damage', 'Damaged / lost'], ['Correction', 'Correction'], ['Adjustment', 'Inventory correction']], data.movementType || 'Usage')}
+      ${field('Quantity', 'quantity', '', 'number', 'min="0.01" step="0.01" required')}
+      ${selectField('Correction direction', 'direction', [['decrease', 'Decrease'], ['increase', 'Increase']], data.direction || 'decrease')}
+      ${field('Date', 'date', today(), 'date', 'required')}
+      ${field('Reason / note', 'reason', '', 'textarea', 'rows="2" required placeholder="Why did this movement occur?"')}
+    </div>
+    <p class="form-note">Current on hand: ${number(item.currentStock || 0)} ${esc(item.unit || '')}. A movement can never make stock negative.</p>
+    ${modalFooter('Cancel', 'Record movement')}
+  </form>`;
 }
-function modalStock(data = {}) {
-  const i = data.item || {}; const editing = Boolean(i.id);
-  return `<form data-form="stock"><input type="hidden" name="id" value="${attr(i.id || '')}">${modalHead(editing ? 'INVENTORY ITEM' : 'NEW STOCK ITEM', editing ? 'Edit stock details' : 'Add stock item', 'Stock changes are recorded as traceable movements.')}<div class="form-grid two">${field('Item name', 'name', i.name, 'text', 'required placeholder="e.g. Composite resin"')}${field('Item code', 'itemCode', i.itemCode, 'text', 'placeholder="Optional internal code"')}${selectField('Category', 'category', inventoryCategories().map((category) => [category, category]), i.category || 'Consumable')}${field('Brand', 'brand', i.brand)}${field('Unit', 'unit', i.unit || 'box', 'text', 'required')}${selectField('Supplier', 'supplierId', [['', 'No supplier linked'], ...active(state.suppliers).map((s) => [s.id, s.name])], i.supplierId)}${field('Purchase date', 'purchaseDate', i.purchaseDate || today(), 'date')}${field('Purchase price', 'purchasePrice', i.purchasePrice || '', 'number', 'min="0" step="0.01"')}${field('Quantity to add', 'quantity', editing ? 0 : '', 'number', 'min="0" step="0.01"')}${field('Current stock', 'currentStock', i.currentStock || 0, 'number', editing ? 'readonly' : 'min="0" step="0.01"')}${field('Minimum / reorder level', 'minimumStock', i.minimumStock ?? state.settings.lowStockThreshold, 'number', 'min="0" step="0.01"')}${field('Expiry date', 'expiryDate', i.expiryDate, 'date')}${field('Batch / lot', 'batch', i.batch)}${field('Location', 'location', i.location)}${field('Notes', 'notes', i.notes, 'textarea', 'rows="2"')}</div><div class="form-note">${icon('activity', 14)} Existing stock is never silently overwritten. Adding a quantity creates a Purchase movement.</div>${modalFooter('Cancel', editing ? 'Save item' : 'Add stock')}</form>`;
+function modalSupplier(data = {}) {
+  const s = data.supplier || {};
+  const editing = Boolean(s.id);
+  return `<form data-form="supplier"><input type="hidden" name="id" value="${attr(s.id || '')}">${modalHead(editing ? 'SUPPLIER' : 'NEW SUPPLIER', editing ? 'Edit supplier' : 'Add a supplier', 'Keep purchasing contacts connected to inventory.')}
+    <div class="form-grid two">
+      ${field('Supplier name', 'name', s.name, 'text', 'required')}
+      ${field('Contact person', 'contactPerson', s.contactPerson)}
+      ${field('Phone', 'phone', s.phone, 'tel')}
+      ${field('Email', 'email', s.email, 'email')}
+      ${field('Address', 'address', s.address, 'textarea', 'rows="2"')}
+      ${field('Notes', 'notes', s.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save supplier' : 'Add supplier')}
+  </form>`;
 }
-function modalSupplier(data = {}) { const s = data.supplier || {}; const editing = Boolean(s.id); return `<form data-form="supplier"><input type="hidden" name="id" value="${attr(s.id || '')}">${modalHead(editing ? 'SUPPLIER' : 'NEW SUPPLIER', editing ? 'Edit supplier' : 'Add a supplier', 'Keep purchasing contacts connected to inventory.')}<div class="form-grid two">${field('Supplier name', 'name', s.name, 'text', 'required')}${field('Contact person', 'contactPerson', s.contactPerson)}${field('Phone', 'phone', s.phone, 'tel')}${field('Email', 'email', s.email, 'email')}${field('Address', 'address', s.address, 'textarea', 'rows="2"')}${field('Tax / registration info', 'taxInfo', s.taxInfo)}${field('Notes', 'notes', s.notes, 'textarea', 'rows="3"')}</div>${modalFooter('Cancel', editing ? 'Save supplier' : 'Add supplier')}</form>`; }
-function modalStaff(data = {}) { const s = data.staff || {}; const editing = Boolean(s.id); return `<form data-form="staff"><input type="hidden" name="id" value="${attr(s.id || '')}">${modalHead(editing ? 'STAFF MEMBER' : 'NEW STAFF MEMBER', editing ? 'Edit staff member' : 'Add staff member', 'Roles keep access architecture clear as the practice grows.')}<div class="form-grid two">${field('Full name', 'name', s.name, 'text', 'required')}${selectField('Role', 'role', [['Dentist', 'Dentist'], ['Dental Assistant', 'Dental Assistant'], ['Receptionist', 'Receptionist'], ['Manager', 'Manager'], ['Cleaner', 'Cleaner'], ['Other', 'Other']], s.role || 'Receptionist')}${field('Phone', 'phone', s.phone, 'tel')}${field('Email', 'email', s.email, 'email')}${field('Address', 'address', s.address, 'textarea', 'rows="2"')}${field('Joining date', 'joiningDate', s.joiningDate || today(), 'date')}${field('Salary', 'salary', s.salary, 'number', 'min="0" step="0.01"')}${selectField('Salary type', 'salaryType', [['Monthly', 'Monthly'], ['Hourly', 'Hourly'], ['Other', 'Other']], s.salaryType || 'Monthly')}${field('Working hours', 'workingHours', s.workingHours, 'text', 'placeholder="e.g. Sat–Thu, 10:00–18:00"')}${selectField('Status', 'status', [['Active', 'Active'], ['Inactive', 'Inactive']], s.status || 'Active')}${field('Notes', 'notes', s.notes, 'textarea', 'rows="2"')}</div>${modalFooter('Cancel', editing ? 'Save staff member' : 'Add staff member')}</form>`; }
-function modalExpense(data = {}) { const e = data.expense || {}; return `<form data-form="expense">${modalHead('EXPENSE', 'Record an expense', 'Keep operating costs separate from patient billing.')}<div class="form-grid two">${field('Description', 'description', e.description, 'text', 'required placeholder="e.g. Monthly clinic rent"')}${field('Amount', 'amount', e.amount, 'number', 'min="0.01" step="0.01" required')}${field('Date', 'date', e.date || today(), 'date', 'required')}${selectField('Category', 'category', expenseCategories().map((category) => [category, category]), e.category || 'Other')}${selectField('Method', 'method', [['Cash', 'Cash'], ['Bank', 'Bank'], ['Card', 'Card'], ['Other', 'Other']], e.method || 'Cash')}${field('Reference', 'reference', e.reference)}${field('Notes', 'notes', e.notes, 'textarea', 'rows="3"')}</div>${modalFooter('Cancel', 'Record expense')}</form>`; }
+function modalStaff(data = {}) {
+  const s = data.staff || {};
+  const editing = Boolean(s.id);
+  return `<form data-form="staff"><input type="hidden" name="id" value="${attr(s.id || '')}">${modalHead(editing ? 'STAFF MEMBER' : 'NEW STAFF MEMBER', editing ? 'Edit staff member' : 'Add staff member', 'Roles keep the access architecture clear as the practice grows.')}
+    <div class="form-grid two">
+      ${field('Full name', 'name', s.name, 'text', 'required')}
+      ${selectField('Role', 'role', [['Dentist', 'Dentist'], ['Dental Assistant', 'Dental Assistant'], ['Receptionist', 'Receptionist'], ['Manager', 'Manager'], ['Cleaner', 'Cleaner'], ['Other', 'Other']], s.role || 'Receptionist')}
+      ${field('Phone', 'phone', s.phone, 'tel')}
+      ${field('Email', 'email', s.email, 'email')}
+      ${field('Specialization', 'specialization', s.specialization)}
+      ${field('Joining date', 'joinDate', s.joinDate || s.joiningDate || today(), 'date')}
+      ${field('Notes', 'notes', s.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save staff member' : 'Add staff member')}
+  </form>`;
+}
+function modalTreatment(data = {}) {
+  const t = data.treatment || {};
+  const editing = Boolean(t.id);
+  return `<form data-form="treatment"><input type="hidden" name="id" value="${attr(t.id || '')}">${modalHead(editing ? 'TREATMENT CATALOG' : 'NEW TREATMENT', editing ? 'Edit treatment' : 'Add a treatment', 'Catalog defaults help the team stay consistent; each invoice remains reviewable.')}
+    <div class="form-grid two">
+      ${field('Treatment name', 'name', t.name, 'text', 'required placeholder="e.g. Composite restoration"')}
+      ${field('Code', 'code', t.code, 'text', 'placeholder="e.g. REST-C"')}
+      ${field('Category', 'category', t.category || 'General')}
+      ${field('Default price', 'defaultPrice', t.defaultPrice || '', 'number', 'min="0" step="0.01"')}
+      ${field('Duration (minutes)', 'duration', t.duration || 30, 'number', 'min="5" step="5"')}
+      ${selectField('Tooth required', 'toothRequired', [['false', 'No'], ['true', 'Yes']], String(t.toothRequired || false))}
+      ${field('Description', 'description', t.description, 'textarea', 'rows="3"')}
+      ${selectField('Status', 'active', [['true', 'Active'], ['false', 'Inactive']], String(t.active !== false))}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save treatment' : 'Add treatment')}
+  </form>`;
+}
 function modalTreatmentPlan(data = {}) {
   const plan = data.plan || {};
-  const stagesText = (plan.stages || []).map((stage) => [stage.title, stage.plannedDate || '', stage.estimatedCost || '', stage.status || 'Planned', stage.notes || ''].join(' | ')).join('\n');
-  const estimatedTotal = numeric(plan.estimatedCost || 0) - numeric(plan.discount || 0);
-  return `<form data-form="treatment-plan"><input type="hidden" name="id" value="${attr(plan.id || '')}">${modalHead(plan.id ? 'TREATMENT PLAN' : 'NEW TREATMENT PLAN', plan.id ? 'Edit treatment plan' : 'Create a treatment plan', 'Plan clinical stages, transparent estimates and responsible care without automating clinical decisions.')}<div class="form-grid two">${selectField('Patient', 'patientId', [['', 'Choose patient...'], ...patientOptions(plan.patientId)], plan.patientId || ui.patientId || '', 'required')}${field('Plan title', 'title', plan.title || '', 'text', 'required placeholder="e.g. Full-mouth rehabilitation"')}${selectField('Responsible dentist', 'dentistId', dentistOptions(), plan.dentistId || '')}${selectField('Plan status', 'status', [['Draft', 'Draft'], ['Proposed', 'Proposed'], ['Accepted', 'Accepted'], ['In Progress', 'In Progress'], ['Partially Completed', 'Partially Completed'], ['Completed', 'Completed'], ['Cancelled', 'Cancelled']], plan.status || 'Draft')}${field('Diagnosis / clinical goal', 'goal', plan.goal || '', 'textarea', 'rows="3" placeholder="Professional diagnosis or clinical goal"')}${field('Procedures', 'procedures', plan.procedures || '', 'textarea', 'rows="3" placeholder="List planned procedures"')}${field('Tooth number(s)', 'teeth', plan.teeth || '', 'text', 'placeholder="e.g. 16, 26"')}${field('Estimated duration (minutes)', 'estimatedDuration', plan.estimatedDuration || '', 'number', 'min="0" step="5"')}${field('Estimated cost', 'estimatedCost', plan.estimatedCost || '', 'number', 'min="0" step="0.01"')}${field('Discount', 'discount', plan.discount || 0, 'number', 'min="0" step="0.01"')}${field('Start date', 'startDate', plan.startDate || today(), 'date')}${field('Review date', 'reviewDate', plan.reviewDate || '', 'date')}${field('Notes', 'notes', plan.notes || '', 'textarea', 'rows="3"')}</div><div class="invoice-preview-line"><span>Estimated total</span><strong>${currency(Math.max(0, estimatedTotal))}</strong><small>Estimate only — no financial transaction is created until explicitly confirmed.</small></div><label class="field-label form-full">Stages <textarea name="stagesText" rows="6" placeholder="One stage per line: Stage name | planned date | estimated cost | status | notes">${attr(stagesText)}</textarea><small class="field-hint">Use one stage per line. Statuses: Planned, In progress, Completed or Deferred.</small></label>${modalFooter('Cancel', plan.id ? 'Save plan' : 'Create plan')}</form>`;
+  const editing = Boolean(plan.id);
+  const stages = plan.stages || [];
+  return `<form data-form="treatment-plan"><input type="hidden" name="id" value="${attr(plan.id || '')}">${modalHead(editing ? 'TREATMENT PLAN' : 'NEW TREATMENT PLAN', editing ? 'Edit treatment plan' : 'Create a treatment plan', 'Treatment plan is clinician-authored; stages can be converted to a visit explicitly.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(plan.patientId || ui.patientId), plan.patientId || ui.patientId, 'required')}
+      ${field('Plan title', 'title', plan.title, 'text', 'required')}
+      ${field('Clinical goal', 'goal', plan.goal, 'textarea', 'rows="2"')}
+      ${selectField('Plan status', 'status', [['Draft', 'Draft'], ['In Progress', 'In Progress'], ['Completed', 'Completed'], ['Cancelled', 'Cancelled']], plan.status || 'Draft')}
+      ${field('Start date', 'startDate', plan.startDate, 'date')}
+      ${field('Review date', 'reviewDate', plan.reviewDate, 'date')}
+      ${selectField('Dentist', 'dentistId', dentistOptions(plan.dentistId), plan.dentistId)}
+      ${field('Estimated duration (minutes)', 'estimatedDuration', plan.estimatedDuration || '', 'number', 'min="0" step="5"')}
+      ${field('Estimated cost', 'estimatedCost', plan.estimatedCost || '', 'number', 'min="0" step="0.01"')}
+      ${field('Discount', 'discount', plan.discount || 0, 'number', 'min="0" step="0.01"')}
+      ${field('Procedures', 'procedures', plan.procedures, 'textarea', 'rows="2"')}
+      ${field('Tooth number(s)', 'teeth', plan.teeth)}
+      ${field('Notes', 'notes', plan.notes, 'textarea', 'rows="2"')}
+    </div>
+    <h3 class="section-sub">Stages</h3>
+    <div class="plan-stages">${stages.map((stage, index) => `<div class="plan-stage-row"><input type="text" name="stages[${index}][title]" value="${attr(stage.title)}" placeholder="Stage name" required><input type="date" name="stages[${index}][plannedDate]" value="${attr(stage.plannedDate || '')}"><input type="number" name="stages[${index}][estimatedCost]" value="${attr(stage.estimatedCost || '')}" min="0" step="0.01" placeholder="Cost"><button type="button" class="icon-button" data-action="remove-plan-stage" data-index="${index}" aria-label="Remove stage">${icon('trash', 15)}</button></div>`).join('')}
+      <button type="button" class="btn btn-secondary" data-action="add-plan-stage">${icon('plus', 15)}<span>Add stage</span></button></div>
+    ${modalFooter('Cancel', editing ? 'Save plan' : 'Create plan')}
+  </form>`;
 }
-
-function modalTreatment(data = {}) { const t = data.treatment || {}; const editing = Boolean(t.id); return `<form data-form="treatment"><input type="hidden" name="id" value="${attr(t.id || '')}">${modalHead(editing ? 'TREATMENT CATALOG' : 'NEW TREATMENT', editing ? 'Edit treatment' : 'Add a treatment', 'Catalog defaults help the team stay consistent; each invoice remains reviewable.')}<div class="form-grid two">${field('Treatment name', 'name', t.name, 'text', 'required placeholder="e.g. Composite restoration"')}${field('Code', 'code', t.code, 'text', 'placeholder="e.g. REST-C"')}${field('Category', 'category', t.category || 'General')}${field('Default price', 'defaultPrice', t.defaultPrice || '', 'number', 'min="0" step="0.01"')}${field('Duration (minutes)', 'duration', t.duration || 30, 'number', 'min="5" step="5"')}${selectField('Tooth required', 'toothRequired', [['false', 'No'], ['true', 'Yes']], String(t.toothRequired || false))}${field('Description', 'description', t.description, 'textarea', 'rows="3"')}${selectField('Status', 'active', [['true', 'Active'], ['false', 'Inactive']], String(t.active !== false))}</div>${modalFooter('Cancel', editing ? 'Save treatment' : 'Add treatment')}</form>`; }
-function modalReferral(data = {}) { const r = data.referral || {}; const editing = Boolean(r.id); return `<form data-form="referral"><input type="hidden" name="id" value="${attr(r.id || '')}">${modalHead(editing ? 'REFERRAL' : 'NEW REFERRAL', editing ? 'Edit referral' : 'Record a referral', 'Keep the reason, destination and response connected to the patient record.')}<div class="form-grid two">${selectField('Patient', 'patientId', [['', 'Choose patient...'], ...patientOptions(r.patientId || ui.patientId)], r.patientId || ui.patientId, 'required')}${field('Referral date', 'date', r.date || today(), 'date', 'required')}${field('Referred to', 'referralTo', r.referralTo, 'text', 'required placeholder="Doctor, specialist or organisation"')}${field('Specialty', 'specialty', r.specialty)}${field('Reason', 'reason', r.reason, 'textarea', 'rows="3" required')}${field('Clinical notes', 'clinicalNotes', r.clinicalNotes, 'textarea', 'rows="3"')}${field('Response / report', 'response', r.response, 'textarea', 'rows="3"')}${field('Follow-up notes', 'followUpNotes', r.followUpNotes, 'textarea', 'rows="2"')}</div>${modalFooter('Cancel', editing ? 'Save referral' : 'Save referral')}</form>`; }
-function modalAuditLog() {
-  const query = String(ui.auditQuery || '').toLowerCase();
-  const entries = state.audit.filter((entry) => !query || [entry.action, entry.entity, entry.summary, entry.user].some((value) => String(value || '').toLowerCase().includes(query))).slice(0, 100);
-  return `<div class="audit-modal">${modalHead('AUDIT TRAIL', 'Activity history', 'Append-only local events make important changes reviewable.')}<label class="search-field modal-search-field">${icon('search', 17)}<input type="search" value="${attr(ui.auditQuery || '')}" placeholder="Filter actions, entities or notes" data-input="audit-search"></label><div class="audit-list">${entries.length ? entries.map((entry) => `<div class="audit-row"><span class="audit-row-icon">${icon(entry.entity === 'Security' ? 'shield' : entry.entity === 'Payment' ? 'credit' : entry.entity === 'Backup' ? 'backup' : 'activity', 15)}</span><div><strong>${esc(entry.action)}</strong><small>${esc(entry.entity || 'System')} ${entry.recordId ? `· ${esc(entry.recordId)}` : ''} · ${date(entry.at?.slice(0, 10))} ${entry.at?.slice(11, 16) || ''}</small><p>${esc(entry.summary || '')}</p></div></div>`).join('') : emptyState('activity', 'No audit events match', 'Changes will appear here after the practice starts working.')}</div><div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Done</button></div></div>`;
+function modalReferral(data = {}) {
+  const r = data.referral || {};
+  const editing = Boolean(r.id);
+  return `<form data-form="referral"><input type="hidden" name="id" value="${attr(r.id || '')}">${modalHead(editing ? 'REFERRAL' : 'NEW REFERRAL', editing ? 'Edit referral' : 'Record a referral', 'Keep the reason, destination and response connected to the patient record.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(r.patientId || ui.patientId), r.patientId || ui.patientId, 'required')}
+      ${field('Referral date', 'date', r.date || today(), 'date', 'required')}
+      ${field('Referred to', 'referralTo', r.referralTo, 'text', 'required placeholder="Doctor, specialist or organisation"')}
+      ${field('Specialty', 'specialty', r.specialty)}
+      ${field('Reason', 'reason', r.reason, 'textarea', 'rows="3" required')}
+      ${field('Response / report', 'response', r.response, 'textarea', 'rows="3"')}
+      ${selectField('Status', 'status', [['Sent', 'Sent'], ['Acknowledged', 'Acknowledged'], ['Report received', 'Report received'], ['Closed', 'Closed'], ['Cancelled', 'Cancelled']], r.status || 'Sent')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save referral' : 'Create referral')}
+  </form>`;
 }
-function modalNotifications() { const notes = notificationItems().slice(0, 12); return `${modalHead('NOTIFICATIONS', 'Notification centre', notes.length ? 'Meaningful signals from your workspace.' : 'Your workspace is quiet.')}<div class="notification-list">${notes.length ? notes.map((n) => `<button class="notification-row ${n.read ? '' : 'unread'}" data-action="notification-open" data-id="${attr(n.id)}"><span class="notification-icon">${icon(n.type === 'warning' ? 'warning' : n.type === 'backup' ? 'backup' : 'bell', 16)}</span><span><strong>${esc(n.title)}</strong><p>${esc(n.message)}</p><small>${date(n.date || today())} · Open ${esc(n.page || 'workspace')}</small></span>${icon('arrow', 14)}</button>`).join('') : emptyState('bell', 'No notifications', 'Appointment, follow-up, stock and backup signals will appear here.')}</div><div class="modal-footer"><button class="btn btn-link" data-action="mark-notifications-read">Mark all as read</button><button class="btn btn-primary" data-action="close-modal">Done</button></div>`; }
-function modalSecurity() { const hasPin = Boolean(state.settings.pinHash); return `<form data-form="security">${modalHead('PRIVACY & SECURITY', hasPin ? 'Change application PIN' : 'Set application PIN', hasPin ? 'Choose a new local PIN for this workspace.' : 'The PIN is hashed locally and never stored as readable text.')}<div class="security-modal-icon">${icon('lock', 26)}</div><div class="form-grid">${field('New PIN', 'pin', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"')}${field('Confirm PIN', 'confirmPin', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="Enter the PIN again"')}</div><p class="form-note">${icon('shield', 14)} This PIN only protects access to this local workspace. Keep a verified backup separately; it cannot recover a forgotten PIN.</p>${modalFooter('Cancel', hasPin ? 'Update PIN' : 'Enable application lock')}</form>`; }
-function modalCsvImport() {
-  const importState = ui.csvImport;
-  if (!importState) return `${modalHead('CSV IMPORT', 'Import patients', 'Choose a file to preview before anything is written.')}<div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Close</button></div>`;
-  const fields = [['fullName', 'Full name'], ['phone', 'Phone'], ['email', 'Email'], ['dateOfBirth', 'Date of birth'], ['gender', 'Gender'], ['address', 'Address'], ['allergies', 'Allergies'], ['notes', 'Notes']];
-  const mappedRows = importState.rows.map((row) => Object.fromEntries(fields.map(([field]) => [field, row[importState.mapping[field]] || ''])));
-  const invalid = mappedRows.filter((row) => !String(row.fullName || '').trim() || !String(row.phone || '').trim());
-  const duplicates = mappedRows.filter((row) => active(state.patients).some((patient) => patient.fullName?.trim().toLowerCase() === row.fullName.trim().toLowerCase() && patient.phone?.replace(/\D/g, '') === row.phone.replace(/\D/g, '')));
-  return `<div class="csv-import-modal">${modalHead('CSV IMPORT', importState.fileName, 'Map columns, review validation and choose a duplicate policy before importing.')}<div class="csv-import-summary"><div><strong>${number(importState.rows.length)}</strong><span>rows detected</span></div><div><strong>${number(importState.rows.length - invalid.length)}</strong><span>valid rows</span></div><div><strong>${number(duplicates.length)}</strong><span>possible duplicates</span></div></div><div class="form-grid two">${fields.map(([field, label]) => `<label class="field-label">${esc(label)}<select data-change="csv-map" data-field="${field}"><option value="">Not mapped</option>${importState.headers.map((header) => `<option value="${attr(header)}" ${importState.mapping[field] === header ? 'selected' : ''}>${esc(header)}</option>`).join('')}</select></label>`).join('')}</div>${invalid.length ? `<div class="inline-warning">${icon('warning', 15)} ${number(invalid.length)} row(s) are missing a full name or phone and will not be imported.</div>` : ''}${duplicates.length ? `<div class="inline-warning">${icon('warning', 15)} ${number(duplicates.length)} possible duplicate(s) found by name and phone. Choose Skip or Create New Copy.</div>` : ''}<div class="csv-preview table-wrap"><table class="data-table"><thead><tr>${fields.slice(0, 5).map(([, label]) => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>${mappedRows.slice(0, 10).map((row) => `<tr><td>${esc(row.fullName || '—')}</td><td>${esc(row.phone || '—')}</td><td>${esc(row.email || '—')}</td><td>${esc(row.dateOfBirth || '—')}</td><td>${esc(row.gender || '—')}</td></tr>`).join('')}</tbody></table>${mappedRows.length > 10 ? `<small class="field-hint">Showing the first 10 rows of ${number(mappedRows.length)}.</small>` : ''}</div><div class="csv-import-actions"><label class="field-label">Duplicate policy<select data-change="csv-strategy"><option value="Skip" ${importState.strategy === 'Skip' ? 'selected' : ''}>Skip possible duplicates</option><option value="Create New Copy" ${importState.strategy === 'Create New Copy' ? 'selected' : ''}>Create new copy</option></select></label>${button('Cancel', 'close-modal', 'close', 'link')}${button(`Import ${number(Math.max(0, mappedRows.length - invalid.length))} valid patient(s)`, 'csv-import-confirm', 'upload', 'primary')}</div></div>`;
+function modalFollowup(data = {}) {
+  const task = data.task || {};
+  const editing = Boolean(task.id);
+  return `<form data-form="followup"><input type="hidden" name="id" value="${attr(task.id || '')}">${modalHead('FOLLOW-UP', editing ? 'Edit follow-up' : 'Schedule follow-up', 'A due follow-up date becomes an actionable task on the dashboard.')}
+    <div class="form-grid two">
+      ${selectField('Patient', 'patientId', patientOptions(task.patientId || ui.patientId), task.patientId || ui.patientId, 'required')}
+      ${field('Title', 'title', task.title, 'text')}
+      ${field('Reason', 'reason', task.reason, 'text')}
+      ${field('Due date', 'dueDate', task.dueDate || today(), 'date', 'required')}
+      ${selectField('Status', 'status', [['Open', 'Open'], ['Contacted', 'Contacted'], ['Scheduled', 'Scheduled'], ['Completed', 'Completed'], ['Cancelled', 'Cancelled']], task.status || 'Open')}
+      ${field('Notes', 'notes', task.notes, 'textarea', 'rows="2"')}
+    </div>
+    ${modalFooter('Cancel', editing ? 'Save follow-up' : 'Schedule follow-up')}
+  </form>`;
 }
-function parseCsv(text) {
-  const rows = []; let row = []; let cell = ''; let quoted = false;
-  for (let i = 0; i < text.length; i += 1) { const char = text[i]; const next = text[i + 1]; if (char === '"' && quoted && next === '"') { cell += '"'; i += 1; } else if (char === '"') quoted = !quoted; else if (char === ',' && !quoted) { row.push(cell.trim()); cell = ''; } else if ((char === '\n' || char === '\r') && !quoted) { if (char === '\r' && next === '\n') i += 1; row.push(cell.trim()); if (row.some((value) => value)) rows.push(row); row = []; cell = ''; } else cell += char; }
-  if (cell || row.length) { row.push(cell.trim()); if (row.some((value) => value)) rows.push(row); }
-  const headers = (rows.shift() || []).map((header, index) => header || `Column ${index + 1}`);
-  return { headers, rows: rows.filter((values) => values.some(Boolean)).slice(0, 25_000).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || '']))) };
+function modalAttachment(data = {}) {
+  const p = data.patient || {};
+  return `<form data-form="attachment"><input type="hidden" name="patientId" value="${attr(p.id || ui.patientId || '')}">${modalHead('ATTACH FILE', 'Attach to patient record', 'Images, PDFs and clinical documents. Executables and scripts are blocked for safety.')}
+    <div class="form-grid">
+      <label class="file-drop" data-action="pick-attachment"><input type="file" name="file" accept="image/*,application/pdf,.doc,.docx,.txt" hidden><span class="file-drop-inner">${icon('upload', 22)}<strong>${esc(data.fileName || 'Choose a file…')}</strong><small>Click to browse — stored locally with a checksum</small></span></label>
+      ${field('Attachment name', 'name', data.name || '', 'text', 'required')}
+      ${selectField('Category', 'category', [['Image / X-ray', 'Image / X-ray'], ['PDF report', 'PDF report'], ['Clinical document', 'Clinical document']], data.category || '')}
+      ${field('Notes', 'notes', '', 'textarea', 'rows="2"')}
+    </div>
+    <p class="form-note">${icon('shield', 14)} PDF active content is never embedded — previews are inert images of the first page.</p>
+    ${modalFooter('Cancel', 'Attach file')}
+  </form>`;
 }
-const COMMANDS = [
-  ['new-patient', 'New patient', 'Register a patient', 'open-patient', 'users'],
-  ['new-appointment', 'New appointment', 'Book time with a patient', 'open-appointment', 'calendar'],
-  ['check-in', 'Check in patient', 'Open today’s queue', 'navigate:queue', 'clipboard'],
-  ['new-visit', 'New clinical visit', 'Capture a clinical encounter', 'open-visit', 'activity'],
-  ['new-treatment', 'New treatment', 'Add a catalog procedure', 'open-treatment', 'layers'],
-  ['prescription', 'New prescription', 'Create printable instructions', 'open-prescription', 'file'],
-  ['new-invoice', 'New invoice', 'Create a transparent invoice', 'open-invoice', 'receipt'],
-  ['record-payment', 'Record payment', 'Add a patient collection', 'open-payment', 'credit'],
-  ['add-expense', 'Add expense', 'Record an operating cost', 'open-expense', 'dollar'],
-  ['add-inventory', 'Add inventory', 'Add or adjust stock', 'open-stock', 'box'],
-  ['open-payments', 'Open payments', 'Review receipts and collections', 'navigate:payments', 'credit'],
-  ['open-reports', 'Open reports', 'Review operational reports', 'navigate:reports', 'chart']
-  ['open-analytics', 'Open analytics', 'Review meaningful trends', 'navigate:analytics', 'activity'],
-  ['open-settings', 'Open settings', 'Configure this practice', 'navigate:settings', 'settings'],
-  ['run-backup', 'Export verified backup', 'Create a portable local backup', 'export-backup', 'backup'],
-  ['restore-backup', 'Restore backup', 'Validate and restore a local package', 'trigger-import', 'upload']
-];
-function modalSearch() {
-  const q = ui.search.trim().toLowerCase();
-  const commandResults = COMMANDS.filter(([, label, hint]) => !q || `${label} ${hint}`.toLowerCase().includes(q));
-  const recordResults = q ? globalSearch(q) : [];
-  const commandsMarkup = commandResults.slice(0, q ? 6 : COMMANDS.length).map(([id, label, hint, command, ico]) => `<button class="search-result command-result" data-action="run-command" data-command="${attr(command)}"><span class="search-result-icon">${icon(ico, 16)}</span><span><strong>${esc(label)}</strong><small>${esc(hint)}</small></span><span class="result-type">Command</span>${icon('arrow', 14)}</button>`).join('');
-  const recordsMarkup = recordResults.map((r) => `<button class="search-result" data-action="search-result" data-kind="${r.kind}" data-id="${r.id}"><span class="search-result-icon">${icon(r.icon, 16)}</span><span><strong>${esc(r.title)}</strong><small>${esc(r.subtitle)}</small></span><span class="result-type">${esc(r.type)}</span>${icon('arrow', 14)}</button>`).join('');
-  const resultMarkup = commandsMarkup || recordsMarkup ? `${commandsMarkup}${recordsMarkup}` : emptyState('search', 'No matching records', 'Try a command, patient name, phone, invoice number or item code.');
-  return `${modalHead('COMMAND CENTRE', 'Search your workspace', 'Commands and records are local to this practice. Use the keyboard to stay in flow.')}<label class="search-field modal-search-field">${icon('search', 19)}<input autofocus type="search" value="${attr(ui.search)}" placeholder="Try “new patient” or search a record..." data-input="modal-search"><kbd>Esc</kbd></label><div class="search-hint">${icon('sparkle', 14)} ${q ? 'Commands appear before records.' : 'Start with a command or search any patient, invoice, appointment or stock item.'} Use <kbd>Ctrl</kbd> <kbd>K</kbd> any time.</div><div class="search-results">${resultMarkup}</div>`;
-}
-
-function modalUser() {
-  const user = currentUser();
-  const accounts = (state.users || []).filter((candidate) => candidate.active !== false);
-  return `${modalHead('LOCAL ACCOUNT', user?.name || state.settings.dentistName || 'Practice administrator', 'Manage local sign-in, sessions and practice access.')}<div class="user-panel"><span class="avatar avatar-large">${initials(user?.name || state.settings.dentistName || 'Dr')}</span><div><h3>${esc(user?.name || state.settings.dentistName || 'Practice administrator')}</h3><p>${esc(state.settings.clinicName || 'Your practice')} · ${esc(user?.role || 'Administrator')}</p><span class="security-pill">${icon('shield', 14)} ${user?.pinHash ? 'Authenticated local account' : 'Local administrator'}</span></div></div><div class="account-list">${accounts.map((candidate) => `<div class="account-row"><span class="avatar avatar-small">${initials(candidate.name)}</span><div><strong>${esc(candidate.name)}</strong><small>${esc(candidate.role)}${candidate.lastLogin ? ` · Last sign-in ${date(candidate.lastLogin.slice(0, 10))}` : ' · Never signed in'}</small></div><span class="account-status ${candidate.active === false ? 'inactive' : ''}">${candidate.active === false ? 'Inactive' : 'Active'}</span></div>`).join('')}</div><div class="user-actions">${can('users.manage') ? button('Manage user accounts', 'navigate', 'users', 'secondary', 'data-page="users"') : ''}${button('Settings', 'navigate', 'settings', 'secondary', 'data-page="settings"')}${button('About Dentiva Pro', 'navigate', 'info', 'link', 'data-page="about"')}${state.settings.applicationLock ? button('Lock workspace', 'lock-workspace', 'lock', 'secondary') : button('Set application PIN', 'open-security', 'lock', 'secondary')}</div><div class="modal-footer"><button class="btn btn-primary" data-action="close-modal">Close</button></div>`;
+function modalAttachmentPreview(data = {}) {
+  const attachment = data.attachment || {};
+  return `${modalHead('ATTACHMENT', attachment.name || 'Attachment', `${attachment.type || ''} · ${formatBytes(attachment.size || 0)}`)}
+    <div class="attachment-preview-body">${data.previewHtml || '<p class="muted">Loading preview…</p>'}</div>
+    <div class="modal-footer"><button class="btn btn-link" data-action="download-attachment" data-id="${attr(attachment.id)}">${icon('download', 15)}<span>Download original</span></button>${can('attachments.delete') ? `<button class="btn btn-link danger" data-action="delete-attachment" data-id="${attr(attachment.id)}">${icon('trash', 15)}<span>Remove</span></button>` : ''}<button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
 }
 function modalUserAccount(data = {}) {
   const user = data.user || {};
   const editing = Boolean(user.id);
-  const roleOptions = ['Administrator', 'Dentist', 'Manager', 'Receptionist', 'Dental Assistant', 'Custom Role'].map((role) => [role, role]);
-  const permissions = Object.entries(PERMISSIONS);
-  const selected = new Set(user.permissions || permissionsForRole(user.role || 'Receptionist', user.role === 'Custom Role' ? [] : undefined));
-  return `<form data-form="user-account"><input type="hidden" name="id" value="${attr(user.id || '')}">${modalHead(editing ? 'LOCAL USER ACCOUNT' : 'NEW LOCAL USER', editing ? 'Edit account access' : 'Create a secure user account', 'PINs are protected with PBKDF2 hashing. Staff association and account status remain auditable.')}<div class="form-grid two">${field('Full name', 'name', user.name, 'text', 'required')}${selectField('Role template', 'role', roleOptions, user.role || 'Receptionist', 'required')}${selectField('Associated staff member', 'staffId', [['', 'No staff link'], ...active(state.staff).map((person) => [person.id, `${person.name} · ${person.role || 'Staff'}`])], user.staffId || '')}${selectField('Account status', 'active', [['true', 'Active'], ['false', 'Inactive']], String(user.active !== false))}${field(editing ? 'New PIN (leave blank to keep current)' : 'PIN', 'pin', '', 'password', `${editing ? '' : 'required '}minlength="4" maxlength="12" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"`)}${field('Confirm PIN', 'confirmPin', '', 'password', `${data.requirePin ? 'required ' : ''}minlength="4" maxlength="12" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="Repeat PIN"`)}</div><fieldset class="permission-fieldset"><legend>Effective permissions</legend><p class="form-note">Role templates are a starting point. Custom Role can be narrowed or expanded explicitly.</p><div class="permission-grid">${permissions.map(([key, permission]) => `<label class="permission-option"><input type="checkbox" name="permissions" value="${attr(permission)}" ${selected.has(permission) ? 'checked' : ''}><span>${esc(permission.replaceAll('.', ' · '))}</span></label>`).join('')}</div></fieldset>${modalFooter('Cancel', editing ? 'Save account' : 'Create account')}</form>`;
+  const selected = new Set(editing ? effectivePermissions(user) : permissionsForRole(user.role || 'Receptionist', []));
+  return `<form data-form="user-account"><input type="hidden" name="id" value="${attr(user.id || '')}">${modalHead(editing ? 'LOCAL USER ACCOUNT' : 'NEW LOCAL USER', editing ? 'Edit account access' : 'Create a secure user account', 'PINs are protected with PBKDF2 hashing. Staff association and account status remain auditable.')}
+    <div class="form-grid two">
+      ${field('Full name', 'name', user.name, 'text', 'required')}
+      ${selectField('Role template', 'role', USER_ROLE_OPTIONS, user.role || 'Receptionist', 'required data-change="user-role"')}
+      ${selectField('Associated staff member', 'staffId', [['', 'No staff link'], ...appState.directory.staff.map((s) => [s.id, `${s.name} · ${s.role || 'Staff'}`])], user.staffId)}
+      ${selectField('Account status', 'active', [['true', 'Active'], ['false', 'Inactive']], String(user.active !== false))}
+      ${field(editing ? 'New PIN (leave blank to keep current)' : 'PIN', 'pin', '', 'password', `${editing ? '' : 'required '}minlength="4" maxlength="12" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"`)}
+      ${field('Confirm PIN', 'confirmPin', '', 'password', `${editing ? '' : 'required '}minlength="4" maxlength="12" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="Repeat the PIN"`)}
+    </div>
+    <fieldset class="permission-fieldset"><legend>Effective permissions</legend>
+      <p class="form-note">Role templates are a starting point. Custom Role can be narrowed or expanded explicitly.</p>
+      <div class="permission-grid">${permissionGroups.length ? permissionGroupsHtml(selected) : ''}</div>
+    </fieldset>
+    ${modalFooter('Cancel', editing ? 'Save account' : 'Create account')}
+  </form>`;
+}
+function modalSecurity(data = {}) {
+  return `<form data-form="security">${modalHead('PRIVACY & SECURITY', 'Change my PIN', 'The PIN is hashed locally with PBKDF2 and never stored as readable text.')}
+    <div class="security-modal-icon">${icon('lock', 26)}</div>
+    <div class="form-grid">
+      ${field('New PIN', 'pin', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"')}
+      ${field('Confirm PIN', 'confirmPin', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="Enter the PIN again"')}
+    </div>
+    <p class="form-note">${icon('shield', 14)} This PIN protects your local account. Keep a verified backup separately; a forgotten PIN cannot be recovered.</p>
+    ${modalFooter('Cancel', 'Update PIN')}
+  </form>`;
+}
+function modalCsvImport(data = {}) {
+  const importState = ui.csvImport;
+  const headers = importState?.headers || [];
+  const fields = ['fullName', 'phone', 'email', 'dateOfBirth', 'gender', 'address', 'allergies', 'notes'];
+  return `${modalHead('IMPORT', 'Import patients from CSV', 'Map the columns. Duplicates (name + phone) are skipped unless you create copies.')}
+    <div class="form-grid">
+      <div class="csv-file-row">${importState?.fileName ? `<span class="file-chip">${icon('file', 15)}${esc(importState.fileName)} · ${number(importState.rows.length)} rows</span>` : `<label class="file-drop small" data-action="pick-csv"><input type="file" accept=".csv,text/csv" hidden><span>${icon('upload', 18)}<strong>Choose a CSV file</strong></span></label>`}</div>
+      ${importState ? `<div class="csv-mapping">${fields.map((field) => `<label class="field-label">Map ${esc(field)}<select name="map-${attr(field)}">${['', 'Choose column...'].map((v) => `<option value="${v}"></option>`).join('')}${headers.map((header, index) => `<option value="${index}" ${(importState.mapping[field] === index ? 'selected' : '')}>${esc(header)}</option>`).join('')}</select></label>`).join('')}</div>
+      <div class="restore-strategy"><span class="eyebrow">DUPLICATE STRATEGY</span><label class="radio-option"><input type="radio" name="csv-strategy" value="Skip" checked><span>Skip duplicates</span></label><label class="radio-option"><input type="radio" name="csv-strategy" value="Create New Copy"><span>Create New Copy</span></label></div>` : ''}
+    </div>
+    ${importState ? modalFooter('Cancel', 'Import patients', 'import-csv') : `<div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Close</button></div>`}`;
+}
+function modalSearch(data = {}) {
+  return `${modalHead('COMMANDS', 'Open quick search', 'Type to search patients, appointments and records.')}
+    <input type="search" class="command-input" name="command" placeholder="Search your workspace" value="${attr(data.query || '')}" data-input="command-search" autofocus>
+    <div class="command-results" id="command-results">${data.results || ''}</div>`;
+}
+function modalSavedFilters(data = {}) {
+  return `${modalHead('SAVED VIEWS', 'Patient views', 'Keep the current search and patient filters available for the next visit.')}
+    <div class="form-grid"><label class="field-label">View name<input type="text" name="filterName" value="${attr(data.name || '')}" placeholder="e.g. Follow-up due" required></label></div>
+    <div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="save-filter" data-collection="${attr(data.collection || 'patients')}">${icon('check', 16)}<span>Save this patient view</span></button></div>`;
+}
+function modalDashboardCustomizer(data = {}) {
+  const widgets = [['schedule', 'Today’s schedule', 'Your upcoming appointments and chair flow.'], ['queue', 'Today’s queue', 'Checked-in, waiting and completed patient counts.'], ['followups', 'Follow-ups due', 'Clinical follow-up dates that need attention.'], ['signals', 'Operational signals', 'Outstanding balances, low stock and backup health.']];
+  const layout = data.layout || ['schedule', 'queue', 'followups', 'signals'];
+  return `${modalHead('DASHBOARD', 'Customize your command centre', 'Keep the signals your team needs in view. Changes are saved locally per practice workspace.')}
+    <div class="dashboard-widget-options">${widgets.map(([key, title, description]) => { const enabled = layout.includes(key); const position = layout.indexOf(key); return `<div class="dashboard-widget-option ${enabled ? 'selected' : ''}"><button class="widget-toggle" data-action="toggle-dashboard-widget" data-widget="${key}" aria-pressed="${enabled}"><span class="widget-check">${icon(enabled ? 'check' : 'plus', 15)}</span><span><strong>${title}</strong><small>${description}</small></span></button>${enabled ? `<span class="widget-order" aria-label="Dashboard card order"><button class="icon-button tiny" data-action="move-dashboard-widget" data-widget="${key}" data-direction="up" ${position === 0 ? 'disabled' : ''} aria-label="Move ${title} up">${icon('up', 14)}</button><button class="icon-button tiny" data-action="move-dashboard-widget" data-widget="${key}" data-direction="down" ${position === layout.length - 1 ? 'disabled' : ''} aria-label="Move ${title} down">${icon('down', 14)}</button></span>` : ''}</div>`; }).join('')}</div>
+    <p class="form-note">The metric strip and shortcut actions are always visible. Keep at least one operational card enabled. Use the arrows to reorder enabled cards.</p>
+    <div class="modal-footer"><button class="btn btn-link" data-action="reset-dashboard-widgets">Reset layout</button><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
+}
+function modalAuditLog(data = {}) {
+  return `${modalHead('AUDIT TRAIL', 'Audit log', 'Every protected action is attributed to the account that performed it.')}
+    <div class="form-grid"><label class="field-label">Search<input type="search" name="auditQuery" value="${attr(data.query || '')}" placeholder="Action, user or summary"></label></div>
+    <div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Close</button><button class="btn btn-primary" data-action="run-audit-search">${icon('search', 15)}<span>Search audit</span></button></div>`;
+}
+function modalNotifications(data = {}) {
+  const notes = notificationItems().slice(0, 12);
+  return `${modalHead('NOTIFICATIONS', 'Notification centre', notes.length ? 'Meaningful signals from your workspace.' : 'Your workspace is quiet.')}
+    <div class="notification-list">${notes.length ? notes.map((n) => `<button class="notification-row ${n.read ? '' : 'unread'}" data-action="notification-open" data-id="${attr(n.id)}"><span class="notification-icon">${icon(n.type === 'warning' ? 'warning' : n.type === 'backup' ? 'backup' : 'bell', 16)}</span><span><strong>${esc(n.title)}</strong><p>${esc(n.message)}</p><small>${date(n.date || today())} · Open ${esc(n.page || 'workspace')}</small></span>${icon('arrow', 14)}</button>`).join('') : emptyState('bell', 'No notifications', 'Appointment, follow-up, stock and backup signals will appear here.')}
+    </div>
+    <div class="modal-footer"><button class="btn btn-link" data-action="mark-notifications-read">Mark all as read</button><button class="btn btn-primary" data-action="close-modal">Done</button></div>`;
 }
 
-function globalSearch(q) {
-  const results = [];
-  if (can('patients.view')) active(state.patients).filter((p) => [p.fullName, p.patientCode, p.phone, p.email, p.address].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 8).forEach((p) => results.push({ kind: 'patient', id: p.id, title: p.fullName, subtitle: `${p.patientCode || 'Patient'} · ${p.phone || 'No phone'}`, type: 'Patient', icon: 'users' }));
-  if (can('appointments.view')) active(state.appointments).filter((a) => [patientName(a.patientId), a.reason, a.date, a.status].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 6).forEach((a) => results.push({ kind: 'appointment', id: a.id, title: patientName(a.patientId), subtitle: `${date(a.date)} · ${time(a.time)} · ${a.reason || 'Appointment'}`, type: 'Appointment', icon: 'calendar' }));
-  if (can('billing.view')) active(state.invoices).filter((i) => [i.invoiceNumber, patientName(i.patientId), i.date].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 6).forEach((i) => results.push({ kind: 'invoice', id: i.id, title: i.invoiceNumber, subtitle: `${patientName(i.patientId)} · ${currency(i.total)}`, type: 'Invoice', icon: 'receipt' }));
-  if (can('inventory.view')) active(state.inventory).filter((i) => [i.name, i.itemCode, i.category, i.batch].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 6).forEach((i) => results.push({ kind: 'inventory', id: i.id, title: i.name, subtitle: `${i.itemCode || 'Stock item'} · ${i.currentStock} ${i.unit || ''}`, type: 'Inventory', icon: 'box' }));
-  if (can('inventory.view')) active(state.suppliers).filter((s) => [s.name, s.contactPerson, s.phone, s.email].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 4).forEach((s) => results.push({ kind: 'supplier', id: s.id, title: s.name, subtitle: `${s.contactPerson || 'Supplier'} · ${s.phone || 'No phone'}`, type: 'Supplier', icon: 'truck' }));
-  if (can('staff.view')) active(state.staff).filter((person) => [person.name, person.role, person.phone, person.email].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 4).forEach((person) => results.push({ kind: 'staff', id: person.id, title: person.name, subtitle: `${person.role || 'Staff'} · ${person.phone || 'No phone'}`, type: 'Staff', icon: 'briefcase' }));
-  if (can('clinical.view')) active(state.visits).filter((v) => [patientName(v.patientId), v.reason, v.diagnosis, v.treatmentPerformed].some((value) => String(value || '').toLowerCase().includes(q))).slice(0, 5).forEach((v) => results.push({ kind: 'visit', id: v.id, title: patientName(v.patientId), subtitle: `${date(v.date)} · ${v.reason || 'Clinical visit'}`, type: 'Visit', icon: 'activity' }));
-  return results.slice(0, 16);
+/* ------------------------------------------------------------------ */
+/* Commands                                                            */
+/* ------------------------------------------------------------------ */
+const COMMANDS = [
+  { id: 'new-patient', label: 'New patient', run: () => openModal('patient') },
+  { id: 'new-appointment', label: 'Book appointment', run: () => openModal('appointment') },
+  { id: 'new-visit', label: 'Record visit', run: () => openModal('visit') },
+  { id: 'new-invoice', label: 'New invoice', run: () => openModal('invoice') },
+  { id: 'new-payment', label: 'Record payment', run: () => openModal('payment') },
+  { id: 'new-stock', label: 'Add stock item', run: () => openModal('stock') },
+  { id: 'open-reports', label: 'Open reports', run: () => { ui.page = 'reports'; render(); } },
+  { id: 'open-analytics', label: 'Open analytics', run: () => { ui.page = 'analytics'; render(); } },
+  { id: 'open-backup', label: 'Open backup & restore', run: () => { ui.page = 'backup'; render(); } },
+  { id: 'open-settings', label: 'Open settings', run: () => { ui.page = 'settings'; render(); } },
+  { id: 'run-integrity', label: 'Run integrity check', run: () => runIntegrityCheck() }
+];
+async function runCommand(command) {
+  command.run();
+  notify(`${command.label} executed.`, 'info');
+}
+async function globalSearch(qText) {
+  if (!qText || qText.length < 2) return { patients: [], appointments: [], invoices: [] };
+  const [patients, appointments, invoices] = await Promise.all([
+    q('list', { collection: 'patients', query: qText, page: 1, pageSize: 5 }).catch(() => ({ rows: [] })),
+    q('list', { collection: 'appointments', query: qText, page: 1, pageSize: 5 }).catch(() => ({ rows: [] })),
+    q('list', { collection: 'invoices', query: qText, page: 1, pageSize: 5 }).catch(() => ({ rows: [] }))
+  ]);
+  return {
+    patients: (patients.rows || []).map((p) => ({ id: p.id, label: `${p.patientCode || ''} · ${p.fullName}`, sub: p.phone || '' })),
+    appointments: (appointments.rows || []).map((a) => ({ id: a.id, label: `${a.date} ${a.time} · ${patientName(a.patientId)}`, sub: a.reason || '' })),
+    invoices: (invoices.rows || []).map((i) => ({ id: i.id, label: `${i.invoiceNumber} · ${patientName(i.patientId)}`, sub: currency(centsToMoney(i.totalCents ?? i.total)) }))
+  };
 }
 
-function openModal(type, data = {}) { ui.modal = { type, data }; render(); window.setTimeout(() => document.querySelector('[data-modal-window] input, [data-modal-window] select')?.focus(), 40); }
-function closeModal() { if (ui.modal?.type === 'csvImport' && ui.csvImport) ui.csvImport = null; ui.modal = null; render(); }
-function openPatientProfile(id) { ui.patientId = id; ui.patientTab = 'overview'; ui.page = 'patients'; render(); }
-function formData(event) { return Object.fromEntries(new FormData(event.target).entries()); }
-function numeric(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
-function makePatient(data, editing = false) {
-  const existing = editing ? byId(state.patients, data.id) : null;
-  const status = data.status || existing?.status || 'Active';
-  const record = { ...(existing || {}), ...data, id: existing?.id || uid('patient'), patientCode: existing?.patientCode || nextCode('patient', 'patientPrefix'), registrationDate: existing?.registrationDate || today(), status, archived: status === 'Archived', updatedAt: now() };
-  return record;
+/* ------------------------------------------------------------------ */
+/* Form submission (every mutation goes through the ops layer)         */
+/* ------------------------------------------------------------------ */
+function formData(event) {
+  const out = Object.fromEntries(new FormData(event.target).entries());
+  return out;
 }
-function invoiceTotals(data) { return calculateInvoice(data); }
+function checkFormPermission(formName, _data) {
+  const permission = formPermissions[formName];
+  if (!permission) return true;
+  return requirePermission(permission);
+}
 
 async function handleSubmit(event) {
-  const form = event.target.closest('form[data-form]'); if (!form) return;
-  event.preventDefault(); const type = form.dataset.form; const data = formData(event);
-  const formPermissions = { patient: data.id ? 'patients.edit' : 'patients.create', appointment: data.id ? 'appointments.edit' : 'appointments.create', visit: data.id ? 'clinical.edit' : 'clinical.create', prescription: data.id ? 'prescriptions.edit' : 'prescriptions.create', invoice: data.id ? 'billing.edit' : 'billing.create', payment: 'payments.create', refund: 'payments.refund', stock: data.id ? 'inventory.adjust' : 'inventory.purchase', supplier: data.id ? 'inventory.adjust' : 'inventory.purchase', 'stock-adjustment': data.movementType === 'Usage' ? 'inventory.consume' : data.movementType === 'Adjustment' ? 'inventory.correct' : 'inventory.purchase', staff: data.id ? 'staff.edit' : 'staff.create', expense: data.id ? 'accounting.edit' : 'accounting.create', treatment: data.id ? 'clinical.edit' : 'clinical.create', 'treatment-plan': data.id ? 'clinical.edit' : 'clinical.create', referral: data.id ? 'clinical.edit' : 'clinical.create', attachment: 'clinical.edit', security: 'settings.edit' };
-  if (formPermissions[type] && !requirePermission(formPermissions[type])) return;
-  try {
-    if (type === 'saved-filter') {
-      if (!String(data.name || '').trim()) return notify('Enter a name for this saved view.', 'error');
-      const filter = { id: uid('filter'), entity: 'patients', name: String(data.name).trim(), query: ui.search, status: ui.patientStatusFilter || 'All statuses', dateFrom: ui.patientDateFrom || '', dateTo: ui.patientDateTo || '', toothStatus: ui.patientToothStatus || '', balance: ui.patientBalanceFilter || 'all', createdAt: now(), updatedAt: now() };
-      state.savedFilters = [filter, ...(state.savedFilters || []).filter((item) => item.name.toLowerCase() !== filter.name.toLowerCase())].slice(0, 50);
-      audit('Saved patient view created', 'Saved search', filter.id, filter.name);
-      Store.save(state); closeModal(); notify('Patient view saved.'); return;
-    }
-    if (type === 'user-account') {
-      if (!requirePermission('users.manage')) return;
-      const editing = Boolean(data.id);
-      const user = editing ? byId(state.users, data.id) : null;
-      if (editing && !user) return notify('That user account no longer exists.', 'error');
-      if (!String(data.name || '').trim()) return notify('Enter the account holder name.', 'error');
-      if (!editing && !/^\d{4,12}$/.test(data.pin || '')) return notify('New accounts require a 4–12 digit PIN.', 'error');
-      if (data.pin && data.pin !== data.confirmPin) return notify('PIN confirmation does not match.', 'error');
-      if (data.pin && !/^\d{4,12}$/.test(data.pin)) return notify('PINs must be 4–12 digits.', 'error');
-      const role = data.role || 'Receptionist';
-      const selectedPermissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map((input) => input.value);
-      const permissions = permissionsForRole(role, selectedPermissions);
-      const next = user || { id: uid('user'), createdAt: now(), failedAttempts: 0, lockedUntil: 0, lastLogin: null };
-      Object.assign(next, { name: String(data.name).trim(), role, staffId: data.staffId || '', active: data.active !== 'false', permissions });
-      if (data.pin) { const hashed = await hashPin(data.pin); next.pinSalt = hashed.salt; next.pinHash = hashed.hash; }
-      if (next.active === false && next.id === currentUser()?.id) return notify('You cannot deactivate the signed-in account.', 'error');
-      const projectedUsers = editing ? state.users.map((candidate) => candidate.id === next.id ? next : candidate) : [...state.users, next];
-      const remainingAdmins = projectedUsers.filter((candidate) => candidate.active !== false && candidate.role === 'Administrator').length;
-      if (remainingAdmins < 1) return notify('Keep at least one active Administrator account.', 'error');
-      if (editing) Object.assign(user, next); else state.users.push(next);
-      audit(editing ? 'User account updated' : 'User account created', 'User', next.id, `${next.name} · ${next.role}`);
-      Store.save(state); closeModal(); notify(editing ? 'User account updated.' : 'User account created.');
-      return;
-    }
-    if (type === 'user-login') {
-      const user = state.users.find((candidate) => candidate.id === data.userId && candidate.active !== false);
-      if (!user) return notify('That local account is unavailable.', 'error');
-      if (Date.now() < Number(user.lockedUntil || 0)) return notify('This account is temporarily locked. Try again shortly.', 'error');
-      if (!/^\d{4,12}$/.test(data.pin || '')) return notify('Enter your 4–12 digit local PIN.', 'error');
-      const candidateHash = await hashPin(data.pin, user.pinSalt || '');
-      if (!user.pinHash || candidateHash.hash !== user.pinHash) {
-        user.failedAttempts = Number(user.failedAttempts || 0) + 1;
-        if (user.failedAttempts >= 5) { user.lockedUntil = Date.now() + 30_000; user.failedAttempts = 0; }
-        Store.save(state);
-        return notify(user.lockedUntil ? 'Too many failed attempts. Try again in 30 seconds.' : 'That PIN is not correct.', 'error');
-      }
-      user.failedAttempts = 0;
-      user.lockedUntil = 0;
-      user.lastLogin = now();
-      ui.authenticatedUserId = user.id;
-      ui.locked = false;
-      ui.toast = null;
-      Store.save(state);
+  event.preventDefault();
+  const form = event.target;
+  const formName = form.dataset.form;
+  const data = formData(event);
+  if (formName === 'user-login') {
+    const result = await api.login(data.userId || (appState.boot?.userDirectory || [])[0]?.id || '', data.pin);
+    if (result.ok) {
+      appState.session = result.session;
+      ui.unlockUserId = data.userId || '';
+      recordActivity();
+      notify(`Welcome back, ${result.session?.userName || 'doctor'}.`, 'success');
       render();
-      notify(`Welcome, ${user.name}.`);
-      return;
-    }
-    if (type === 'setup') return await saveSetupStep(data);
-    if (type === 'unlock') {
-      if (!state.settings.pinHash) { ui.locked = false; render(); return; }
-      if (Date.now() < ui.unlockBlockedUntil) return notify('Too many failed attempts. Try again shortly.', 'error');
-      if (!/^\d{4,12}$/.test(data.pin || '')) return notify('Enter the 4–12 digit application PIN.', 'error');
-      const candidateHash = await hashPin(data.pin, state.settings.pinSalt);
-      if (candidateHash.hash !== state.settings.pinHash) {
-        ui.unlockFailures += 1;
-        if (ui.unlockFailures >= 5) { ui.unlockBlockedUntil = Date.now() + 30_000; ui.unlockFailures = 0; }
-        return notify(ui.unlockBlockedUntil ? 'Too many failed attempts. Try again in 30 seconds.' : 'That PIN is not correct. Try again.', 'error');
-      }
-      ui.unlockFailures = 0;
-      ui.unlockBlockedUntil = 0;
-      ui.locked = false;
-      ui.toast = null;
-      render();
-      resetActivityTimer();
-      notify('Workspace unlocked.');
-      return;
-    }
-    if (type === 'security') {
-      if (!/^\d{4,12}$/.test(data.pin || '')) return notify('PIN must contain 4–12 digits.', 'error');
-      if (data.pin !== data.confirmPin) return notify('The PIN confirmation does not match.', 'error');
-      const derivedPin = await hashPin(data.pin);
-      state.settings.pinHash = derivedPin.hash;
-      state.settings.pinSalt = derivedPin.salt;
-      state.settings.applicationLock = true;
-      const securityUser = currentUser() || state.users.find((candidate) => candidate.role === 'Administrator');
-      if (securityUser) { securityUser.pinHash = derivedPin.hash; securityUser.pinSalt = derivedPin.salt; securityUser.active = true; }
-      audit('Application lock enabled', 'Security', '', 'Local administrator PIN configured');
-      Store.save(state);
-      closeModal();
-      notify('Application lock enabled.');
-      return;
-    }
-    if (type === 'attachment') {
-      const existing = data.id ? byId(state.attachments, data.id) : null;
-      const source = ui.modal?.data || {};
-      const fileData = data.data || source.data || existing?.data;
-      const validation = validateAttachmentFile({ type: data.type || source.type || existing?.type, size: data.size || source.size || existing?.size, name: data.name });
-      if (!validation.allowed || !data.patientId || !fileData) return notify('This attachment is invalid or missing its patient record.', 'error');
-      const record = { ...(existing || {}), id: existing?.id || uid('attachment'), patientId: data.patientId, visitId: data.visitId || '', name: sanitizeFilename(data.name), type: data.type || source.type || existing?.type, size: numeric(data.size || source.size || existing?.size), data: fileData, category: data.category || 'Clinical document', notes: data.notes || '', createdAt: existing?.createdAt || now(), updatedAt: now() };
-      if (existing) Object.assign(existing, record); else state.attachments.push(record);
-      audit(existing ? 'Attachment details edited' : 'Attachment added', 'Attachment', record.id, `${record.name} · ${record.category}`);
-      Store.save(state);
-      ui.pendingAttachment = null;
-      closeModal();
-      notify(existing ? 'Attachment details saved.' : 'Attachment added to the patient record.');
-      return;
-    }
-    if (type === 'patient') {
-      const validation = validatePatientInput(data);
-      if (!validation.valid) return notify(validation.errors[0], 'error');
-      const duplicate = active(state.patients).find((p) => p.id !== data.id && p.phone && data.phone && p.phone.replace(/\D/g, '') === data.phone.replace(/\D/g, '') && p.fullName.toLowerCase() === data.fullName.toLowerCase());
-      if (duplicate && !window.confirm(`A patient with the same name and phone already exists (${duplicate.patientCode}). Save anyway?`)) return;
-      const customFields = Object.fromEntries((state.settings.customPatientFields || []).map((definition) => [definition.key, data[`custom_${definition.key}`] || '']));
-      const editing = Boolean(data.id); const record = makePatient({ ...data, tags: normaliseTags(data.tagsText), customFields }, editing); if (editing) Object.assign(byId(state.patients, data.id), record); else state.patients.push(record); audit(editing ? 'Patient edited' : 'Patient created', 'Patient', record.id, `${record.patientCode} · ${record.fullName}`); Store.save(state); closeModal(); notify(editing ? 'Patient updated.' : `Patient ${record.patientCode} created.`); return;
-    }
-    if (type === 'appointment') {
-      if (!data.patientId || !data.date || !data.time || !data.reason.trim()) return notify('Patient, date, time and reason are required.', 'error');
-      const candidate = { ...data, duration: numeric(data.duration) || state.settings.defaultDuration };
-      const conflict = active(state.appointments).find((a) => appointmentsOverlap(candidate, a, state.settings.defaultDuration));
-      if (conflict) {
-        const resources = [candidate.dentistId && conflict.dentistId === candidate.dentistId ? 'dentist' : '', candidate.chair && conflict.chair === candidate.chair ? 'chair' : '', candidate.room && conflict.room === candidate.room ? 'room' : ''].filter(Boolean).join(', ');
-        if (!window.confirm(`This appointment overlaps ${conflict.patientId ? patientName(conflict.patientId) : 'another appointment'} on the same ${resources || 'resource'}. Save as a double-booking?`)) return;
-      }
-      const editing = Boolean(data.id); const existing = editing ? byId(state.appointments, data.id) : null; const record = { ...(existing || {}), ...data, id: existing?.id || uid('appointment'), appointmentCode: existing?.appointmentCode || nextCode('appointment', 'appointmentPrefix'), serial: existing?.serial || nextCode('serial', 'serialPrefix'), duration: candidate.duration, createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.appointments.push(record); const patient = byId(state.patients, data.patientId); if (patient && data.date >= today()) patient.nextVisit = data.date; audit(editing ? 'Appointment edited' : 'Appointment created', 'Appointment', record.id, `${patient?.fullName || ''} · ${data.date} ${data.time}`); Store.save(state); closeModal(); notify(editing ? 'Appointment updated.' : 'Appointment booked.'); return;
-    }
-    if (type === 'visit') {
-      if (!data.patientId || !data.date || !data.reason.trim()) return notify('Patient, date and reason are required.', 'error');
-      const editing = Boolean(data.id); const existing = editing ? byId(state.visits, data.id) : null; const record = { ...(existing || {}), ...data, id: existing?.id || uid('visit'), visitCode: existing?.visitCode || nextCode('visit', 'appointmentPrefix'), createdAt: existing?.createdAt || now(), updatedAt: now(), status: 'Completed' }; if (editing) Object.assign(existing, record); else state.visits.push(record); const patient = byId(state.patients, data.patientId); if (patient) patient.lastVisit = data.date; audit(editing ? 'Visit edited' : 'Visit created', 'Visit', record.id, `${patient?.fullName || ''} · ${data.reason}`); Store.save(state); closeModal(); if (patient) { ui.patientId = patient.id; ui.page = 'patients'; } notify(editing ? 'Clinical visit updated.' : 'Clinical visit recorded.'); return;
-    }
-    if (type === 'prescription') {
-      if (!data.patientId || !data.medicine.trim() || !data.doctor.trim()) return notify('Patient, doctor and medicine are required.', 'error');
-      const additional = String(data.medicationsText || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => { const [medicine = '', strength = '', dosage = '', frequency = '', duration = '', route = 'Oral', instructions = ''] = line.split('|').map((part) => part.trim()); return { medicine, strength, dosage, frequency, duration, route, instructions }; }).filter((medication) => medication.medicine);
-      const medication = { medicine: data.medicine.trim(), strength: data.strength, dosage: data.dosage, frequency: data.frequency, duration: data.duration, route: data.route, instructions: data.instructions };
-      const medications = [medication, ...additional.filter((item) => item.medicine.toLowerCase() !== medication.medicine.toLowerCase())];
-      const editing = Boolean(data.id); const existing = editing ? byId(state.prescriptions, data.id) : null; const record = { ...(existing || {}), id: existing?.id || uid('rx'), prescriptionCode: existing?.prescriptionCode || nextCode('prescription', 'appointmentPrefix'), patientId: data.patientId, date: data.date || today(), doctor: data.doctor, medications, notes: data.notes, createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.prescriptions.push(record); audit(editing ? 'Prescription edited' : 'Prescription created', 'Prescription', record.id, `${patientName(data.patientId)} · ${medications.length} medicine(s)`); Store.save(state); closeModal(); notify(editing ? 'Prescription updated.' : 'Prescription created.'); return;
-    }
-    if (type === 'invoice') {
-      if (!data.patientId || !data.itemName.trim() || !validateMoney(data.unitPrice) || !validateMoney(data.discount || 0)) return notify('Patient, line item and valid two-decimal money amounts are required.', 'error');
-      const totals = invoiceTotals(data);
-      const editing = Boolean(data.id);
-      const existing = editing ? byId(state.invoices, data.id) : null;
-      const record = { ...(existing || {}), id: existing?.id || uid('invoice'), invoiceNumber: existing?.invoiceNumber || nextCode('invoice', 'invoicePrefix'), patientId: data.patientId, date: data.date || today(), items: [{ name: data.itemName.trim(), quantity: numeric(data.quantity) || 1, unitPrice: totals.subtotal / (numeric(data.quantity) || 1), total: totals.subtotal }], subtotal: totals.subtotal, discount: totals.discount, taxRate: totals.taxRate, tax: totals.tax, total: totals.total, notes: data.notes, createdAt: existing?.createdAt || now(), updatedAt: now() };
-      const existingPayments = editing ? active(state.payments).filter((payment) => payment.invoiceId === record.id).map((payment) => ({ ...payment, amount: paymentAmount(payment), refundedAmount: 0 })) : [];
-      const paymentStatus = paymentStatusFor(record.total, existingPayments);
-      Object.assign(record, paymentStatus);
-      if ((data.status === 'Cancelled' || existing?.status === 'Cancelled') && paymentStatus.paid === 0) record.status = 'Cancelled';
-      if (editing) Object.assign(existing, record); else state.invoices.push(record);
-      audit(editing ? 'Invoice edited' : 'Invoice created', 'Invoice', record.id, `${record.invoiceNumber} · ${currency(record.total)}`);
-      Store.save(state); closeModal(); notify(editing ? 'Invoice updated.' : `Invoice ${record.invoiceNumber} created.`); return;
-    }
-    if (type === 'payment') {
-      const amount = numeric(data.amount);
-      if (!data.patientId || !data.date) return notify('Patient and payment date are required.', 'error');
-      const invoice = data.invoiceId ? byId(state.invoices, data.invoiceId) : null;
-      const validation = validatePayment({ amount, due: invoice ? invoicePaymentStatus(invoice).due : amount, invoiceStatus: invoice?.status || 'Unpaid' });
-      if (!validation.valid) return notify(validation.errors[0], 'error');
-      const record = { id: uid('payment'), receiptNumber: nextCode('receipt', 'invoicePrefix'), invoiceId: data.invoiceId || '', patientId: data.patientId, amount: validation.amount, refundedAmount: 0, status: 'Recorded', date: data.date, method: data.method, reference: data.reference, transactionId: data.reference, provider: data.provider, notes: data.notes, createdAt: now(), updatedAt: now() };
-      state.payments.push(record);
-      if (invoice) { Object.assign(invoice, invoicePaymentStatus(invoice)); invoice.updatedAt = now(); }
-      audit('Payment recorded', 'Payment', record.id, `${record.receiptNumber} · ${currency(record.amount)}`);
-      Store.save(state); closeModal(); notify(`Payment of ${currency(record.amount)} recorded.`); return;
-    }
-    if (type === 'refund') {
-      const payment = byId(state.payments, data.paymentId);
-      const amount = numeric(data.amount);
-      const remaining = payment ? paymentAmount(payment) : 0;
-      if (!payment || !validateMoney(data.amount, { allowZero: false }) || amount > remaining) return notify('Refund must be greater than zero, use at most two decimals and cannot exceed the remaining payment.', 'error');
-      const adjustment = { id: uid('adjustment'), type: 'Refund', paymentId: payment.id, invoiceId: payment.invoiceId || '', patientId: payment.patientId, amount, date: data.date || today(), reason: data.reason.trim(), createdAt: now() };
-      state.paymentAdjustments.push(adjustment);
-      payment.status = paymentAmount(payment) <= 0 ? 'Refunded' : 'Partially Refunded';
-      const invoice = payment.invoiceId ? byId(state.invoices, payment.invoiceId) : null;
-      if (invoice) { Object.assign(invoice, invoicePaymentStatus(invoice)); invoice.updatedAt = now(); }
-      audit('Payment refunded', 'Payment adjustment', adjustment.id, `${currency(amount)} · ${adjustment.reason}`);
-      Store.save(state); closeModal(); notify(`Refund of ${currency(amount)} recorded.`); return;
-    }
-    if (type === 'stock-adjustment') {
-      const item = byId(state.inventory, data.itemId);
-      const quantity = numeric(data.quantity);
-      if (!item || quantity <= 0 || !data.reason.trim()) return notify('Choose an item, positive quantity and a reason.', 'error');
-      const delta = data.movementType === 'Purchase' || (data.movementType === 'Adjustment' && data.direction === 'increase') ? quantity : -quantity;
-      const before = numeric(item.currentStock);
-      const after = before + delta;
-      if (after < 0) return notify('This movement would make stock negative.', 'error');
-      item.currentStock = after;
-      item.updatedAt = now();
-      if (data.batch) item.batch = data.batch;
-      const movement = { id: uid('movement'), itemId: item.id, supplierId: item.supplierId || '', unitPrice: numeric(item.purchasePrice), type: data.movementType || 'Adjustment', quantity: delta, before, after, date: data.date || today(), reason: data.reason.trim(), createdAt: now() };
-      state.stockMovements.unshift(movement);
-      audit('Stock movement recorded', 'Inventory movement', movement.id, `${item.name} · ${movement.type} · ${delta}`);
-      Store.save(state); closeModal(); notify('Stock movement recorded.'); return;
-    }
-    if (type === 'stock') {
-      if (!data.name.trim() || numeric(data.currentStock) < 0) return notify('Item name and a valid stock quantity are required.', 'error'); const editing = Boolean(data.id); const existing = editing ? byId(state.inventory, data.id) : null; const previous = Number(existing?.currentStock || 0); const added = numeric(data.quantity); const record = { ...(existing || {}), ...data, id: existing?.id || uid('stock'), currentStock: editing ? Number(existing.currentStock || 0) : numeric(data.currentStock) + added, minimumStock: numeric(data.minimumStock), createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.inventory.push(record); if (!editing && added > 0) state.stockMovements.unshift({ id: uid('movement'), itemId: record.id, supplierId: record.supplierId || '', unitPrice: numeric(record.purchasePrice), type: 'Purchase', quantity: added, before: previous, after: record.currentStock, date: record.purchaseDate || today(), createdAt: now(), notes: 'Initial stock entry' }); audit(editing ? 'Inventory item edited' : 'Inventory adjusted', 'Inventory', record.id, `${record.name} · ${record.currentStock} ${record.unit || ''}`); Store.save(state); closeModal(); notify(editing ? 'Stock details updated.' : 'Stock item added.'); return;
-    }
-    if (type === 'supplier') { if (!data.name.trim()) return notify('Supplier name is required.', 'error'); const editing = Boolean(data.id); const existing = editing ? byId(state.suppliers, data.id) : null; const record = { ...(existing || {}), ...data, id: existing?.id || uid('supplier'), createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.suppliers.push(record); audit(editing ? 'Supplier edited' : 'Supplier created', 'Supplier', record.id, record.name); Store.save(state); closeModal(); notify(editing ? 'Supplier updated.' : 'Supplier added.'); return; }
-    if (type === 'staff') { if (!data.name.trim()) return notify('Staff name is required.', 'error'); const editing = Boolean(data.id); const existing = editing ? byId(state.staff, data.id) : null; const record = { ...(existing || {}), ...data, id: existing?.id || uid('staff'), staffCode: existing?.staffCode || nextCode('staff', 'patientPrefix'), createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.staff.push(record); audit(editing ? 'Staff edited' : 'Staff created', 'Staff', record.id, record.name); Store.save(state); closeModal(); notify(editing ? 'Staff member updated.' : 'Staff member added.'); return; }
-    if (type === 'referral') { if (!data.patientId || !data.referralTo.trim() || !data.reason.trim()) return notify('Patient, destination and reason are required.', 'error'); const editing = Boolean(data.id); const existing = editing ? byId(state.referrals, data.id) : null; const record = { ...(existing || {}), ...data, id: existing?.id || uid('referral'), createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.referrals.push(record); audit(editing ? 'Referral edited' : 'Referral created', 'Referral', record.id, `${patientName(record.patientId)} · ${record.referralTo}`); Store.save(state); closeModal(); notify(editing ? 'Referral updated.' : 'Referral recorded.'); return; }
-    if (type === 'treatment-plan') {
-      const planValidation = validateTreatmentPlanInput(data);
-      if (!planValidation.valid) return notify(planValidation.errors[0], 'error');
-      const editing = Boolean(data.id);
-      const existing = editing ? byId(state.treatmentPlans, data.id) : null;
-      const oldStages = existing?.stages || [];
-      const stages = String(data.stagesText || '').split(/\r?\n/).map((line, index) => line.trim()).filter(Boolean).map((line, index) => { const [title, plannedDate = '', estimatedCost = '', status = 'Planned', notes = ''] = line.split('|').map((part) => part.trim()); const previous = oldStages[index] || {}; return { id: previous.id || uid('stage'), title: title || `Stage ${index + 1}`, plannedDate, estimatedCost: numeric(estimatedCost), status: ['Planned', 'In progress', 'Completed', 'Deferred'].includes(status) ? status : 'Planned', notes }; });
-      const record = { ...(existing || {}), id: existing?.id || uid('plan'), patientId: data.patientId, title: String(data.title).trim(), goal: data.goal || '', procedures: data.procedures || '', teeth: data.teeth || '', status: data.status || 'Draft', estimatedDuration: numeric(data.estimatedDuration), estimatedCost: numeric(data.estimatedCost), discount: numeric(data.discount), estimatedTotal: Math.max(0, numeric(data.estimatedCost) - numeric(data.discount)), startDate: data.startDate || '', reviewDate: data.reviewDate || '', dentistId: data.dentistId || '', notes: data.notes || '', stages, createdAt: existing?.createdAt || now(), updatedAt: now() };
-      if (editing) Object.assign(existing, record); else state.treatmentPlans.push(record);
-      audit(editing ? 'Treatment plan edited' : 'Treatment plan created', 'Treatment plan', record.id, `${patientName(record.patientId)} · ${record.title}`);
-      Store.save(state); closeModal(); ui.patientId = record.patientId; ui.page = 'patients'; ui.patientTab = 'treatment-plan'; notify(editing ? 'Treatment plan updated.' : 'Treatment plan created.'); return;
-    }
-    if (type === 'treatment') { if (!data.name.trim()) return notify('Treatment name is required.', 'error'); const editing = Boolean(data.id); const existing = editing ? byId(state.treatments, data.id) : null; const record = { ...(existing || {}), ...data, id: existing?.id || uid('treatment'), defaultPrice: numeric(data.defaultPrice), duration: numeric(data.duration) || 30, toothRequired: data.toothRequired === 'true', active: data.active !== 'false', createdAt: existing?.createdAt || now(), updatedAt: now() }; if (editing) Object.assign(existing, record); else state.treatments.push(record); audit(editing ? 'Treatment catalog edited' : 'Treatment catalog item created', 'Treatment', record.id, record.name); Store.save(state); closeModal(); notify(editing ? 'Treatment updated.' : 'Treatment added.'); return; }
-    if (type === 'expense') { const amount = numeric(data.amount); if (!data.description.trim() || !validateMoney(data.amount, { allowZero: false })) return notify('Description and a positive amount with at most two decimals are required.', 'error'); const record = { id: uid('expense'), ...data, amount, createdAt: now() }; state.expenses.push(record); audit('Expense recorded', 'Expense', record.id, `${record.description} · ${currency(amount)}`); Store.save(state); closeModal(); notify('Expense recorded.'); return; }
-  } catch (error) { console.error(error); notify('The record could not be saved. Your data is unchanged.', 'error'); }
-}
-async function saveSetupStep(data) {
-  const step = ui.modal.data.step || 1;
-  if (step === 1) { Object.assign(state.settings, data); openModal('setup', { step: 2 }); return; }
-  if (!/^\d{4,12}$/.test(data.adminPin || '') || data.adminPin !== data.adminPinConfirm) return notify('Choose a matching 4–12 digit Administrator PIN.', 'error');
-  const { adminPin, adminPinConfirm, ...settingsData } = data;
-  Object.assign(state.settings, settingsData);
-  const derivedPin = await hashPin(adminPin);
-  state.settings.pinHash = derivedPin.hash;
-  state.settings.pinSalt = derivedPin.salt;
-  state.settings.applicationLock = true;
-  const administrator = state.users.find((user) => user.role === 'Administrator') || { id: 'user_admin', createdAt: now(), failedAttempts: 0, lockedUntil: 0, lastLogin: null };
-  Object.assign(administrator, { name: state.settings.dentistName || 'Practice administrator', staffId: '', role: 'Administrator', permissions: permissionsForRole('Administrator'), pinHash: derivedPin.hash, pinSalt: derivedPin.salt, active: true });
-  if (!state.users.some((user) => user.id === administrator.id)) state.users.push(administrator);
-  state.setupComplete = true;
-  audit('Setup completed', 'Settings', '', 'Practice identity and administrator account configured');
-  Store.save(state);
-  openModal('setup', { step: 3 });
-}
-function saveSettings() {
-  if (!requirePermission('settings.edit')) return;
-  document.querySelectorAll('[data-settings]').forEach((el) => {
-    if (['paymentMethodsText', 'roomsText', 'customPatientFieldsText', 'expenseCategoriesText', 'inventoryCategoriesText'].includes(el.name)) return;
-    state.settings[el.name] = el.type === 'number' ? numeric(el.value) : el.value;
-  });
-  const methodsInput = document.querySelector('[name="paymentMethodsText"]');
-  if (methodsInput) state.settings.paymentMethods = [...new Set(methodsInput.value.split(',').map((method) => method.trim()).filter(Boolean))];
-  const expenseCategoriesInput = document.querySelector('[name="expenseCategoriesText"]');
-  if (expenseCategoriesInput) state.settings.expenseCategories = [...new Set(expenseCategoriesInput.value.split(',').map((category) => category.trim()).filter(Boolean))].slice(0, 100);
-  const inventoryCategoriesInput = document.querySelector('[name="inventoryCategoriesText"]');
-  if (inventoryCategoriesInput) state.settings.inventoryCategories = [...new Set(inventoryCategoriesInput.value.split(',').map((category) => category.trim()).filter(Boolean))].slice(0, 100);
-  const roomsInput = document.querySelector('[name="roomsText"]');
-  if (roomsInput) { state.settings.rooms = [...new Set(roomsInput.value.split(',').map((room) => room.trim()).filter(Boolean))]; state.rooms = state.settings.rooms.map((name, index) => ({ id: `room_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || index + 1}`, name, active: true })); }
-  const customFieldsInput = document.querySelector('[name="customPatientFieldsText"]');
-  if (customFieldsInput) state.settings.customPatientFields = [...new Set(customFieldsInput.value.split(',').map((label) => label.trim()).filter(Boolean))].slice(0, 20).map((label) => ({ key: label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || uid('field'), label, type: 'text' }));
-  document.querySelectorAll('[data-settings-template]').forEach((el) => { state.settings.documentTemplate = { ...(state.settings.documentTemplate || {}), [el.dataset.settingsTemplate]: el.type === 'checkbox' ? el.checked : el.value }; });
-  document.querySelectorAll('[data-settings-checkbox]').forEach((el) => { state.settings[el.dataset.settingsCheckbox] = el.checked; });
-  state.notificationRules = NOTIFICATION_RULES.map(([kind]) => ({ id: `rule_${kind}`, kind, enabled: document.querySelector(`[data-settings-rule="${kind}"]`)?.checked !== false }));
-  state.settings.autoLockMinutes = clamp(numeric(state.settings.autoLockMinutes) || 30, 1, 240);
-  state.settings.taxRate = clamp(numeric(state.settings.taxRate), 0, 100);
-  audit('Settings changed', 'Settings', '', 'General practice settings updated'); Store.save(state); notify('Settings saved.');
-}
-
-function runCommand(command) {
-  if (command.startsWith('navigate:')) {
-    const page = command.split(':')[1];
-    const permissions = { queue: 'appointments.queue', reports: 'reports.view', analytics: 'reports.analytics', settings: 'settings.view', payments: 'payments.view' };
-    if (permissions[page] && !requirePermission(permissions[page])) return;
-    ui.page = page; ui.patientId = null; ui.modal = null; ui.search = ''; render(); return;
-  }
-  const actions = { 'open-patient': () => openModal('patient'), 'open-appointment': () => openModal('appointment'), 'open-visit': () => openModal('visit'), 'open-treatment': () => openModal('treatment'), 'open-prescription': () => openModal('prescription', { patientId: ui.patientId || '' }), 'open-invoice': () => openModal('invoice', { patientId: ui.patientId || '' }), 'open-payment': () => openModal('payment'), 'open-expense': () => openModal('expense'), 'open-stock': () => openModal('stock'), 'export-backup': () => exportBackup(), 'trigger-import': () => { if (requirePermission('backup.restore')) document.querySelector('#backup-file')?.click(); } };
-  if (actions[command]) actions[command]();
-}
-
-function handleClick(event) {
-  const target = event.target.closest('[data-action]'); if (!target) return; const action = target.dataset.action;
-  const actionPermissions = { 'export-backup': 'backup.create', 'trigger-import': 'backup.restore', 'restore-confirm': 'backup.restore', 'integrity-check': 'diagnostics.view', 'export-patients': 'patients.view', 'import-patients': 'patients.create', 'export-visits': 'clinical.view', 'export-inventory': 'inventory.view', 'export-report': 'reports.export', 'export-report-pdf': 'reports.export', 'print-invoice': 'billing.view', 'print-payment': 'payments.view', 'print-prescription': 'prescriptions.print', 'print-patient': 'patients.view', 'print-patient-statement': 'billing.view', 'print-dental-chart': 'clinical.view', 'print-report': 'reports.view', 'print-billing': 'billing.view', 'print-queue': 'appointments.view', 'print-expense': 'accounting.view', 'open-audit-log': 'audit.view' };
-  if (actionPermissions[action] && !requirePermission(actionPermissions[action])) return;
-  if (action === 'export-unsupported-store') { jsonDownload(deepClone(state), `dentiva-pro-preserved-schema-${state.schemaVersion}.json`); return; }
-  if (action === 'reset-workspace') { if (window.confirm('Reset this workspace? Export the preserved data first because this cannot be undone.')) Store.reset(); return; }
-  if (action === 'navigate') { const page = target.dataset.page || 'dashboard'; const pagePermissions = { patients: 'patients.view', appointments: 'appointments.view', queue: 'appointments.queue', clinical: 'clinical.view', prescriptions: 'prescriptions.view', dental: 'clinical.view', treatments: 'clinical.view', billing: 'billing.view', payments: 'payments.view', accounting: 'accounting.view', inventory: 'inventory.view', suppliers: 'inventory.view', staff: 'staff.view', reports: 'reports.view', analytics: 'reports.analytics', notifications: 'notifications.manage', backup: 'backup.create', diagnostics: 'diagnostics.view', settings: 'settings.view', users: 'users.manage' }; if (pagePermissions[page] && !requirePermission(pagePermissions[page])) return; ui.page = page; ui.patientId = null; ui.modal = null; ui.mobileNav = false; ui.search = ''; render(); return; }
-  if (action === 'open-user-account') { if (!requirePermission('users.manage')) return; openModal('userAccount', { user: byId(state.users, target.dataset.id) || {} }); return; }
-  if (action === 'toggle-user-active') { if (!requirePermission('users.manage')) return; const user = byId(state.users, target.dataset.id); if (!user || user.id === currentUser()?.id) return notify('You cannot deactivate the signed-in account.', 'error'); user.active = user.active === false; audit(user.active ? 'User account activated' : 'User account deactivated', 'User', user.id, `${user.name} · ${user.role}`); Store.save(state); render(); notify(user.active ? 'User account activated.' : 'User account deactivated.'); return; }
-  if (action === 'toggle-sidebar') { ui.sidebarCollapsed = !ui.sidebarCollapsed; render(); return; }
-  if (action === 'toggle-mobile-nav') { ui.mobileNav = !ui.mobileNav; render(); return; }
-  if (action === 'open-search') { openModal('search'); return; }
-  if (action === 'save-patient-filter') { openModal('saveFilter'); return; }
-  if (action === 'open-saved-filters') { openModal('savedFilters'); return; }
-  if (action === 'load-saved-filter') { const filter = byId(state.savedFilters || [], target.dataset.id); if (!filter) return; ui.search = filter.query || ''; ui.patientStatusFilter = filter.status || 'All statuses'; ui.patientDateFrom = filter.dateFrom || ''; ui.patientDateTo = filter.dateTo || ''; ui.patientToothStatus = filter.toothStatus || ''; ui.patientBalanceFilter = filter.balance || 'all'; ui.patientPage = 1; closeModal(); render(); return; }
-  if (action === 'delete-saved-filter') { const filter = byId(state.savedFilters || [], target.dataset.id); if (!filter || !window.confirm(`Delete saved view “${filter.name}”?`)) return; state.savedFilters = state.savedFilters.filter((item) => item.id !== filter.id); audit('Saved patient view deleted', 'Saved search', filter.id, filter.name); Store.save(state); render(); return; }
-  if (action === 'open-dashboard-customizer') { openModal('dashboard'); return; }
-  if (action === 'toggle-dashboard-widget') { const key = target.dataset.widget; const current = new Set(state.dashboard || ['schedule', 'queue', 'followups', 'signals']); if (current.has(key) && current.size === 1) return notify('Keep at least one dashboard card enabled.', 'error'); if (current.has(key)) current.delete(key); else current.add(key); state.dashboard = [...current]; audit('Dashboard layout changed', 'Dashboard', '', `${key} ${current.has(key) ? 'enabled' : 'hidden'}`); Store.save(state); render(); return; }
-  if (action === 'move-dashboard-widget') { const key = target.dataset.widget; const direction = target.dataset.direction; const layout = [...(state.dashboard || ['schedule', 'queue', 'followups', 'signals'])]; const index = layout.indexOf(key); const nextIndex = direction === 'up' ? index - 1 : index + 1; if (index < 0 || nextIndex < 0 || nextIndex >= layout.length) return; [layout[index], layout[nextIndex]] = [layout[nextIndex], layout[index]]; state.dashboard = layout; audit('Dashboard layout reordered', 'Dashboard', '', `${key} moved ${direction}`); Store.save(state); render(); return; }
-  if (action === 'reset-dashboard-widgets') { state.dashboard = ['schedule', 'queue', 'followups', 'signals']; audit('Dashboard layout reset', 'Dashboard', '', 'Default operational cards restored'); Store.save(state); render(); return; }
-  if (action === 'run-command') { const command = target.dataset.command || ''; closeModal(); runCommand(command); return; }
-  if (action === 'open-notifications') { openModal('notifications'); return; }
-  if (action === 'notification-open') { const note = notificationItems().find((item) => item.id === target.dataset.id); if (!note) return; const notificationPermissions = { patients: 'patients.view', billing: 'billing.view', queue: 'appointments.queue', inventory: 'inventory.view', clinical: 'clinical.view', backup: 'backup.create' }; if (note.page && notificationPermissions[note.page] && !requirePermission(notificationPermissions[note.page])) return; state.notificationRead = { ...(state.notificationRead || {}), [note.id]: true }; audit('Notification opened', 'Notification', note.id, note.title); Store.save(state); closeModal(); if (note.page === 'patients' && note.recordId) openPatientProfile(note.recordId); else if (note.page === 'billing' && note.recordId) { const invoice = byId(state.invoices, note.recordId); invoice ? openModal('invoice', { invoice }) : (ui.page = 'billing', render()); } else if (note.page === 'queue' && note.recordId) { const appointment = byId(state.appointments, note.recordId); appointment ? openModal('appointment', { appointment }) : (ui.page = 'queue', render()); } else if (note.page === 'inventory' && note.recordId) { const item = byId(state.inventory, note.recordId); item ? openModal('stock', { item }) : (ui.page = 'inventory', render()); } else if (note.page === 'clinical' && note.recordId) { const visit = byId(state.visits, note.recordId); if (visit) openPatientProfile(visit.patientId); else { ui.page = 'clinical'; render(); } } else { const page = ['queue', 'inventory', 'clinical', 'billing', 'backup'].includes(note.page) ? note.page : 'notifications'; ui.page = page; render(); } return; }
-  if (action === 'open-audit-log') { openModal('auditLog'); return; }
-  if (action === 'open-user-menu') { openModal('user'); return; }
-  if (action === 'open-security') { if (!requirePermission('settings.edit')) return; openModal('security'); return; }
-  if (action === 'lock-workspace') { lockWorkspace('Workspace locked by administrator'); return; }
-  if (action === 'disable-lock') {
-    if (!requirePermission('settings.edit')) return;
-    if (!window.confirm('Disable the application lock for this workspace?')) return;
-    state.settings.applicationLock = false;
-    state.settings.pinHash = '';
-    state.settings.pinSalt = '';
-    audit('Application lock disabled', 'Security', '', 'Local administrator PIN removed');
-    Store.save(state);
-    closeModal();
-    notify('Application lock disabled.');
+    } else notify(result.error || 'Sign-in failed.', 'error');
     return;
   }
-  if (action === 'close-modal' && (event.target === target || target === event.target.closest('[data-action="close-modal"]'))) { closeModal(); return; }
-  if (action === 'close-toast') { ui.toast = null; render(); return; }
-  if (action === 'open-setup') { openModal('setup', { step: 1 }); return; }
-  if (action === 'choose-logo') { document.querySelector('#clinic-logo-file')?.click(); return; }
-  if (action === 'remove-logo') { state.settings.logo = ''; audit('Clinic logo removed', 'Settings', '', 'Clinic logo removed'); Store.save(state); render(); notify('Clinic logo removed.'); return; }
-  if (action === 'finish-setup') { closeModal(); notify('Workspace ready.'); return; }
-  if (action === 'open-patient') { openModal('patient', {}); return; }
-  if (action === 'open-appointment') { openModal('appointment', { patientId: target.dataset.patientId || '' }); return; }
-  if (action === 'open-visit') { openModal('visit', { patientId: target.dataset.patientId || ui.patientId || '' }); return; }
-  if (action === 'open-prescription') { openModal('prescription', { patientId: ui.patientId || '' }); return; }
-  if (action === 'save-medication-template') { if (!requirePermission('prescriptions.create')) return; const form = target.closest('form'); const values = Object.fromEntries(new FormData(form).entries()); if (!String(values.medicine || '').trim()) return notify('Enter a medicine before saving it to the catalog.', 'error'); const template = { id: uid('medication'), name: String(values.medicine).trim(), strength: values.strength || '', dosage: values.dosage || '', frequency: values.frequency || '', duration: values.duration || '', route: values.route || 'Oral', instructions: values.instructions || '', active: true, updatedAt: now() }; state.medicationCatalog = [template, ...(state.medicationCatalog || []).filter((item) => item.name.toLowerCase() !== template.name.toLowerCase())].slice(0, 500); audit('Medication catalog updated', 'Medication', template.id, template.name); Store.save(state); notify('Medicine saved to the local catalog.'); return; }
-  if (action === 'open-invoice') { openModal('invoice', { patientId: ui.patientId || '' }); return; }
-  if (action === 'open-payment') { openModal('payment', { invoiceId: target.dataset.invoiceId || '', patientId: target.dataset.patientId || '' }); return; }
-  if (action === 'refund-payment') { const payment = byId(state.payments, target.dataset.id); if (payment) openModal('refund', { payment }); return; }
-  if (action === 'open-stock') { openModal('stock', {}); return; }
-  if (action === 'open-stock-adjustment') { openModal('stockAdjustment', { itemId: target.dataset.id || '' }); return; }
-  if (action === 'open-supplier') { openModal('supplier', {}); return; }
-  if (action === 'open-staff') { openModal('staff', {}); return; }
-  if (action === 'open-expense') { openModal('expense', {}); return; }
-  if (action === 'open-treatment') { openModal('treatment', {}); return; }
-  if (action === 'open-treatment-plan') { openModal('treatmentPlan', { patientId: target.dataset.patientId || ui.patientId || '' }); return; }
-  if (action === 'edit-treatment-plan') { openModal('treatmentPlan', { plan: byId(state.treatmentPlans, target.dataset.id) }); return; }
-  if (action === 'cycle-plan-stage') { if (!requirePermission('clinical.edit')) return; const plan = byId(state.treatmentPlans, target.dataset.id); const stage = plan?.stages?.[Number(target.dataset.stageIndex)]; if (!stage) return; const statuses = ['Planned', 'In progress', 'Completed', 'Deferred']; stage.status = statuses[(statuses.indexOf(stage.status || 'Planned') + 1) % statuses.length]; plan.updatedAt = now(); audit('Treatment plan stage updated', 'Treatment plan', plan.id, `${plan.title} · ${stage.title} · ${stage.status}`); Store.save(state); render(); return; }
-  if (action === 'convert-treatment-plan') { if (!requirePermission('clinical.edit')) return; const plan = byId(state.treatmentPlans, target.dataset.id); if (!plan || !window.confirm('Record a clinical visit from this treatment plan? This creates a visit record only; no invoice or payment is created.')) return; const visit = { id: uid('visit'), visitCode: nextCode('visit', 'appointmentPrefix'), patientId: plan.patientId, date: today(), reason: `Treatment plan: ${plan.title}`, diagnosis: plan.goal || plan.diagnosis || '', treatmentPerformed: (plan.stages || []).filter((stage) => stage.status !== 'Deferred').map((stage) => stage.title).join(', '), notes: plan.notes || 'Created from a clinician-authored treatment plan.', createdAt: now(), updatedAt: now(), status: 'Completed' }; state.visits.push(visit); plan.status = plan.status === 'Draft' ? 'In Progress' : plan.status || 'In Progress'; plan.updatedAt = now(); const patient = byId(state.patients, plan.patientId); if (patient) patient.lastVisit = today(); audit('Treatment plan converted to visit', 'Treatment plan', plan.id, `${plan.title} · ${visit.visitCode}`); Store.save(state); notify('Clinical visit recorded from the treatment plan.'); render(); return; }
-  if (action === 'edit-treatment') { openModal('treatment', { treatment: byId(state.treatments, target.dataset.id) }); return; }
-  if (action === 'open-referral') { openModal('referral', { patientId: target.dataset.patientId || ui.patientId || '' }); return; }
-  if (action === 'edit-referral') { openModal('referral', { referral: byId(state.referrals, target.dataset.id) }); return; }
-  if (action === 'open-patient-profile') { openPatientProfile(target.dataset.id); return; }
-  if (action === 'close-patient-profile') { ui.patientId = null; render(); return; }
-  if (action === 'patient-tab') { const tab = target.dataset.tab || 'overview'; if (!requirePermission(permissionForPatientTab(tab))) return; ui.patientTab = tab; render(); return; }
-  if (action === 'edit-patient') { openModal('patient', { patient: byId(state.patients, target.dataset.id) }); return; }
-  if (action === 'edit-appointment') { openModal('appointment', { appointment: byId(state.appointments, target.dataset.id) }); return; }
-  if (action === 'edit-visit') { openModal('visit', { visit: byId(state.visits, target.dataset.id) }); return; }
-  if (action === 'edit-prescription') { openModal('prescription', { prescription: byId(state.prescriptions, target.dataset.id) }); return; }
-  if (action === 'edit-stock') { openModal('stock', { item: byId(state.inventory, target.dataset.id) }); return; }
-  if (action === 'edit-supplier') { openModal('supplier', { supplier: byId(state.suppliers, target.dataset.id) }); return; }
-  if (action === 'edit-staff') { openModal('staff', { staff: byId(state.staff, target.dataset.id) }); return; }
-  if (action === 'patient-page-prev') { ui.patientPage = Math.max(1, (ui.patientPage || 1) - 1); render(); return; }
-  if (action === 'patient-page-next') { ui.patientPage = (ui.patientPage || 1) + 1; render(); return; }
-  if (action === 'toggle-patient-filters') { ui.patientFilters = !ui.patientFilters; render(); return; }
-  if (action === 'cycle-queue-status') { cycleQueueStatus(target.dataset.id); return; }
-  if (action === 'select-tooth') { ui.dentalTooth = Number(target.dataset.tooth); render(); return; }
-  if (action === 'set-dentition') { ui.dentition = target.dataset.dentition || 'adult'; ui.dentalTooth = null; render(); return; }
-  if (action === 'close-tooth') { ui.dentalTooth = null; render(); return; }
-  if (action === 'save-tooth') { saveTooth(); return; }
-  if (action === 'remove-tooth') { removeTooth(); return; }
-  if (action === 'set-appointment-view') { ui.appointmentView = target.dataset.view || 'month'; render(); return; }
-  if (action === 'calendar-prev' || action === 'calendar-next') { const direction = action === 'calendar-prev' ? -1 : 1; const view = ui.appointmentView || 'month'; if (view === 'month') { ui.calendarMonth += direction; if (ui.calendarMonth < 0) { ui.calendarMonth = 11; ui.calendarYear -= 1; } if (ui.calendarMonth > 11) { ui.calendarMonth = 0; ui.calendarYear += 1; } } else { const current = new Date(`${ui.appointmentDate || today()}T00:00:00Z`); current.setUTCDate(current.getUTCDate() + direction * (view === 'week' ? 7 : 1)); ui.appointmentDate = localDateKey(current); ui.calendarMonth = current.getUTCMonth(); ui.calendarYear = current.getUTCFullYear(); } render(); return; }
-  if (action === 'calendar-today') { const current = new Date(`${today()}T00:00:00Z`); ui.calendarMonth = current.getUTCMonth(); ui.calendarYear = current.getUTCFullYear(); ui.appointmentDate = today(); render(); return; }
-  if (action === 'export-backup') { exportBackup(); return; }
-  if (action === 'trigger-import') { document.querySelector('#backup-file')?.click(); return; }
-  if (action === 'clear-restore') { ui.restoreCandidate = null; render(); return; }
-  if (action === 'select-all-restore-patients') { if (ui.restoreCandidate?.data?.patients) { ui.restoreCandidate.patientScope = true; ui.restoreCandidate.selectedPatientIds = ui.restoreCandidate.data.patients.map((patient) => patient.id); } render(); return; }
-  if (action === 'clear-restore-patients') { if (ui.restoreCandidate) { ui.restoreCandidate.patientScope = true; ui.restoreCandidate.selectedPatientIds = []; } render(); return; }
-  if (action === 'restore-confirm') { restoreCandidate(); return; }
-  if (action === 'integrity-check') { integrityCheck(); return; }
-  if (action === 'import-patients') { document.querySelector('#patient-csv-file')?.click(); return; }
-  if (action === 'csv-import-confirm') { importPatientsFromCsv(); return; }
-  if (action === 'export-patients') { exportPatients(); return; }
-  if (action === 'export-visits') { downloadCsv(active(state.visits).map((v) => ({ Visit: v.visitCode, Date: v.date, Patient: patientName(v.patientId), Reason: v.reason || '', Diagnosis: v.diagnosis || '', Treatment: v.treatmentPerformed || '', FollowUp: v.followUpDate || '' })), 'dentiva-visits.csv'); return; }
-  if (action === 'export-inventory') { downloadCsv(active(state.inventory).map((i) => ({ ItemCode: i.itemCode || '', Item: i.name, Category: i.category || '', Supplier: byId(state.suppliers, i.supplierId)?.name || '', CurrentStock: i.currentStock, Unit: i.unit || '', MinimumStock: i.minimumStock || 0, ExpiryDate: i.expiryDate || '' })), 'dentiva-inventory.csv'); return; }
-  if (action === 'export-report') { exportReport(); return; }
-  if (action === 'save-settings') { saveSettings(); return; }
-  if (action === 'mark-notifications-read') { state.notifications.forEach((n) => { n.read = true; }); state.notificationRead = Object.fromEntries(notificationItems().map((item) => [item.id, true])); audit('Notifications marked read', 'Notifications', '', 'Notification centre cleared'); Store.save(state); if (ui.modal) closeModal(); else render(); return; }
-  if (action === 'dismiss-notification') { if (!requirePermission('notifications.manage')) return; state.notifications = state.notifications.filter((notification) => notification.id !== target.dataset.id); audit('Notification dismissed', 'Notification', target.dataset.id, 'Notification removed from the centre'); Store.save(state); render(); return; }
-  if (action === 'search-result') { const kind = target.dataset.kind; const id = target.dataset.id; closeModal(); if (kind === 'patient') openPatientProfile(id); else if (kind === 'appointment') { ui.page = 'appointments'; openModal('appointment', { appointment: byId(state.appointments, id) }); } else if (kind === 'invoice') { ui.page = 'billing'; render(); } else if (kind === 'inventory') { ui.page = 'inventory'; render(); } else if (kind === 'supplier') { ui.page = 'suppliers'; render(); } else if (kind === 'staff') { ui.page = 'staff'; render(); } else if (kind === 'visit') { const visit = byId(state.visits, id); if (visit) openPatientProfile(visit.patientId); } return; }
-  if (action === 'attach-file') { document.querySelector('#patient-attachment-file')?.click(); return; }
-  if (action === 'open-attachment') { const attachment = byId(state.attachments, target.dataset.id); if (attachment) { audit('Attachment previewed', 'Attachment', attachment.id, attachment.name); Store.save(state); openModal('attachmentPreview', { attachment }); } return; }
-  if (action === 'edit-attachment') { const attachment = byId(state.attachments, target.dataset.id); if (attachment) openModal('attachment', { attachment }); return; }
-  if (action === 'download-attachment') { downloadAttachment(target.dataset.id); return; }
-  if (action === 'delete-attachment') { deleteAttachment(target.dataset.id); return; }
-  if (action === 'print-expense') { printExpense(target.dataset.id); return; }
-  if (action === 'print-queue') { printQueue(); return; }
-  if (action === 'print-billing') { printBilling(); return; }
-  if (action === 'print-invoice') { printInvoice(target.dataset.id); return; }
-  if (action === 'print-payment') { printPayment(target.dataset.id); return; }
-  if (action === 'print-prescription') { printPrescription(target.dataset.id); return; }
-  if (action === 'print-patient') { printPatient(target.dataset.id); return; }
-  if (action === 'print-patient-statement') { printPatientStatement(target.dataset.id); return; }
-  if (action === 'print-dental-chart') { printDental(); return; }
-  if (action === 'print-report') { printReport(false); return; }
-  if (action === 'export-report-pdf') { printReport(true); return; }
-}
-function handleInput(event) {
-  const input = event.target;
-  if (input.dataset.input === 'audit-search') { ui.auditQuery = input.value; render(); window.setTimeout(() => document.querySelector('[data-input="audit-search"]')?.focus(), 0); return; }
-  if (input.dataset.input === 'global-search' || input.dataset.input === 'modal-search') {
-    ui.search = input.value;
-    if (ui.page === 'patients') ui.patientPage = 1;
-    if (ui.modal?.type === 'search' || ui.page === 'patients' || ui.page === 'clinical') {
-      const selector = `[data-input="${input.dataset.input}"]`;
-      render();
-      window.setTimeout(() => { const next = document.querySelector(selector); if (next) { next.focus(); next.setSelectionRange(ui.search.length, ui.search.length); } }, 0);
+  if (formName === 'unlock') {
+    const result = await unlockWorkspace(data.pin);
+    if (result) render();
+    return;
+  }
+  if (formName === 'setup') {
+    await saveSetupStep(data);
+    return;
+  }
+  if (!checkFormPermission(formName, data)) return;
+  const editing = Boolean(data.id);
+
+  if (formName === 'patient') {
+    const result = await op(editing ? 'patient.update' : 'patient.create', data);
+    if (result) { await refreshDirectory(); notify(editing ? 'Patient saved.' : `${result.record.fullName} added.`); ui.patientId = result.record.id; closeModal(); render(); }
+    return;
+  }
+  if (formName === 'merge') {
+    if (!window.confirm(`Move every record from the duplicate into ${patientName(data.primaryId)} and archive the duplicate? This cannot be undone without a restore.`)) return;
+    const result = await op('patient.merge', { ...data, confirm: true });
+    if (result) { await refreshDirectory(); notify(`Merged — ${result.moved} record(s) reassigned.`); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'appointment') {
+    const payload = { ...data, duration: data.duration || undefined };
+    if (editing) {
+      const existing = await q('record', { collection: 'appointments', id: data.id }).then((r) => r.record);
+      if (existing && (existing.date !== payload.date || existing.time !== payload.time) && payload.status === undefined) payload.status = existing.status;
     }
+    const result = await op(editing ? 'appointment.update' : 'appointment.create', payload);
+    if (result) { notify(editing ? 'Appointment saved.' : `Appointment booked for ${date(payload.date)} ${time(payload.time)}.`); closeModal(); render(); }
+    return;
   }
-  if (input.dataset.input === 'tooth-note' && ui.dentalTooth) ui.toothNote = input.value;
-}
-function handleChange(event) {
-  const el = event.target;
-  if (el.dataset.change === 'dashboard-range') { ui.range = el.value; if (el.value === 'custom' && !ui.rangeFrom) ui.rangeFrom = today(); if (el.value === 'custom' && !ui.rangeTo) ui.rangeTo = today(); render(); }
-  if (el.dataset.change === 'dashboard-range-from') { ui.rangeFrom = el.value; render(); }
-  if (el.dataset.change === 'dashboard-range-to') { ui.rangeTo = el.value; render(); }
-  if (el.dataset.change === 'analytics-range') { ui.analyticsRange = el.value; render(); }
-  if (el.dataset.change === 'patient-status-filter') { ui.patientStatusFilter = el.value; render(); }
-  if (el.dataset.change === 'patient-date-from') { ui.patientDateFrom = el.value; render(); }
-  if (el.dataset.change === 'patient-date-to') { ui.patientDateTo = el.value; render(); }
-  if (el.dataset.change === 'patient-tooth-status') { ui.patientToothStatus = el.value; render(); }
-  if (el.dataset.change === 'patient-balance') { ui.patientBalanceFilter = el.value; render(); }
-  if (el.dataset.change === 'dental-patient') { ui.dentalPatientId = el.value; ui.dentalTooth = null; render(); }
-  if (el.dataset.change === 'tooth-status') { ui.toothStatus = el.value; }
-  if (el.dataset.change === 'prescription-template') { const medication = byId(state.medicationCatalog || [], el.value); if (medication) { const form = el.closest('form'); ['medicine', 'strength', 'dosage', 'frequency', 'duration', 'route', 'instructions'].forEach((name) => { const input = form?.elements?.namedItem(name); if (input) input.value = medication[name] || ''; }); } }
-  if (el.dataset.change === 'report-type') { ui.reportType = el.value; render(); }
-  if (el.dataset.change === 'report-range') { ui.reportsRange = el.value; render(); }
-  if (el.dataset.change === 'report-from') { ui.reportFrom = el.value; render(); }
-  if (el.dataset.change === 'report-to') { ui.reportTo = el.value; render(); }
-  if (el.dataset.change === 'csv-map' && ui.csvImport) { ui.csvImport.mapping[el.dataset.field] = el.value; render(); return; }
-  if (el.dataset.change === 'csv-strategy' && ui.csvImport) { ui.csvImport.strategy = el.value; render(); return; }
-  if (el.dataset.change === 'restore-strategy') { if (ui.restoreCandidate) ui.restoreCandidate.strategy = el.value; }
-  if (el.dataset.change === 'restore-patients' || el.dataset.change === 'restore-clinical' || el.dataset.change === 'restore-finance' || el.dataset.change === 'restore-operations' || el.dataset.change === 'restore-settings') { if (ui.restoreCandidate) ui.restoreCandidate[el.dataset.change] = el.checked; }
-  if (el.dataset.change === 'restore-patient' && ui.restoreCandidate) {
-    const selected = new Set(ui.restoreCandidate.selectedPatientIds || []);
-    ui.restoreCandidate.patientScope = true;
-    if (el.checked) selected.add(el.value); else selected.delete(el.value);
-    ui.restoreCandidate.selectedPatientIds = [...selected];
+  if (formName === 'visit') {
+    const result = await op(editing ? 'visit.update' : 'visit.create', data);
+    if (result) { notify(data.followUpDate ? 'Visit saved — follow-up task scheduled.' : 'Visit saved.'); closeModal(); render(); }
+    return;
   }
-  if (el.id === 'invoice-modal-total') return;
+  if (formName === 'prescription') {
+    const payload = { ...data };
+    if (payload.prescriptionTemplate) { const saved = (appState.medicationCatalog || []).find((m) => m.id === payload.prescriptionTemplate); if (saved && !payload.medicine) { payload.medicine = saved.name; payload.strength = saved.strength || ''; payload.dosage = saved.dosage || ''; payload.frequency = saved.frequency || ''; } }
+    const result = await op(editing ? 'prescription.update' : 'prescription.create', payload);
+    if (result) { notify('Prescription saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'invoice') {
+    const items = [];
+    for (let index = 0; ; index += 1) {
+      const name = data[`items[${index}][name]`];
+      if (name === undefined) break;
+      const item = { name: String(name || '').trim(), quantity: Number(data[`items[${index}][quantity]`] || 1), unitPrice: Number(data[`items[${index}][unitPrice]`] || 0) };
+      if (item.name && item.quantity > 0) items.push(item);
+    }
+    const payload = { ...data, items, discount: data.discount || 0, taxRate: data.taxEnabled === 'on' || data.taxEnabled === 'true' ? Number(data.taxRate || 0) : 0 };
+    const result = await op(editing ? 'invoice.update' : 'invoice.create', payload);
+    if (result) { await refreshDirectory(); notify(editing ? 'Invoice saved.' : `Invoice ${result.record.invoiceNumber} created.`); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'payment') {
+    const result = await op('payment.record', data);
+    if (result) { await refreshDirectory(); notify(`Payment recorded — receipt ${result.record.receiptNumber}.`); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'refund') {
+    const result = await op('payment.refund', data);
+    if (result) { notify('Refund recorded — the original payment stays untouched in the trail.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'adjustment') {
+    const result = await op('payment.adjust', data);
+    if (result) { notify('Balance adjusted.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'expense') {
+    const result = await op(editing ? 'expense.update' : 'expense.create', data);
+    if (result) { notify('Expense saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'stock') {
+    const result = await op(editing ? 'inventory.updateItem' : 'inventory.createItem', data);
+    if (result) { notify(editing ? 'Stock item saved.' : 'Stock item added.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'stock-adjustment') {
+    const result = await op('inventory.movement', data);
+    if (result) { notify(`Stock moved — now ${number(result.item?.currentStock ?? '')} on hand.`); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'supplier') {
+    const result = await op(editing ? 'supplier.update' : 'supplier.create', data);
+    if (result) { notify('Supplier saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'staff') {
+    const result = await op(editing ? 'staff.update' : 'staff.create', data);
+    if (result) { await refreshDirectory(); notify('Staff member saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'treatment') {
+    const result = await op(editing ? 'treatment.update' : 'treatment.create', data);
+    if (result) { await refreshDirectory(); notify('Treatment saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'treatment-plan') {
+    const stages = [];
+    for (let index = 0; ; index += 1) {
+      const title = data[`stages[${index}][title]`];
+      if (title === undefined) break;
+      if (String(title || '').trim()) stages.push({ title: String(title).trim(), plannedDate: data[`stages[${index}][plannedDate]`] || '', estimatedCost: Number(data[`stages[${index}][estimatedCost]`] || 0) });
+    }
+    const result = await op(editing ? 'treatmentPlan.update' : 'treatmentPlan.create', { ...data, stages });
+    if (result) { notify('Treatment plan saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'referral') {
+    const result = await op(editing ? 'referral.update' : 'referral.create', data);
+    if (result) { notify('Referral saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'followup') {
+    const result = await op(editing ? 'followup.update' : 'followup.create', data);
+    if (result) { notify('Follow-up saved.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'attachment') {
+    const fileInput = form.querySelector('input[type="file"]');
+    const file = fileInput?.files?.[0];
+    if (!file) return notify('Choose a file to attach.', 'error');
+    if (!validateAttachmentFile({ type: file.type, size: file.size, name: file.name }).allowed) return notify('This file type or size is not allowed.', 'error');
+    const dataUrl = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
+    const result = await op('attachment.add', { patientId: data.patientId, name: data.name || file.name, type: file.type, size: file.size, category: data.category || '', notes: data.notes || '', data: dataUrl });
+    if (result) { notify(`${result.record.name} attached.`); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'user-account') {
+    const permissions = form.querySelectorAll('input[name="permissions"]:checked').map((input) => input.value);
+    const result = await op(editing ? 'user.update' : 'user.create', { ...data, permissions });
+    if (result) { notify(editing ? 'Account updated.' : 'Account created.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'security') {
+    const result = await op('user.changeOwnPin', { newPin: data.pin, confirmPin: data.confirmPin });
+    if (result) { notify('PIN updated.'); closeModal(); render(); }
+    return;
+  }
+  if (formName === 'settings') {
+    const payload = { ...data };
+    for (const key of ['paymentMethods', 'expenseCategories', 'inventoryCategories', 'chairs', 'rooms']) {
+      if (typeof payload[key] === 'string') payload[key] = payload[key].split(',').map((part) => part.trim()).filter(Boolean);
+    }
+    for (const key of ['taxRate', 'defaultDuration', 'lowStockThreshold']) if (payload[key] !== undefined) payload[key] = Number(payload[key] || 0);
+    payload.taxEnabled = payload.taxEnabled === 'on' || payload.taxEnabled === 'true';
+    payload.backupEnabled = payload.backupEnabled === 'on' || payload.backupEnabled === 'true';
+    payload.notifications = payload.notifications === 'on' || payload.notifications === 'true';
+    const result = await op('settings.update', payload);
+    if (result) { appState.settings = result.settings; notify('Settings saved.'); if (ui.page !== 'settings') render(); }
+    return;
+  }
+  notify('This form is not connected yet.', 'error');
 }
-function handleKeydown(event) {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openModal('search'); }
-  if (event.key === 'Escape' && ui.modal) closeModal();
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); openModal('patient'); }
-}
-function cycleQueueStatus(id) { if (!requirePermission('appointments.queue')) return; const a = byId(state.appointments, id); if (!a) return; const statuses = ['Scheduled', 'Checked In', 'Waiting', 'In Treatment', 'Completed']; const next = statuses[(statuses.indexOf(a.status || 'Scheduled') + 1) % statuses.length]; a.status = next; if (next === 'Checked In' && !a.checkedInAt) a.checkedInAt = now(); if (next === 'Waiting' && !a.checkedInAt) a.checkedInAt = now(); if (next === 'In Treatment') a.startedAt = now(); if (next === 'Completed') a.completedAt = now(); audit('Appointment status changed', 'Appointment', a.id, `${patientName(a.patientId)} · ${next}`); Store.save(state); notify(`Queue updated: ${next}.`); }
-function saveTooth() { if (!requirePermission('clinical.edit')) return; const patient = byId(state.patients, ui.dentalPatientId); if (!patient || !ui.dentalTooth) return notify('Choose a patient and tooth first.', 'error'); const status = ui.toothStatus ?? state.dentalRecords.find((r) => r.patientId === patient.id && Number(r.tooth) === Number(ui.dentalTooth))?.status ?? ''; const note = ui.toothNote ?? state.dentalRecords.find((r) => r.patientId === patient.id && Number(r.tooth) === Number(ui.dentalTooth))?.note ?? ''; const existing = state.dentalRecords.find((r) => r.patientId === patient.id && Number(r.tooth) === Number(ui.dentalTooth)); if (!status && !note) { if (existing) state.dentalRecords = state.dentalRecords.filter((r) => r.id !== existing.id); } else if (existing) Object.assign(existing, { status, note, updatedAt: now() }); else state.dentalRecords.push({ id: uid('tooth'), patientId: patient.id, tooth: ui.dentalTooth, status, note, updatedAt: now(), createdAt: now() }); audit('Dental chart updated', 'Dental record', patient.id, `Tooth ${ui.dentalTooth}`); ui.toothStatus = undefined; ui.toothNote = undefined; Store.save(state); notify(`Tooth ${ui.dentalTooth} record saved.`); }
-function removeTooth() { if (!requirePermission('clinical.edit')) return; const patient = byId(state.patients, ui.dentalPatientId); const record = state.dentalRecords.find((r) => r.patientId === patient?.id && Number(r.tooth) === Number(ui.dentalTooth)); if (!record) return; state.dentalRecords = state.dentalRecords.filter((r) => r.id !== record.id); audit('Dental chart record removed', 'Dental record', record.id, `Tooth ${ui.dentalTooth}`); ui.dentalTooth = null; Store.save(state); notify('Tooth record removed.'); }
 
-async function exportBackup() {
-  if (!requirePermission('backup.create')) return;
-  state.lastBackupAt = now();
-  audit('Backup created', 'Backup', '', `${totalRecords()} records exported`);
-  Store.save(state);
-  const data = deepClone(state);
-  const manifest = buildBackupManifest(data, APP_VERSION, [...arrayKeys, 'settings', 'counters', 'dashboard', 'notificationRead']);
-  manifest.exportedAt = now();
-  manifest.payloadHash = await sha256Hex(canonicalJson(data));
-  manifest.integrity = 'SHA-256 over canonical backup data';
-  const backup = { manifest, data };
-  jsonDownload(backup, `dentiva-pro-backup-${today()}.dentiva.json`);
-  notify('Backup exported with a SHA-256 integrity hash.');
-}
-
-async function restoreCandidate() {
-  if (!requirePermission('backup.restore')) return;
-  const c = ui.restoreCandidate;
-  if (!c?.data) return;
-  const source = deepClone(c.data);
-  const strategy = c.strategy || 'Keep Existing';
-  const modules = [];
-  if (c.restorePatients !== false) modules.push('patients');
-  if (c.restoreClinical !== false) modules.push('clinical');
-  if (c.restoreFinance !== false) modules.push('finance');
-  if (c.restoreOperations !== false) modules.push('operations');
-  if (c.restoreSettings !== false) modules.push('settings');
-  const validation = validateBackupPayload(source, arrayKeys);
-  if (validation.errors.length) return notify(`Restore blocked: ${validation.errors[0]}`, 'error');
-  if (c.patientScope && !(c.selectedPatientIds || []).length) return notify('Select at least one patient or turn off patient-scoped restore.', 'error');
-  const patientIds = c.patientScope ? c.selectedPatientIds : [];
-  const plan = buildRestorePlan(state, source, { modules, strategy, patientIds });
-  if (plan.errors.length) return notify(`Restore blocked: ${plan.errors[0]}`, 'error');
-  const before = deepClone(state);
-  try {
-    const applied = applyRestorePlan(state, plan);
-    const candidateState = migrateState({ ...applied.state, schemaVersion: CURRENT_SCHEMA_VERSION, appVersion: APP_VERSION, updatedAt: now() });
-    const relationshipErrors = validateRelationships(candidateState, arrayKeys);
-    if (relationshipErrors.length) throw new Error(`relationship validation failed: ${relationshipErrors[0]}`);
-    Object.keys(state).forEach((key) => { delete state[key]; });
-    Object.assign(state, candidateState);
-    audit('Backup restored', 'Backup', '', `${applied.added} records restored, ${applied.skipped} skipped, ${applied.replaced} replaced`);
-    if (!Store.save(state)) throw new Error('local persistence rejected the restored state');
-    ui.restoreCandidate = null;
-    notify(`Restore complete: ${applied.added} added, ${applied.skipped} skipped, ${applied.replaced} replaced.`);
-  } catch (error) {
-    Object.keys(state).forEach((key) => { delete state[key]; });
-    Object.assign(state, before);
+async function saveSetupStep(data) {
+  if (data.setupStep === '2') {
+    if (data.adminPin && data.adminPin !== data.adminPinConfirm) return notify('PIN confirmation does not match.', 'error');
+    if (!/^\d{4,12}$/.test(data.adminPin || '')) return notify('PINs must be 4–12 digits.', 'error');
+    const existingUsers = appState.boot?.userDirectory || [];
+    const admin = existingUsers.find((user) => user.role === 'Administrator' && user.active !== false) || existingUsers[0];
+    await op('settings.update', { language: data.language || 'English', currency: data.currency || 'BDT' });
+    let accountSaved = true;
+    if (admin && admin.id) {
+      const result = await op('user.update', { id: admin.id, name: admin.name, role: admin.role, active: true, pin: data.adminPin, confirmPin: data.adminPinConfirm });
+      if (result) appState.boot = { ...appState.boot, userDirectory: (await q('list', { collection: 'users', page: 1, pageSize: 50 })).rows };
+      else accountSaved = false;
+    } else {
+      const result = await op('user.create', { name: data.dentistName || 'Administrator', role: 'Administrator', active: true, pin: data.adminPin, confirmPin: data.adminPinConfirm });
+      if (result) appState.boot = { ...appState.boot, userDirectory: [result.record] };
+      else accountSaved = false;
+    }
+    if (!accountSaved) return;
+    appState.setupComplete = true;
+    appState.settings = { ...appState.settings, language: data.language || 'English', currency: data.currency || 'BDT' };
+    ui.modal = { type: 'setup', data: { step: 3, clinicName: data.clinicName || appState.settings.clinicName, dentistName: data.dentistName || appState.settings.dentistName, language: data.language || 'English', currency: data.currency || 'BDT' } };
+    notify('Account PIN saved.', 'success');
     render();
-    notify(`Restore rolled back: ${error.message}`, 'error');
+    return;
+  }
+  const result = await op('setup.complete', { clinicName: data.clinicName, dentistName: data.dentistName, professionalTitle: data.professionalTitle, phone: data.phone, email: data.email, address: data.address, city: data.city, language: data.language, currency: data.currency });
+  if (result) {
+    appState.setupComplete = true;
+    appState.settings = { ...appState.settings, clinicName: data.clinicName, dentistName: data.dentistName };
+    ui.modal = { type: 'setup', data: { step: 2, clinicName: data.clinicName, dentistName: data.dentistName, language: data.language || 'English', currency: data.currency || 'BDT' } };
+    render();
   }
 }
 
-function integrityCheck() { if (!can('diagnostics.view') && !can('backup.validate')) return notify('Your account is not allowed to run diagnostics.', 'error'); const errors = [...validateRelationships(state)]; active(state.attachments).forEach((attachment) => { if (!validateAttachmentFile(attachment).allowed) errors.push(`Attachment ${attachment.name || attachment.id} metadata`); }); active(state.invoices).forEach((invoice) => { const expected = invoicePaymentStatus(invoice); if (Math.abs(expected.paid - Number(invoice.paid || 0)) > 0.01 || Math.abs(expected.due - Number(invoice.due || 0)) > 0.01) errors.push(`Invoice ${invoice.invoiceNumber} payment totals`); }); audit('Integrity check completed', 'Database', '', `${totalRecords()} records checked · ${errors.length} issue(s)`); Store.save(state); if (errors.length) notify(`${errors.length} integrity issue${errors.length > 1 ? 's' : ''} found. Review Diagnostics.`, 'error'); else notify(`${totalRecords()} records checked. Database is healthy.`); }
+/* ------------------------------------------------------------------ */
+/* Click actions                                                       */
+/* ------------------------------------------------------------------ */
+async function handleClick(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) {
+    if (event.target.closest('.modal-overlay')) return closeModal();
+    return;
+  }
+  const action = target.dataset.action;
+  const id = target.dataset.id || '';
+  const navigate = (page) => { ui.page = page; ui.modal = null; op('navigation.pushRecent', { page }).catch(() => {}); render(); };
 
-function openAttachment(id) {
-  const attachment = byId(state.attachments, id);
-  if (!attachment?.data) return notify('This attachment has no readable file data.', 'error');
-  const opened = window.open(attachment.data, '_blank', 'noopener,noreferrer');
-  if (!opened) notify('Allow pop-ups to preview this attachment.', 'error');
-  audit('Attachment previewed', 'Attachment', id, attachment.name);
-  Store.save(state);
+  switch (action) {
+    case 'navigate': return navigate(target.dataset.page);
+    case 'retry-page': return render();
+    case 'close-modal': return closeModal();
+    case 'close-toast': ui.toast = null; return render();
+    case 'toggle-mobile-nav': ui.mobileNav = !ui.mobileNav; return render();
+    case 'lock-workspace': return lockWorkspace('Workspace locked');
+    case 'logout':
+      await api.logout();
+      appState.session = null;
+      notify('Signed out.', 'info');
+      return render();
+
+    case 'open-setup': return openModal('setup', { step: 1, clinicName: appState.settings.clinicName, dentistName: appState.settings.dentistName, professionalTitle: appState.settings.professionalTitle, phone: appState.settings.phone, email: appState.settings.email, address: appState.settings.address });
+    case 'finish-setup':
+      if (ui.modal?.data?.step === 3) {
+        await op('setup.complete', { clinicName: ui.modal.data.clinicName, dentistName: ui.modal.data.dentistName });
+        appState.firstRun = false;
+        appState.setupComplete = true;
+        appState.boot = { ...appState.boot, firstRun: false, setupComplete: true };
+        ui.modal = null;
+        ui.page = 'dashboard';
+        notify('Workspace ready. Welcome to Dentiva Pro.', 'success');
+        render();
+      }
+      return;
+
+    case 'open-patient': return openModal('patient', { patient: id ? appState.directory.patients.find((p) => p.id === id) || (await q('record', { collection: 'patients', id })).record : {} });
+    case 'open-patient-profile': ui.patientId = id; ui.patientTab = 'overview'; ui.page = 'patients'; return render();
+    case 'open-patient-merge': return openModal('merge', { patient: await q('record', { collection: 'patients', id }).then((r) => r.record) });
+    case 'patient-tab': ui.patientTab = target.dataset.tab; return render();
+    case 'print-patient': { const record = await q('record', { collection: 'patients', id }).then((r) => r.record); return printPatient(record); }
+    case 'print-patient-statement': { const record = await q('record', { collection: 'patients', id }).then((r) => r.record); return printPatientStatement(record); }
+
+    case 'open-appointment': {
+      const appointment = id ? (await q('record', { collection: 'appointments', id })).record : {};
+      return openModal('appointment', { appointment });
+    }
+    case 'open-appointment-detail': {
+      const appointment = (await q('record', { collection: 'appointments', id })).record;
+      ui.modal = { type: 'appointmentDetail', data: { appointment } };
+      return render();
+    }
+    case 'queue-status': {
+      const result = await op('appointment.setStatus', { id, status: target.dataset.status });
+      if (result) { notify(`Queue updated: ${result.record.status}.`); return render(); }
+      return;
+    }
+    case 'cancel-appointment':
+      if (!window.confirm('Cancel this appointment?')) return;
+      await op('appointment.cancel', { id, reason: 'Cancelled from queue' });
+      return render();
+    case 'set-appt-view': ui.apptView = target.dataset.view; return render();
+    case 'cal-step': ui.calendarDate = shiftDate(ui.calendarDate, Number(target.dataset.step) || 1); return render();
+    case 'print-queue': return printQueue();
+    case 'print-billing': return printBilling();
+    case 'print-report': return notify('Reports print via the print dialog — use your OS print button.', 'info');
+
+    case 'open-visit': {
+      const visit = id ? (await q('record', { collection: 'visits', id })).record : {};
+      return openModal('visit', { visit });
+    }
+    case 'print-visit': { const visit = (await q('record', { collection: 'visits', id })).record; return printVisit(visit); }
+
+    case 'open-prescription': {
+      const prescription = id ? (await q('record', { collection: 'prescriptions', id })).record : {};
+      return openModal('prescription', { prescription });
+    }
+    case 'print-prescription': { const rx = (await q('record', { collection: 'prescriptions', id })).record; return printPrescription(rx); }
+    case 'save-medication-template': {
+      const form = document.querySelector('form[data-form="prescription"]');
+      if (!form) return;
+      const data = formData({ target: form });
+      if (!data.medicine) return notify('Enter the medicine first.', 'error');
+      const result = await op('medicationCatalog.save', { name: data.medicine, strength: data.strength, dosage: data.dosage, frequency: data.frequency, duration: data.duration });
+      if (result) notify('Medicine saved to the catalog.', 'success');
+      return;
+    }
+
+    case 'select-tooth':
+      ui.dentalTooth = Number(target.dataset.tooth);
+      return render();
+    case 'set-dentition': ui.dentition = target.dataset.dentition; return render();
+    case 'set-tooth-status': ui.toothStatus = target.dataset.status || ''; return render();
+    case 'save-tooth': {
+      const note = document.querySelector('[name="dental-note"]')?.value ?? ui.toothNote ?? '';
+      const procedure = document.querySelector('[name="dental-procedure"]')?.value ?? '';
+      const patientId = ui.patientId || ui.dentalPatientId;
+      if (!patientId || !ui.dentalTooth) return notify('Choose a patient and tooth first.', 'error');
+      const result = await op('dental.save', { patientId, tooth: ui.dentalTooth, dentition: ui.dentition, status: ui.toothStatus || '', note, procedure });
+      if (result) { ui.toothStatus = undefined; ui.toothNote = undefined; notify(`Tooth ${ui.dentalTooth} record saved.`); return render(); }
+      return;
+    }
+    case 'remove-tooth': {
+      if (!ui.dentalTooth) return;
+      const result = await op('dental.removeCurrent', { patientId: ui.patientId || ui.dentalPatientId, tooth: ui.dentalTooth, dentition: ui.dentition });
+      if (result) { ui.dentalTooth = null; notify('Tooth record cleared — history preserved.'); return render(); }
+      return;
+    }
+    case 'print-chart': { const patient = appState.directory.patients.find((p) => p.id === id) || (await q('record', { collection: 'patients', id })).record; return printDentalChart(patient); }
+
+    case 'open-invoice': {
+      const invoice = id ? (await q('record', { collection: 'invoices', id })).record : {};
+      if (!invoice.id) return openModal('invoice', { invoice: {} });
+      if (Number(invoice.paidCents ?? invoice.paid ?? 0) > 0 || !can('billing.edit')) return openInvoiceDetail(invoice);
+      return openModal('invoice', { invoice });
+    }
+    case 'open-invoice-detail': {
+      const invoice = (await q('record', { collection: 'invoices', id })).record;
+      return openInvoiceDetail(invoice);
+    }
+    case 'print-invoice': { const invoice = (await q('record', { collection: 'invoices', id })).record; return printInvoice(invoice); }
+    case 'void-invoice':
+      if (!window.confirm('Void this invoice? It must have no recorded payments.')) return;
+      await op('invoice.cancel', { id, reason: 'Voided' });
+      return render();
+    case 'add-invoice-line': {
+      const container = document.querySelector('.invoice-lines');
+      const index = container.querySelectorAll('.invoice-line').length;
+      const row = document.createElement('div');
+      row.className = 'invoice-line';
+      row.innerHTML = `<input type="text" name="items[${index}][name]" placeholder="Item / treatment" required><input type="number" name="items[${index}][quantity]" value="1" min="1" step="1" aria-label="Quantity"><input type="number" name="items[${index}][unitPrice]" value="" min="0" step="0.01" aria-label="Unit price"><button type="button" class="icon-button" data-action="remove-invoice-line" data-index="${index}" aria-label="Remove line">${icon('trash', 15)}</button>`;
+      container.insertBefore(row, container.lastElementChild);
+      return;
+    }
+    case 'remove-invoice-line': {
+      const line = target.closest('.invoice-line');
+      if (line) { line.remove(); document.querySelectorAll('.invoice-line').forEach((row, idx) => { row.querySelectorAll('input').forEach((input) => { const part = input.name.split(']').pop(); input.name = `items[${idx}][${part}]`; }); }); }
+      return;
+    }
+
+    case 'open-payment': {
+      const patientId = id && (ui.patientId === id || !ui.patientId) ? id : ui.patientId;
+      const invoices = await q('list', { collection: 'invoices', page: 1, pageSize: 30, filters: { patientId: patientId || undefined }, sort: 'date-desc' }).catch(() => ({ rows: [] }));
+      ui.invoiceOptions = invoices.rows || [];
+      return openModal('payment', { payment: {}, invoiceId: id || '' });
+    }
+    case 'open-payment-detail': { const payment = (await q('record', { collection: 'payments', id })).record; return openModal('refund', { payment }); }
+    case 'open-refund': { const payment = (await q('record', { collection: 'payments', id })).record; return openModal('refund', { payment }); }
+    case 'open-adjustment': { const invoice = (await q('record', { collection: 'invoices', id })).record; return openModal('adjustment', { invoice }); }
+    case 'print-payment': { const payment = (await q('record', { collection: 'payments', id })).record; return printPayment(payment); }
+
+    case 'open-expense': { const expense = id ? (await q('record', { collection: 'expenses', id })).record : {}; return openModal('expense', { expense }); }
+    case 'print-expense': { const expense = (await q('record', { collection: 'expenses', id })).record; return printExpense(expense); }
+
+    case 'open-stock': {
+      ui.supplierOptions = (await q('list', { collection: 'suppliers', page: 1, pageSize: 200 }).catch(() => ({ rows: [] }))).rows || [];
+      const item = id ? (await q('record', { collection: 'inventory', id })).record : {};
+      return openModal('stock', { item });
+    }
+    case 'open-stock-adjustment': { const item = (await q('record', { collection: 'inventory', id })).record; return openModal('stock-adjustment', { item }); }
+    case 'open-inventory-item': {
+      ui.supplierOptions = (await q('list', { collection: 'suppliers', page: 1, pageSize: 200 }).catch(() => ({ rows: [] }))).rows || [];
+      const item = (await q('record', { collection: 'inventory', id })).record;
+      return openModal('stock', { item });
+    }
+    case 'open-supplier': { const supplier = id ? (await q('record', { collection: 'suppliers', id })).record : {}; return openModal('supplier', { supplier }); }
+    case 'open-staff': { const staff = id ? (await q('record', { collection: 'staff', id })).record : {}; return openModal('staff', { staff }); }
+    case 'open-treatment': { const treatment = id ? (await q('record', { collection: 'treatments', id })).record : {}; return openModal('treatment', { treatment }); }
+    case 'add-plan-stage': {
+      const container = document.querySelector('.plan-stages');
+      const index = container.querySelectorAll('.plan-stage-row').length;
+      const row = document.createElement('div');
+      row.className = 'plan-stage-row';
+      row.innerHTML = `<input type="text" name="stages[${index}][title]" placeholder="Stage name" required><input type="date" name="stages[${index}][plannedDate]" value=""><input type="number" name="stages[${index}][estimatedCost]" value="" min="0" step="0.01" placeholder="Cost"><button type="button" class="icon-button" data-action="remove-plan-stage" data-index="${index}" aria-label="Remove stage">${icon('trash', 15)}</button>`;
+      container.insertBefore(row, container.lastElementChild);
+      return;
+    }
+    case 'remove-plan-stage': { const row = target.closest('.plan-stage-row'); if (row) row.remove(); return; }
+    case 'cycle-plan-stage': {
+      const planId = target.dataset.plan;
+      const stageId = target.dataset.stage;
+      const plan = (await q('record', { collection: 'treatmentPlans', id: planId })).record;
+      const order = ['Planned', 'In progress', 'Completed', 'Deferred'];
+      const stage = (plan.stages || []).find((s) => s.id === stageId);
+      if (!stage) return;
+      const nextStatus = order[(order.indexOf(stage.status) + 1) % order.length];
+      const updatedStages = plan.stages.map((s) => (s.id === stageId ? { ...s, status: nextStatus } : s));
+      await op('treatmentPlan.update', { id: planId, ...plan, stages: updatedStages });
+      return render();
+    }
+    case 'convert-treatment-plan': {
+      const plan = (await q('record', { collection: 'treatmentPlans', id })).record;
+      if (!window.confirm(`Convert "${plan.title}" to a clinical visit? This creates a visit record only — no financial records are created automatically.`)) return;
+      const result = await op('treatmentPlan.convert', { id });
+      if (result) { notify(`Visit ${result.record.visitCode} created from the plan.`); return render(); }
+      return;
+    }
+    case 'open-treatment-plan': { const plan = id ? (await q('record', { collection: 'treatmentPlans', id })).record : {}; return openModal('treatment-plan', { plan }); }
+    case 'open-referral': { const referral = id ? (await q('record', { collection: 'referrals', id })).record : {}; return openModal('referral', { referral }); }
+    case 'open-followup': { const task = id ? (await q('record', { collection: 'followUpTasks', id })).record : {}; return openModal('followup', { task }); }
+    case 'complete-followup': await op('followup.complete', { id }); return render();
+
+    case 'open-attachment': {
+      if (id) {
+        const attachment = (await q('record', { collection: 'attachments', id })).record;
+        ui.modal = { type: 'attachment-preview', data: { attachment, previewHtml: '' } };
+        render();
+        const content = await api.readAttachment(id);
+        if (content?.ok && ui.modal?.type === 'attachment-preview') {
+          ui.modal.data.previewHtml = content.type?.startsWith('image/') ? `<img class="attachment-image" src="${content.dataUrl}" alt="${esc(attachment.name)}">` : `<p class="muted">${esc(attachment.type || 'Document')}${content.type === 'application/pdf' ? ' — PDF active content is never embedded; download to view.' : ''}</p>`;
+          const body = document.querySelector('.attachment-preview-body');
+          if (body) body.innerHTML = ui.modal.data.previewHtml;
+        }
+        return;
+      }
+      return openModal('attachment', { patient: appState.directory.patients.find((p) => p.id === ui.patientId) || {} });
+    }
+    case 'pick-attachment': { const input = target.querySelector('input[type="file"]'); if (input) input.click(); return; }
+    case 'download-attachment': {
+      const content = await api.readAttachment(id);
+      if (content?.ok) {
+        const link = document.createElement('a');
+        link.href = content.dataUrl;
+        const row = document.querySelector(`[data-action="open-attachment"][data-id="${CSS.escape(id)}"]`)?.closest('.record-row');
+        link.download = row?.querySelector('strong')?.textContent || 'attachment';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      return render();
+    }
+    case 'delete-attachment':
+      if (!window.confirm('Remove this attachment? This cannot be undone unless it exists in a backup.')) return;
+      await op('attachment.delete', { id, confirm: true });
+      return render();
+
+    case 'open-user-account': {
+      const user = id ? (await q('record', { collection: 'users', id })).record : {};
+      return openModal('user-account', { user });
+    }
+    case 'open-security': return openModal('security', {});
+    case 'open-csv-import': ui.csvImport = null; return openModal('csv-import', {});
+    case 'pick-csv': { const input = target.querySelector('input[type="file"]'); if (input) input.click(); return; }
+    case 'import-csv': return importPatientsFromCsv();
+
+    case 'open-notifications': ui.modal = { type: 'notifications', data: {} }; return render();
+    case 'mark-notifications-read': await op('notification.markAllRead', {}); return render();
+    case 'notification-open':
+      await op('notification.markRead', { id });
+      const note = notificationItems().find((item) => item.id === id);
+      if (note?.page) navigate(note.page);
+      return;
+
+    case 'open-dashboard-customizer': {
+      const dash = await q('dashboard', {});
+      ui.modal = { type: 'dashboard-customizer', data: { layout: dash.dashboardLayout?.widgets?.length ? dash.dashboardLayout.widgets : ['schedule', 'queue', 'followups', 'signals'] } };
+      return render();
+    }
+    case 'toggle-dashboard-widget': {
+      const result = await op('dashboard.toggleWidget', { widget: target.dataset.widget });
+      if (result) ui.modal.data.layout = result.dashboard;
+      return render();
+    }
+    case 'move-dashboard-widget': {
+      const layout = [...ui.modal.data.layout];
+      const index = layout.indexOf(target.dataset.widget);
+      const delta = target.dataset.direction === 'up' ? -1 : 1;
+      const swap = index + delta;
+      if (index < 0 || swap < 0 || swap >= layout.length) return;
+      [layout[index], layout[swap]] = [layout[swap], layout[index]];
+      await op('dashboard.setLayout', { layout });
+      ui.modal.data.layout = layout;
+      return render();
+    }
+    case 'reset-dashboard-widgets':
+      await op('dashboard.setLayout', { layout: ['schedule', 'queue', 'followups', 'signals'] });
+      return render();
+
+    case 'open-audit-log': ui.modal = { type: 'audit-log', data: {} }; return render();
+    case 'run-audit-search': {
+      const queryText = document.querySelector('[name="auditQuery"]')?.value || '';
+      ui.modal = null;
+      const result = await q('auditList', { query: queryText });
+      notify(`${result.total} audit entr${result.total === 1 ? 'y' : 'ies'} match.`, 'info');
+      return render();
+    }
+
+    case 'save-filter': {
+      const collection = target.dataset.collection || 'patients';
+      const nameInput = document.querySelector('[name="filterName"]');
+      const name = nameInput?.value || ui.search || 'My view';
+      const result = await op('savedFilter.save', { entity: collection, name, query: listState[collection]?.query || ui.search || '', filters: listState[collection]?.filters || {} });
+      if (result) notify('View saved.', 'success');
+      return render();
+    }
+    case 'apply-saved-filter': {
+      const view = (await q('list', { collection: 'savedFilters', page: 1, pageSize: 50 })).rows.find((item) => item.id === id);
+      if (!view) return;
+      const state = listState[view.entity || 'patients'];
+      state.query = view.query || '';
+      state.filters = view.filters || {};
+      state.page = 1;
+      ui.search = view.query || '';
+      return render();
+    }
+    case 'export-patients-csv': return exportPatientsCsv();
+
+    case 'create-backup': {
+      const result = await api.createBackup('manual');
+      if (result.ok) { notify(result.exported ? 'Backup exported to your downloads.' : 'Backup created.', 'success'); appState.storage = { ...appState.storage, lastBackupAt: result.manifest?.createdAt }; return render(); }
+      notify(result.error || 'Backup failed.', 'error');
+      return;
+    }
+    case 'restore-from-folder': {
+      const picked = await api.pickFolder();
+      if (!picked || picked.canceled) return;
+      const validation = await api.validateBackup(picked.path);
+      if (!validation.ok) return notify(`Backup validation failed: ${(validation.problems || []).join(' ') || 'unknown problem'}`, 'error');
+      ui.restoreCandidate = { sourceKind: 'folder', sourceLabel: picked.path, path: picked.path, validated: true, selectedModules: ['patients', 'clinical', 'finance', 'operations'], strategy: 'Replace', state: null };
+      return render();
+    }
+    case 'restore-from-file': {
+      const picked = await api.pickFile();
+      if (!picked || picked.canceled) return;
+      try {
+        const parsed = JSON.parse(picked.text);
+        const state = parsed.state || parsed;
+        ui.restoreCandidate = { sourceKind: 'file', sourceLabel: picked.path, path: picked.path, text: picked.text, validated: true, selectedModules: ['patients', 'clinical', 'finance', 'operations'], strategy: 'Replace', state, manifest: parsed.manifest || null };
+        render();
+      } catch {
+        notify('That file is not a valid Dentiva JSON backup.', 'error');
+      }
+      return;
+    }
+    case 'validate-backup': {
+      const validation = await api.validateBackup(id);
+      if (!validation.ok) return notify(`Validation failed: ${(validation.problems || []).join(' ') || 'unknown problem'}`, 'error');
+      if (!requirePermission('backup.restore')) return;
+      ui.restoreCandidate = { sourceKind: 'folder', sourceLabel: id, path: id, validated: true, selectedModules: ['patients', 'clinical', 'finance', 'operations'], strategy: 'Replace', state: null };
+      return render();
+    }
+    case 'restore-backup': {
+      if (!requirePermission('backup.restore')) return;
+      if (!window.confirm('Restore this backup? A safety backup of the current workspace is created first. Continue?')) return;
+      const result = await api.restoreBackup(id);
+      if (result.ok) { notify('Workspace restored.', 'success'); return boot(); }
+      notify(result.error || 'Restore failed.', 'error');
+      return;
+    }
+    case 'delete-backup':
+      if (!requirePermission('backup.restore')) return;
+      if (!window.confirm('Delete this backup permanently?')) return;
+      await api.deleteBackup(id);
+      return render();
+    case 'close-restore-candidate': ui.restoreCandidate = null; return render();
+    case 'confirm-restore': {
+      if (!requirePermission('backup.restore')) return;
+      const candidate = ui.restoreCandidate;
+      const modules = candidate?.selectedModules || [];
+      const strategy = candidate?.strategy || 'Replace';
+      if (candidate.sourceKind === 'file') {
+        const result = await api.restoreJson(candidate.text, { modules, strategy });
+        if (result.ok) { notify('JSON backup restored.', 'success'); ui.restoreCandidate = null; return boot(); }
+        return notify(result.error || 'Restore failed.', 'error');
+      }
+      if (!window.confirm('Restore this backup? A safety backup of the current workspace is created first. Continue?')) return;
+      const result = await api.restoreBackup(candidate.path);
+      if (result.ok) { notify('Workspace restored.', 'success'); ui.restoreCandidate = null; return boot(); }
+      return notify(result.error || 'Restore failed.', 'error');
+    }
+
+    case 'run-integrity-check': return runIntegrityCheck();
+    case 'export-unsupported-store': {
+      const result = await api.exportWorkspace();
+      if (result?.ok) notify(result.canceled ? 'Export cancelled.' : `Preserved workspace exported to: ${result.path}`, 'info');
+      return;
+    }
+    case 'reset-unsupported-workspace': {
+      if (!window.confirm('Reset this workspace? Export the preserved data first because this cannot be undone.')) return;
+      const resetResult = await op('workspace.reset', { confirmToken: 'RESET' });
+      if (resetResult) { notify('Workspace reset. The preserved export should already be safe somewhere else.', 'success'); return boot(); }
+      return;
+    }
+
+    case 'list-page': {
+      const collection = target.dataset.collection;
+      listState[collection].page = Number(target.dataset.page) || 1;
+      return render();
+    }
+
+    case 'upload-logo': {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/webp';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const dataUrl = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
+        const result = await op('settings.update', { logo: dataUrl });
+        if (result) { appState.settings = result.settings; render(); }
+      };
+      input.click();
+      return;
+    }
+    case 'remove-logo': {
+      const result = await op('settings.update', { logo: '' });
+      if (result) { appState.settings = result.settings; render(); }
+      return;
+    }
+
+    default:
+      if (action.startsWith('open-')) { ui.modal = null; }
+  }
 }
-function downloadAttachment(id) { if (!requirePermission('clinical.view')) return; const attachment = byId(state.attachments, id); if (!attachment) return; const link = document.createElement('a'); link.href = attachment.data; link.download = attachment.name; link.click(); audit('Attachment exported', 'Attachment', id, attachment.name); Store.save(state); }
-function deleteAttachment(id) { if (!requirePermission('clinical.edit')) return; const attachment = byId(state.attachments, id); if (!attachment) return; if (!window.confirm(`Remove ${attachment.name} from this patient record? This cannot be undone unless it exists in a backup.`)) return; state.attachments = state.attachments.filter((a) => a.id !== id); audit('Attachment deleted', 'Attachment', id, attachment.name); Store.save(state); notify('Attachment removed.'); }
-function importPatientsFromCsv() {
+async function importPatientsFromCsv() {
   if (!requirePermission('patients.create')) return;
   const importState = ui.csvImport;
   if (!importState) return;
   const fields = ['fullName', 'phone', 'email', 'dateOfBirth', 'gender', 'address', 'allergies', 'notes'];
   const rows = importState.rows.map((row) => Object.fromEntries(fields.map((field) => [field, row[importState.mapping[field]] || '']))).filter((row) => String(row.fullName || '').trim() && String(row.phone || '').trim());
-  const before = deepClone(state);
-  try {
-    let added = 0; let skipped = 0;
-    rows.forEach((row) => {
-      const duplicate = active(state.patients).find((patient) => patient.fullName?.trim().toLowerCase() === row.fullName.trim().toLowerCase() && patient.phone?.replace(/\D/g, '') === row.phone.replace(/\D/g, ''));
-      if (duplicate && importState.strategy !== 'Create New Copy') { skipped += 1; return; }
-      const record = makePatient({ ...row, fullName: row.fullName.trim(), phone: row.phone.trim(), status: 'Active' }, false);
-      state.patients.push(record); added += 1;
-    });
-    audit('Patient CSV imported', 'Patient import', '', `${added} added, ${skipped} duplicate rows skipped`);
-    if (!Store.save(state)) throw new Error('local persistence rejected the import');
-    ui.csvImport = null; closeModal(); notify(`Patient import complete: ${added} added, ${skipped} duplicate${skipped === 1 ? '' : 's'} skipped.`);
-  } catch (error) {
-    Object.keys(state).forEach((key) => { delete state[key]; }); Object.assign(state, before); render(); notify(`Patient CSV import rolled back: ${error.message}`, 'error');
+  if (!rows.length) return notify('No valid rows found (full name + phone required).', 'error');
+  const created = [];
+  let skipped = 0;
+  const createCopy = importState.strategy === 'Create New Copy';
+  for (const row of rows) {
+    const result = await op('patient.create', { ...row, fullName: row.fullName.trim(), phone: row.phone.trim(), status: 'Active', confirmDuplicate: createCopy || undefined });
+    if (result) created.push(result.record);
+    else if (result?.code === 'duplicate-confirm') skipped += 1;
   }
+  await refreshDirectory();
+  ui.csvImport = null;
+  closeModal();
+  notify(`Patient import complete: ${created.length} added, ${skipped} duplicate${skipped === 1 ? '' : 's'} skipped.`, created.length ? 'success' : 'error');
 }
-function printExpense(id) { const expense = byId(state.expenses, id); if (!expense) return; printHtml('Expense record', `<div class="summary"><div><span class="muted">Date</span><strong>${date(expense.date)}</strong></div><div><span class="muted">Category</span><strong>${esc(expense.category || 'Other')}</strong></div><div><span class="muted">Amount</span><strong>${currency(expense.amount)}</strong></div></div><table class="print-table"><tbody><tr><th>Description</th><td>${esc(expense.description)}</td></tr><tr><th>Payment method</th><td>${esc(expense.method || '—')}</td></tr><tr><th>Reference</th><td>${esc(expense.reference || '—')}</td></tr><tr><th>Notes</th><td>${esc(expense.notes || '—')}</td></tr></tbody></table>`); }
-
-function printQueue() { const queue = active(state.appointments).filter((a) => a.date === today()).sort((a, b) => (a.time || '').localeCompare(b.time || '')); printHtml('Today’s Queue', `<div class="summary"><div><span class="muted">Date</span><strong>${date(today())}</strong></div><div><span class="muted">Appointments</span><strong>${queue.length}</strong></div></div>${queue.length ? `<table class="print-table"><thead><tr><th>Serial</th><th>Time</th><th>Patient</th><th>Reason</th><th>Chair</th><th>Status</th></tr></thead><tbody>${queue.map((a, i) => `<tr><td>${esc(a.serial || `${state.settings.serialPrefix}-${String(i + 1).padStart(3, '0')}`)}</td><td>${time(a.time)}</td><td>${esc(patientName(a.patientId))}</td><td>${esc(a.reason || '—')}</td><td>${esc(a.chair || 'Chair 1')}</td><td>${esc(a.status || 'Scheduled')}</td></tr>`).join('')}</tbody></table>` : '<p>No appointments scheduled today.</p>'}`); }
-function printBilling() { const invoices = active(state.invoices); printHtml('Billing statement', `<div class="summary"><div><span class="muted">Total billed</span><strong>${currency(sum(invoices, (i) => i.total))}</strong></div><div><span class="muted">Collected</span><strong>${currency(sum(active(state.payments), paymentAmount))}</strong></div><div><span class="muted">Outstanding</span><strong>${currency(sum(invoices, (i) => invoicePaymentStatus(i).due))}</strong></div></div>${invoices.length ? `<table class="print-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${invoices.map((i) => { const paymentState = invoicePaymentStatus(i); return `<tr><td>${esc(i.invoiceNumber)}</td><td>${esc(patientName(i.patientId))}</td><td>${date(i.date)}</td><td>${currency(i.total)}</td><td>${currency(paymentState.paid)}</td><td>${currency(paymentState.due)}</td></tr>`; }).join('')}</tbody></table>` : '<p>No invoices created.</p>'}`); }
-function printInvoice(id) { const i = byId(state.invoices, id); if (!i) return; printHtml(`Invoice ${i.invoiceNumber}`, `<div class="summary"><div><span class="muted">Patient</span><strong>${esc(patientName(i.patientId))}</strong></div><div><span class="muted">Invoice date</span><strong>${date(i.date)}</strong></div><div><span class="muted">Status</span><strong>${esc(i.status)}</strong></div></div><table class="print-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${(i.items || []).map((item) => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${currency(item.unitPrice)}</td><td>${currency(item.total)}</td></tr>`).join('')}</tbody></table><div class="summary right" style="justify-content:flex-end"><div><span class="muted">Subtotal</span><strong>${currency(i.subtotal)}</strong></div><div><span class="muted">Discount</span><strong>${currency(i.discount)}</strong></div><div><span class="muted">Total due</span><strong>${currency(i.total)}</strong></div></div>`); }
-function printPayment(id) { const p = byId(state.payments, id); if (!p) return; printHtml(`Money receipt ${p.receiptNumber}`, `<div class="summary"><div><span class="muted">Receipt</span><strong>${esc(p.receiptNumber)}</strong></div><div><span class="muted">Patient</span><strong>${esc(patientName(p.patientId))}</strong></div><div><span class="muted">Date</span><strong>${date(p.date)}</strong></div></div><h2>Received</h2><p style="font-size:24px;font-weight:700">${currency(paymentAmount(p))}</p>${paymentRefundedAmount(p) ? `<p>Refunded / reversed: ${currency(paymentRefundedAmount(p))}</p>` : ''}<p>Payment method: <b>${esc(p.method || '—')}</b><br>Reference: ${esc(p.reference || '—')}<br>Status: ${esc(p.status || 'Recorded')}</p>`, 'Receipt'); }
-function printPrescription(id) { const p = byId(state.prescriptions, id); if (!p) return; printHtml(`Prescription ${p.prescriptionCode}`, `<div class="summary"><div><span class="muted">Patient</span><strong>${esc(patientName(p.patientId))}</strong></div><div><span class="muted">Date</span><strong>${date(p.date)}</strong></div><div><span class="muted">Prescriber</span><strong>${esc(p.doctor)}</strong></div></div><table class="print-table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead><tbody>${(p.medications || []).map((m) => `<tr><td>${esc(m.medicine)}<br>${esc(m.strength || '')}</td><td>${esc(m.dosage || '—')}</td><td>${esc(m.frequency || '—')}</td><td>${esc(m.duration || '—')}</td><td>${esc(m.instructions || '—')}</td></tr>`).join('')}</tbody></table><p style="margin-top:40px">${esc(p.notes || '')}</p>`); }
-function printPatient(id) { const p = byId(state.patients, id); if (!p) return; const visits = active(state.visits).filter((v) => v.patientId === id); printHtml(`Patient summary — ${p.fullName}`, `<div class="summary"><div><span class="muted">Patient code</span><strong>${esc(p.patientCode)}</strong></div><div><span class="muted">Phone</span><strong>${esc(p.phone || '—')}</strong></div><div><span class="muted">Registration</span><strong>${date(p.registrationDate)}</strong></div></div><h2>Patient details</h2><table class="print-table"><tbody><tr><th>Date of birth</th><td>${date(p.dateOfBirth)}</td><th>Gender</th><td>${esc(p.gender || '—')}</td></tr><tr><th>Allergies</th><td>${esc(p.allergies || 'None recorded')}</td><th>Blood group</th><td>${esc(p.bloodGroup || '—')}</td></tr><tr><th>Address</th><td colspan="3">${esc(p.address || '—')}</td></tr></tbody></table><h2>Visit history</h2>${visits.length ? `<table class="print-table"><thead><tr><th>Date</th><th>Reason</th><th>Diagnosis</th><th>Treatment</th></tr></thead><tbody>${visits.map((v) => `<tr><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${esc(v.treatmentPerformed || '—')}</td></tr>`).join('')}</tbody></table>` : '<p>No visits recorded.</p>'}`); }
-function printPatientStatement(id) {
-  const p = byId(state.patients, id);
-  if (!p) return;
-  const entries = statementEntries({ invoices: active(state.invoices), payments: active(state.payments), adjustments: active(state.paymentAdjustments || []) }, id);
-  const balance = entries.at(-1)?.balance || 0;
-  printHtml(`Financial statement — ${p.fullName}`, `<div class="summary"><div><span class="muted">Patient</span><strong>${esc(p.fullName)}</strong></div><div><span class="muted">Patient code</span><strong>${esc(p.patientCode || '—')}</strong></div><div><span class="muted">Balance</span><strong>${currency(balance)}</strong></div></div>${entries.length ? `<table class="print-table"><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Note</th></tr></thead><tbody>${entries.map((entry) => `<tr><td>${date(entry.date)}</td><td>${esc(entry.type)}</td><td>${esc(entry.reference)}</td><td>${entry.debit ? currency(entry.debit) : '—'}</td><td>${entry.credit ? currency(entry.credit) : '—'}</td><td>${currency(entry.balance)}</td><td>${esc(entry.note)}</td></tr>`).join('')}</tbody></table>` : '<p>No financial activity recorded.</p>'}`);
+async function runIntegrityCheck() {
+  const diag = await api.diagnostics();
+  if (!diag) return notify('Diagnostics unavailable.', 'error');
+  if (diag.ok) notify('Integrity check passed — structure, relationships and money fields are sound.', 'success');
+  else notify(`${diag.issues.length} integrity issue(s) found. Open Diagnostics to review.`, 'error');
+  ui.page = 'diagnostics';
+  render();
 }
-function printDental() { const p = byId(state.patients, ui.dentalPatientId); if (!p) return notify('Choose a patient before printing the chart.', 'error'); const records = state.dentalRecords.filter((r) => r.patientId === p.id); printHtml(`Dental chart — ${p.fullName}`, `<p>FDI adult dentition record.</p><table class="print-table"><thead><tr><th>Tooth</th><th>Status</th><th>Note</th><th>Updated</th></tr></thead><tbody>${records.length ? records.map((r) => `<tr><td>${r.tooth}</td><td>${esc(r.status || '—')}</td><td>${esc(r.note || '—')}</td><td>${date(r.updatedAt?.slice(0, 10))}</td></tr>`).join('') : '<tr><td colspan="4">No tooth records.</td></tr>'}</tbody></table>`); }
-function printReport(asPdf = false) { const r = buildReport(ui.reportType, ui.reportsRange); const content = `<div class="summary">${r.kpis.map((k) => `<div><span class="muted">${esc(k.label)}</span><strong>${esc(k.value)}</strong></div>`).join('')}</div>${r.body.replaceAll('data-table', 'print-table')}`; if (asPdf) exportPdf(r.title, content); else printHtml(r.title, content); }
+async function exportPatientsCsv() {
+  const result = await q('list', { collection: 'patients', page: 1, pageSize: 5000, filters: { status: 'active' } });
+  const headers = ['fullName', 'phone', 'email', 'dateOfBirth', 'gender', 'address', 'allergies', 'notes'];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const p of result.rows || []) lines.push(headers.map((h) => csvEscape(p[h])).join(','));
+  downloadBlob(lines.join('\n'), `dentiva-patients-${today()}.csv`, 'text/csv');
+  notify(`Exported ${(result.rows || []).length} patients to CSV.`, 'success');
+}
+function csvEscape(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inQuotes) {
+      if (char === '"') { if (text[index + 1] === '"') { cell += '"'; index += 1; } else inQuotes = false; }
+      else cell += char;
+    } else if (char === '"') inQuotes = true;
+    else if (char === ',') { row.push(cell); cell = ''; }
+    else if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(cell); cell = '';
+      if (row.some((part) => part !== '')) rows.push(row);
+      row = [];
+    } else cell += char;
+  }
+  row.push(cell);
+  if (row.some((part) => part !== '')) rows.push(row);
+  return rows;
+}
+function downloadBlob(content, filename, type = 'application/json') {
+  const blob = new Blob([content], { type });
+  const anchor = document.createElement('a');
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(anchor.href);
+}
 
-function render() { app.innerHTML = state.unsupportedSchema ? unsupportedSchemaScreen() : (requiresLogin() ? authScreen() : (ui.locked ? lockScreen() : shell())); translateDom(); document.title = `${requiresLogin() ? 'Sign in' : ui.locked ? 'Workspace locked' : pageTitle()} · Dentiva Pro`; if (!ui.locked && !requiresLogin()) resetActivityTimer(); }
-
-document.addEventListener('click', (event) => { recordActivity(); handleClick(event); });
-document.addEventListener('pointerdown', recordActivity, { passive: true });
-document.addEventListener('keydown', recordActivity, { passive: true });
-document.addEventListener('submit', handleSubmit);
-document.addEventListener('input', handleInput);
-document.addEventListener('change', handleChange);
-document.addEventListener('keydown', handleKeydown);
-window.addEventListener('error', (event) => { console.error(event.error || event.message); });
-
-// File import listener is delegated because the input is re-created with the Backup page.
-document.addEventListener('change', (event) => {
-  if (event.target.dataset.input === 'clinic-logo-file') {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 1024 * 1024) return notify('Clinic logos must be PNG, JPEG or WebP files up to 1 MB.', 'error');
-    const reader = new FileReader();
-    reader.onload = () => { state.settings.logo = String(reader.result); audit('Clinic logo updated', 'Settings', '', file.name); Store.save(state); render(); notify('Clinic logo updated.'); };
-    reader.readAsDataURL(file);
+/* ------------------------------------------------------------------ */
+/* Input / change / keydown                                            */
+/* ------------------------------------------------------------------ */
+async function handleInput(event) {
+  const target = event.target;
+  const key = target.dataset.input;
+  recordActivity();
+  if (key === 'global-search') {
+    ui.search = target.value;
+    if (ui.modal?.type === 'search') {
+      const results = await globalSearch(target.value);
+      const container = document.getElementById('command-results');
+      if (container) container.innerHTML = commandResultsHtml(results);
+    }
     return;
   }
-  if (event.target.dataset.input === 'patient-csv-file') {
-    if (!requirePermission('patients.create')) return;
-    const file = event.target.files?.[0]; if (!file) return;
-    if (file.size > 10 * 1024 * 1024) return notify('CSV imports are limited to 10 MB.', 'error');
-    const reader = new FileReader(); reader.onload = () => { const parsed = parseCsv(String(reader.result || '')); if (!parsed.headers.length || !parsed.rows.length) return notify('The CSV needs a header row and at least one data row.', 'error'); const normalized = Object.fromEntries(parsed.headers.map((header) => [header.toLowerCase().replace(/[^a-z0-9]+/g, ''), header])); const pick = (names) => names.map((name) => normalized[name]).find(Boolean) || ''; ui.csvImport = { fileName: file.name, headers: parsed.headers, rows: parsed.rows, strategy: 'Skip', mapping: { fullName: pick(['fullname', 'name', 'patientname']), phone: pick(['phone', 'mobile', 'phonenumber']), email: pick(['email', 'emailaddress']), dateOfBirth: pick(['dateofbirth', 'dob', 'birthdate']), gender: pick(['gender', 'sex']), address: pick(['address', 'location']), allergies: pick(['allergies', 'allergy']), notes: pick(['notes', 'note']) } }; openModal('csvImport'); }; reader.readAsText(file); return;
+  if (key === 'command-search') {
+    const results = await globalSearch(target.value);
+    const container = document.getElementById('command-results');
+    if (container) container.innerHTML = commandResultsHtml(results);
+    return;
   }
-  if (event.target.dataset.input === 'patient-attachment-file') {
-    const file = event.target.files?.[0]; if (!file) return;
-    const attachmentValidation = validateAttachmentFile(file);
-    if (!attachmentValidation.allowedTypes.includes(file.type)) { notify('This file type is not allowed for clinical attachments.', 'error'); return; }
-    if (file.size > attachmentValidation.maxBytes) { notify('Attachments are limited to 6 MB to protect local storage.', 'error'); return; }
-    const reader = new FileReader(); reader.onload = () => { const patient = byId(state.patients, ui.patientId); if (!patient) return; const safe = validateAttachmentFile({ type: file.type, size: file.size, name: file.name }); ui.pendingAttachment = { patientId: patient.id, name: safe.safeName, type: file.type, size: file.size, data: reader.result, category: file.type === 'application/pdf' ? 'PDF report' : file.type.startsWith('image/') ? 'Image / X-ray' : 'Clinical document' }; openModal('attachment', ui.pendingAttachment); };
-    reader.readAsDataURL(file); return;
+  if (key === 'list-query') {
+    const collection = target.dataset.collection;
+    const state = listState[collection] || (listState[collection] = { page: 1, pageSize: 25, query: '', filters: {} });
+    clearTimeout(state._timer);
+    state._timer = setTimeout(() => { state.query = target.value; state.page = 1; render(); }, 220);
+    return;
   }
-  if (event.target.dataset.input !== 'backup-file') return;
-  const file = event.target.files?.[0]; if (!file) return;
-  const reader = new FileReader(); reader.onload = async () => {
-    try {
-      const parsed = JSON.parse(reader.result);
-      const validation = validateBackupPayload(parsed, arrayKeys);
-      const source = validation.data;
-      const counts = Object.fromEntries(arrayKeys.map((key) => [key, Array.isArray(source[key]) ? source[key].length : 0]));
-      const conflicts = arrayKeys.reduce((total, key) => total + (Array.isArray(source[key]) ? source[key].filter((record) => record.id && state[key].some((existing) => existing.id === record.id)).length : 0), 0);
-      const warnings = [...validation.warnings];
-      const errors = [...validation.errors];
-      if (parsed.manifest?.payloadHash) {
-        const actualHash = await sha256Hex(canonicalJson(source));
-        if (actualHash !== parsed.manifest.payloadHash) errors.push('SHA-256 integrity check failed: the backup data does not match its manifest.');
-      } else warnings.push('This backup has no payload hash; structural and relationship checks were still performed.');
-      ui.restoreCandidate = { name: file.name, product: parsed.manifest?.product || 'Dentiva Pro / legacy export', schemaVersion: parsed.manifest?.schemaVersion || source.schemaVersion || '?', total: Object.values(counts).reduce((a, b) => a + b, 0), counts, conflicts, errors, warnings, data: source, strategy: 'Keep Existing', restorePatients: true, restoreClinical: true, restoreFinance: true, restoreOperations: true, restoreSettings: true, selectedPatientIds: [], patientScope: false };
+  if (key === 'dental-note') { ui.toothNote = target.value; return; }
+  if (key === 'invoice-lines') { updateInvoiceTotals(); return; }
+}
+function handleFilePick(event) {
+  const target = event.target;
+  const file = target.files?.[0];
+  if (!file) return;
+  if (target.closest('[data-action="pick-csv"]')) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = parseCsv(String(reader.result));
+      if (rows.length < 2) return notify('The CSV needs a header row and at least one data row.', 'error');
+      ui.csvImport = { fileName: file.name, headers: rows[0], rows: rows.slice(1), mapping: { fullName: rows[0].findIndex((h) => /name/i.test(h)), phone: rows[0].findIndex((h) => /phone/i.test(h)) }, strategy: 'Skip' };
+      if (ui.csvImport.mapping.fullName < 0) ui.csvImport.mapping.fullName = 0;
+      if (ui.csvImport.mapping.phone < 0) ui.csvImport.mapping.phone = 1;
       render();
-      if (errors.length) notify(`Backup validation found ${errors.length} issue${errors.length === 1 ? '' : 's'}; restore will remain blocked.`, 'error'); else notify('Backup validated. Review the import preview before restoring.');
-    } catch (error) { notify('This file could not be read as a Dentiva Pro backup.', 'error'); }
-  }; reader.readAsText(file);
-});
-
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('/sw.js').catch(() => {});
-render();
-try {
-  if (!state.setupComplete && !sessionStorage.getItem('dentiva-pro.setup-prompted')) {
-    sessionStorage.setItem('dentiva-pro.setup-prompted', '1');
-    openModal('setup', { step: 1 });
+    };
+    reader.readAsText(file);
+    return;
   }
-} catch { /* session storage can be unavailable in restricted previews */ }
+  if (target.closest('[data-action="pick-attachment"]')) {
+    const nameInput = document.querySelector('form[data-form="attachment"] [name="name"]');
+    if (nameInput && !nameInput.value) nameInput.value = file.name;
+    const label = document.querySelector('.file-drop strong');
+    if (label) label.textContent = file.name;
+  }
+}
+async function handleChange(event) {
+  const target = event.target;
+  const key = target.dataset.change;
+  recordActivity();
+  switch (key) {
+    case 'dashboard-range': ui.range = target.value; if (ui.range !== 'custom') { ui.rangeFrom = ''; ui.rangeTo = ''; } return render();
+    case 'dashboard-range-from': ui.rangeFrom = target.value; return render();
+    case 'dashboard-range-to': ui.rangeTo = target.value; return render();
+    case 'reports-range': ui.reportsRange = target.value; if (ui.reportsRange !== 'custom') { ui.rangeFrom = ''; ui.rangeTo = ''; } return render();
+    case 'reports-range-from': ui.rangeFrom = target.value; return render();
+    case 'reports-range-to': ui.rangeTo = target.value; return render();
+    case 'analytics-range': ui.analyticsRange = target.value; return render();
+    case 'report-type': ui.reportType = target.value; return render();
+    case 'patient-status-filter': ui.patientStatusFilter = target.value; listState.patients.page = 1; return render();
+    case 'patient-balance-filter': ui.patientBalanceFilter = target.value; listState.patients.page = 1; return render();
+    case 'invoice-status-filter': listState.invoices.filters = { ...listState.invoices.filters, status: target.value || undefined }; listState.invoices.page = 1; return render();
+    case 'inventory-category-filter': listState.inventory.filters = { ...listState.inventory.filters, category: target.value || undefined }; listState.inventory.page = 1; return render();
+    case 'inventory-lowstock': listState.inventory.filters = { ...listState.inventory.filters, lowStock: target.checked || undefined }; listState.inventory.page = 1; return render();
+    case 'inventory-expiring': listState.inventory.filters = { ...listState.inventory.filters, expiringBefore: target.checked ? shiftDate(today(), 60) : undefined }; listState.inventory.page = 1; return render();
+    case 'dental-patient': {
+      if (target.value) { ui.dentalPatientId = target.value; ui.patientId = target.value; ui.patientTab = 'dental'; ui.page = 'patients'; render(); }
+      return;
+    }
+    case 'user-role': {
+      const form = target.closest('form');
+      const role = form?.querySelector('[name="role"]')?.value || 'Receptionist';
+      const grid = form?.querySelector('.permission-grid');
+      if (grid) grid.innerHTML = permissionGroupsHtml(new Set((await import('./core.js')).permissionsForRole(role, [])));
+      return;
+    }
+    case 'restore-module': {
+      const candidate = ui.restoreCandidate;
+      if (candidate) {
+        const modules = new Set(candidate.selectedModules || []);
+        if (target.checked) modules.add(target.dataset.module); else modules.delete(target.dataset.module);
+        candidate.selectedModules = [...modules];
+        if (!candidate.selectedModules.length) { candidate.selectedModules = ['patients']; target.checked = true; }
+        render();
+      }
+      return;
+    }
+    case 'restore-strategy': if (ui.restoreCandidate) { ui.restoreCandidate.strategy = target.value; render(); } return;
+    case 'csv-strategy': if (ui.csvImport) ui.csvImport.strategy = target.value; return;
+    case 'invoice-treatment': {
+      const selected = appState.directory.treatments.find((t) => t.id === target.value);
+      if (selected) {
+        const container = document.querySelector('.invoice-lines');
+        if (container && container.querySelectorAll('.invoice-line').length <= 1) {
+          const inputs = container.querySelector('.invoice-line')?.querySelectorAll('input');
+          if (inputs) { inputs[0].value = selected.name; inputs[2].value = selected.defaultPrice || ''; }
+          updateInvoiceTotals();
+        }
+      }
+      return;
+    }
+    default: return;
+  }
+}
+function handleKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    ui.modal = { type: 'search', data: { query: '', results: '' } };
+    render();
+    return;
+  }
+  if (event.key === 'Escape' && ui.modal) { event.preventDefault(); closeModal(); }
+}
+
+function commandResultsHtml(results) {
+  const sections = [];
+  if (results.patients?.length) sections.push(`<div class="command-section"><h4>Patients</h4>${results.patients.map((item) => `<button class="command-row" data-action="open-patient-profile" data-id="${attr(item.id)}"><strong>${esc(item.label)}</strong><small>${esc(item.sub || '')}</small></button>`).join('')}</div>`);
+  if (results.appointments?.length) sections.push(`<div class="command-section"><h4>Appointments</h4>${results.appointments.map((item) => `<button class="command-row" data-action="open-appointment-detail" data-id="${attr(item.id)}"><strong>${esc(item.label)}</strong><small>${esc(item.sub || '')}</small></button>`).join('')}</div>`);
+  if (results.invoices?.length) sections.push(`<div class="command-section"><h4>Invoices</h4>${results.invoices.map((item) => `<button class="command-row" data-action="open-invoice-detail" data-id="${attr(item.id)}"><strong>${esc(item.label)}</strong><small>${esc(item.sub || '')}</small></button>`).join('')}</div>`);
+  if (!sections.length) return `<p class="muted">No matching records for this search.</p>`;
+  return sections.join('');
+}
+function updateInvoiceTotals() {
+  const form = document.querySelector('form[data-form="invoice"]');
+  if (!form) return;
+  const items = [...form.querySelectorAll('.invoice-line')].map((line) => {
+    const inputs = line.querySelectorAll('input');
+    return { name: inputs[0]?.value || '', quantity: Number(inputs[1]?.value || 1), unitPrice: Number(inputs[2]?.value || 0) };
+  }).filter((item) => item.name && item.quantity > 0);
+  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const discount = Number(form.querySelector('[name="discount"]')?.value || 0);
+  const taxEnabled = form.querySelector('[name="taxEnabled"]')?.checked;
+  const taxRate = taxEnabled ? Number(form.querySelector('[name="taxRate"]')?.value || 0) : 0;
+  const totals = calculateInvoice({ quantity: 1, unitPrice: subtotal, discount, taxRate });
+  document.getElementById('invoice-subtotal')?.replaceChildren(currency(totals.subtotal));
+  document.getElementById('invoice-discount')?.replaceChildren(currency(totals.discount));
+  document.getElementById('invoice-tax')?.replaceChildren(currency(totals.tax));
+  document.getElementById('invoice-total')?.replaceChildren(currency(totals.total));
+}
+
+/* ------------------------------------------------------------------ */
+/* Printing (isolated window; no active content)                       */
+/* ------------------------------------------------------------------ */
+function printDocumentMarkup(title, content) {
+  const footer = (appState.settings.documentTemplate || {}).footer || '';
+  const brand = appState.settings.clinicName || 'Dentiva Pro';
+  const contact = [appState.settings.phone, appState.settings.address].filter(Boolean).join(' · ');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    html,body{margin:0;padding:32px;font-family:Arial,Helvetica,sans-serif;color:#111;background:#fff}
+    .print-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0c6b70;padding-bottom:12px;margin-bottom:20px}
+    .print-brand{font-size:20px;font-weight:800;color:#0c6b70}.print-brand small{display:block;font-size:11px;color:#555;font-weight:400}
+    .summary{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}.summary div{background:#f4f7f7;padding:8px 14px;border-radius:8px}.summary .muted{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#5c6f6f}
+    .print-table{width:100%;border-collapse:collapse;margin:10px 0}.print-table th,.print-table td{text-align:left;padding:8px 10px;border-bottom:1px solid #dfe7e7;font-size:13px}.print-table th{background:#f4f7f7;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
+    .print-footer{margin-top:28px;padding-top:12px;border-top:1px solid #dfe7e7;font-size:11px;color:#5c6f6f}
+    h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 8px}
+    @media print{body{padding:0}}
+  </style></head><body>
+  <div class="print-header"><div class="print-brand">${esc(brand)}<small>${esc(contact)}</small></div><div style="text-align:right"><h1>${esc(title)}</h1><small>${dateFull(today())}</small></div></div>
+  ${content}
+  ${footer ? `<div class="print-footer">${esc(footer)}</div>` : ''}
+  </body></html>`;
+}
+async function printHtml(title, content, pageSize = appState.settings.printPageSize || 'A4') {
+  const result = await api.printHtmlPdf(printDocumentMarkup(title, content), { pageSize });
+  if (result?.ok === false) notify(result.error, 'error');
+}
+function documentSummary(rows) { return `<div class="summary">${rows.map(([label, value]) => `<div><span class="muted">${esc(label)}</span><strong>${value}</strong></div>`).join('')}</div>`; }
+
+async function printInvoice(inv) {
+  return printHtml(`Invoice ${inv.invoiceNumber || ''}`, documentSummary([['Patient', esc(patientName(inv.patientId))], ['Invoice date', dateFull(inv.date)], ['Status', esc(inv.status)]]) +
+    `<table class="print-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${(inv.items || []).map((item) => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${currency(item.unitPrice)}</td><td>${currency(item.total)}</td></tr>`).join('')}</tbody></table>` +
+    `<div class="summary" style="justify-content:flex-end"><div><span class="muted">Subtotal</span><strong>${currency(inv.subtotal)}</strong></div><div><span class="muted">Discount</span><strong>${currency(inv.discount)}</strong></div><div><span class="muted">Tax</span><strong>${currency(inv.tax)}</strong></div><div><span class="muted">Total</span><strong>${currency(inv.total)}</strong></div></div>`);
+}
+async function printPayment(payment) {
+  const refunded = Number(payment.refundedAmount) || 0;
+  return printHtml(`Money receipt ${payment.receiptNumber || ''}`, documentSummary([['Receipt', esc(payment.receiptNumber || '—')], ['Patient', esc(patientName(payment.patientId))], ['Date', dateFull(payment.date)]]) +
+    `<h2>Received</h2><p style="font-size:24px;font-weight:700">${currency(Math.max(0, (Number(payment.amount) || 0) - refunded))}</p>${refunded ? `<p>Refunded / reversed: ${currency(refunded)}</p>` : ''}<p>Payment method: <b>${esc(payment.method || '—')}</b><br>Reference: ${esc(payment.reference || '—')}<br>Status: ${esc(payment.status || 'Recorded')}</p>`);
+}
+async function printPrescription(rx) {
+  return printHtml(`Prescription ${rx.prescriptionCode || ''}`, documentSummary([['Patient', esc(patientName(rx.patientId))], ['Date', dateFull(rx.date)], ['Prescriber', esc(rx.doctor || appState.settings.dentistName || '')]]) +
+    `<table class="print-table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead><tbody>${(rx.medications || []).map((m) => `<tr><td>${esc(m.medicine)}<br>${esc(m.strength || '')}</td><td>${esc(m.dosage || '—')}</td><td>${esc(m.frequency || '—')}</td><td>${esc(m.duration || '—')}</td><td>${esc(m.instructions || '')}</td></tr>`).join('')}</tbody></table><p style="margin-top:40px">${esc(rx.notes || '')}</p>`);
+}
+async function printPatient(patient) {
+  const visits = (await q('list', { collection: 'visits', page: 1, pageSize: 100, filters: { patientId: patient.id }, sort: 'date-desc' })).rows || [];
+  return printHtml(`Patient summary — ${patient.fullName}`, documentSummary([['Patient code', esc(patient.patientCode || '—')], ['Phone', esc(patient.phone || '—')], ['Registration', dateFull(patient.registrationDate)]]) +
+    `<h2>Patient details</h2><table class="print-table"><tbody><tr><th>Date of birth</th><td>${patient.dateOfBirth ? dateFull(patient.dateOfBirth) : '—'}</td><th>Gender</th><td>${esc(patient.gender || '—')}</td></tr><tr><th>Allergies</th><td>${esc(patient.allergies || 'None recorded')}</td><th>Blood group</th><td>${esc(patient.bloodGroup || '—')}</td></tr><tr><th>Address</th><td colspan="3">${esc([patient.address, patient.city, patient.district].filter(Boolean).join(', ') || '—')}</td></tr></tbody></table>` +
+    `<h2>Visit history</h2>${visits.length ? `<table class="print-table"><thead><tr><th>Date</th><th>Reason</th><th>Diagnosis</th><th>Treatment</th></tr></thead><tbody>${visits.map((v) => `<tr><td>${dateFull(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${esc(v.treatmentPerformed || '—')}</td></tr>`).join('')}</tbody></table>` : '<p>No visits recorded.</p>'}`);
+}
+async function printPatientStatement(patient) {
+  const statement = await q('patientStatement', { patientId: patient.id });
+  const entries = statement.rows || [];
+  const balance = statement.balanceCents || 0;
+  return printHtml(`Financial statement — ${patient.fullName}`, documentSummary([['Patient', esc(patient.fullName)], ['Patient code', esc(patient.patientCode || '—')], ['Balance', currency(centsToMoney(balance))]]) +
+    (entries.length ? `<table class="print-table"><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${entries.map((entry) => `<tr><td>${dateFull(entry.date)}</td><td>${esc(entry.type)}</td><td>${esc(entry.reference)}</td><td>${entry.debit > 0 ? currency(centsToMoney(entry.debitCents ?? entry.debit)) : ''}</td><td>${entry.credit > 0 ? currency(centsToMoney(entry.creditCents ?? entry.credit)) : ''}</td><td>${currency(centsToMoney(entry.balanceCents ?? entry.balance))}</td></tr>`).join('')}</tbody></table>` : '<p>No financial activity recorded.</p>'));
+}
+async function printQueue() {
+  const day = await q('appointmentDay', { date: today() });
+  const queue = (day.appointments || []).filter((a) => a.status !== 'Cancelled').sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  return printHtml('Today’s Queue', documentSummary([['Date', dateFull(today())], ['Appointments', queue.length]]) +
+    (queue.length ? `<table class="print-table"><thead><tr><th>Serial</th><th>Time</th><th>Patient</th><th>Reason</th><th>Chair</th><th>Status</th></tr></thead><tbody>${queue.map((a, i) => `<tr><td>${esc(a.serial || `Q-${String(i + 1).padStart(3, '0')}`)}</td><td>${time(a.time)}</td><td>${esc(patientName(a.patientId))}</td><td>${esc(a.reason || '—')}</td><td>${esc(a.chair || 'Chair 1')}</td><td>${esc(a.status || 'Scheduled')}</td></tr>`).join('')}</tbody></table>` : '<p>No appointments scheduled today.</p>'));
+}
+async function printBilling() {
+  const invoices = (await q('list', { collection: 'invoices', page: 1, pageSize: 2000 })).rows || [];
+  const payments = (await q('list', { collection: 'payments', page: 1, pageSize: 2000 })).rows || [];
+  const billed = invoices.reduce((sum, i) => sum + (i.totalCents ?? 0), 0);
+  const collected = payments.reduce((sum, p) => sum + Math.max(0, (p.amountCents ?? 0) - (p.refundedCents ?? 0)), 0);
+  const outstanding = invoices.reduce((sum, i) => sum + (i.dueCents ?? 0), 0);
+  return printHtml('Billing statement', documentSummary([['Total billed', currency(centsToMoney(billed))], ['Collected', currency(centsToMoney(collected))], ['Outstanding', currency(centsToMoney(outstanding))]]) +
+    (invoices.length ? `<table class="print-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${invoices.map((i) => `<tr><td>${esc(i.invoiceNumber)}</td><td>${esc(patientName(i.patientId))}</td><td>${dateFull(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td>${currency(centsToMoney(i.paidCents ?? i.paid))}</td><td>${currency(centsToMoney(i.dueCents ?? i.due))}</td></tr>`).join('')}</tbody></table>` : '<p>No invoices created.</p>'));
+}
+async function printVisit(visit) {
+  return printHtml(`Visit ${visit.visitCode || ''} — ${patientName(visit.patientId)}`, documentSummary([['Patient', esc(patientName(visit.patientId))], ['Date', dateFull(visit.date)], ['Dentist', esc(staffName(visit.dentistId))]]) +
+    `<table class="print-table"><tbody><tr><th>Reason</th><td>${esc(visit.reason || '—')}</td></tr><tr><th>Chief complaint</th><td>${esc(visit.chiefComplaint || '—')}</td></tr><tr><th>Findings</th><td>${esc(visit.findings || '—')}</td></tr><tr><th>Diagnosis</th><td>${esc(visit.diagnosis || '—')}</td></tr><tr><th>Treatment performed</th><td>${esc(visit.treatmentPerformed || '—')}</td></tr><tr><th>Notes</th><td>${esc(visit.notes || '—')}</td></tr></tbody></table>`);
+}
+async function printDentalChart(patient) {
+  const history = await q('dentalHistory', { patientId: patient.id });
+  const teeth = {};
+  for (const record of history.records || []) {
+    if (record.superseded) continue;
+    teeth[`${record.dentition || 'adult'}:${record.tooth}`] = record;
+  }
+  const rows = [['adult', 32, 'Permanent'], ['primary', 16, 'Primary']].map(([dentition, count, label]) => `<h2>${label} dentition</h2><table class="print-table"><tbody><tr>${Array.from({ length: count }, (_, i) => i + 1).map((tooth) => `<td style="text-align:center"><b>${tooth}</b><br><small>${esc(teeth[`${dentition}:${tooth}`]?.status || '')}</small>${teeth[`${dentition}:${tooth}`]?.note ? `<br><small>${esc(String(teeth[`${dentition}:${tooth}`].note).slice(0, 40))}</small>` : ''}</td>`).join('')}</tr></tbody></table>`).join('');
+  return printHtml(`Dental chart — ${patient.fullName}`, documentSummary([['Patient', esc(patient.fullName)], ['Patient code', esc(patient.patientCode || '—')], ['Date', dateFull(today())]]) + rows);
+}
+async function printExpense(expense) {
+  return printHtml('Expense record', documentSummary([['Date', dateFull(expense.date)], ['Category', esc(expense.category || 'Other')], ['Amount', currency(expense.amount)]]) +
+    `<table class="print-table"><tbody><tr><th>Description</th><td>${esc(expense.description)}</td></tr><tr><th>Payment method</th><td>${esc(expense.method || '—')}</td></tr><tr><th>Reference</th><td>${esc(expense.reference || '—')}</td></tr><tr><th>Notes</th><td>${esc(expense.notes || '—')}</td></tr></tbody></table>`);
+}
+async function openInvoiceDetail(invoice) {
+  const [payments, adjustments] = await Promise.all([
+    q('list', { collection: 'payments', page: 1, pageSize: 100, filters: { invoiceId: invoice.id }, sort: 'date-desc' }),
+    q('list', { collection: 'paymentAdjustments', page: 1, pageSize: 100, filters: { invoiceId: invoice.id }, sort: 'date-desc' })
+  ]);
+  const paidCents = (payments.rows || []).reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+  const refundedCents = (payments.rows || []).reduce((sum, p) => sum + (p.refundedCents ?? 0), 0);
+  const netPaidCents = Math.max(0, paidCents - refundedCents);
+  const adjustedCents = (adjustments.rows || []).filter((a) => a.type === 'Adjustment').reduce((sum, a) => sum + (a.amountCents ?? 0), 0);
+  const dueCents = Math.max(0, (invoice.totalCents ?? 0) - netPaidCents - adjustedCents);
+  ui.modal = { type: 'invoiceDetail', data: { invoice, payments: payments.rows || [], adjustments: adjustments.rows || [], netPaidCents, refundedCents, adjustedCents, dueCents } };
+  render();
+}
+
+/* ------------------------------------------------------------------ */
+/* Boot                                                                */
+/* ------------------------------------------------------------------ */
+let permissionGroups = [];
+async function refreshDirectory() {
+  try {
+    const directory = await q('directory', {});
+    if (directory) {
+      appState.directory = { patients: directory.patients || [], staff: directory.staff || [], treatments: directory.treatments || [] };
+      appState.medicationCatalog = directory.medicationCatalog || [];
+    }
+  } catch { /* keep last directory */ }
+}
+function permissionGroupsHtml(prechecked = null) {
+  return permissionGroups.map(([group, permissions]) => `<div class="permission-group"><h4>${esc(group)}</h4>${permissions.map((permission) => `<label class="permission-option"><input type="checkbox" name="permissions" value="${attr(permission)}" ${prechecked?.has(permission) ? 'checked' : ''}><span>${esc(permission.replaceAll('.', ' · '))}</span></label>`).join('')}</div>`).join('');
+}
+async function initPermissionGroups() {
+  const core = await import('./core.js');
+  const groups = {};
+  for (const permission of core.PERMISSIONS || []) {
+    const head = String(permission).split('.')[0];
+    (groups[head] = groups[head] || []).push(permission);
+  }
+  permissionGroups = Object.entries(groups).map(([key, list]) => [key, list]);
+}
+async function boot() {
+  app.innerHTML = `<div class="boot-screen"><div class="boot-spinner"></div><p>Opening your local workspace…</p></div>`;
+  const result = await api.bootstrap();
+  if (!result || !result.ok) {
+    app.innerHTML = `<div class="boot-screen"><h1>Dentiva Pro could not start</h1><p>${esc(result?.error || 'The local workspace is unavailable.')} If this continues, check disk space or restore from a verified backup.</p></div>`;
+    return;
+  }
+  appState.boot = result;
+  appState.session = result.session;
+  appState.firstRun = Boolean(result.firstRun);
+  appState.setupComplete = Boolean(result.setupComplete);
+  appState.settings = result.settings || {};
+  appState.unsupportedSchema = Boolean(result.unsupportedSchema);
+  appState.migrationError = result.migrationError || '';
+  appState.storage = result.storage || null;
+  appState.counts = result.counts || {};
+  ui.unlockUserId = result.session?.userId || (result.userDirectory || [])[0]?.id || '';
+  await refreshDirectory();
+  await loadNotifications();
+  appState.ready = true;
+  render();
+  if (appState.firstRun && !appState.setupComplete) {
+    ui.modal = { type: 'setup', data: { step: 1 } };
+    render();
+  }
+}
+function render() {
+  document.title = `${appState.unsupportedSchema ? 'Upgrade required' : requiresLogin() ? 'Sign in' : ui.locked ? 'Workspace locked' : pageTitle()} · Dentiva Pro`;
+  app.innerHTML = shell();
+  const main = document.querySelector('#main-content');
+  if (!main) return;
+  if (appState.unsupportedSchema) { main.innerHTML = unsupportedSchemaScreen(); translateDom(); return; }
+  if (requiresLogin()) { main.innerHTML = authScreen(); translateDom(); return; }
+  if (ui.locked) { main.innerHTML = lockScreen(); translateDom(); return; }
+  main.innerHTML = `<div class="page-loading"><div class="boot-spinner small"></div></div>`;
+  renderPage().then((html) => {
+    const current = document.querySelector('#main-content');
+    if (current) current.innerHTML = html;
+    translateDom();
+  }).catch((error) => {
+    console.error(error);
+    const current = document.querySelector('#main-content');
+    if (current) current.innerHTML = `<div class="empty-state"><h3>View could not be loaded</h3><p>${esc(error?.message || 'Unexpected error.')}</p><button class="btn btn-primary" data-action="retry-page">Retry</button></div>`;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Event wiring (delegated — survives re-renders)                      */
+/* ------------------------------------------------------------------ */
+document.addEventListener('submit', handleSubmit);
+document.addEventListener('click', handleClick);
+document.addEventListener('input', handleInput);
+document.addEventListener('change', (event) => {
+  if (event.target && event.target.type === 'file') handleFilePick(event);
+  else handleChange(event);
+});
+document.addEventListener('keydown', handleKeydown);
+
+window.addEventListener('DOMContentLoaded', () => {
+  initPermissionGroups();
+  boot();
+});

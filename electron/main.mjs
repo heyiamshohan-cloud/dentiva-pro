@@ -20,6 +20,7 @@ import { Workspace } from './lib/db.mjs';
 import { SqlRepo } from './lib/repo-sql.mjs';
 import { SessionManager } from './lib/auth.mjs';
 import { registerIpc } from './lib/ipc.mjs';
+import { DB_LAYOUT_VERSION } from './lib/schema.mjs';
 import { diagnoseWorkspace } from './lib/diagnostics.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -274,6 +275,12 @@ app.whenReady().then(async () => {
   workspace = new Workspace(storageDirectory).open();
   repo = new SqlRepo(workspace);
   sessions = new SessionManager({ repo });
+  // Future-layout guard: never let an older build silently edit a newer store.
+  const layoutVersion = Number(workspace.getMeta('dbLayoutVersion'));
+  if (Number.isInteger(layoutVersion) && layoutVersion > DB_LAYOUT_VERSION) {
+    workspace.setMeta('unsupportedSchema', true);
+    workspace.setMeta('migrationError', `This workspace was created by a newer Dentiva Pro (layout v${layoutVersion}; this build supports v${DB_LAYOUT_VERSION}). Export the preserved data or upgrade the application.`);
+  }
   registerIpc({ repo, ws: workspace, sessions });
 
   ipcMain.handle('app:info', () => ({

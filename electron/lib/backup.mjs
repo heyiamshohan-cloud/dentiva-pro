@@ -136,10 +136,12 @@ export function validateBackup(backupPath) {
  * Create a portable backup in the workspace's backups directory.
  * Returns { ok: true, path, manifest } or { ok: false, error }.
  */
-export function createBackup(ws, { label = '', createdBy = '' } = {}) {
+export function createBackup(ws, { label = '', createdBy = '', directory = '' } = {}) {
   try {
     const name = `${timestampName()}${safeLabel(label) ? `-${safeLabel(label)}` : ''}`;
-    const target = path.join(ws.backupDirectory, name);
+    const root = path.isAbsolute(String(directory || '')) && String(directory || '').trim() ? path.resolve(String(directory).trim()) : ws.backupDirectory;
+    fs.mkdirSync(root, { recursive: true });
+    const target = path.join(root, name);
     if (fs.existsSync(target)) return { ok: false, error: 'A backup with this name already exists.' };
     fs.mkdirSync(target, { recursive: true });
 
@@ -302,3 +304,106 @@ export function pruneBackups(ws, keep = 10) {
   }
   return { ok: true, removed };
 }
+
+/* ------------------------------------------------------------------ */
+/* v1.3.0-compatible JSON backups: full or module-grouped restore with */
+/* explicit strategies (Keep Existing / Replace / Create New Copy).    */
+/* ------------------------------------------------------------------ */
+
+import { migrateState } from '../../src/migrate-state.js';
+import { ARRAY_COLLECTIONS, buildRestorePlan, applyRestorePlan } from '../../src/core.js';
+
+/**
+ * Parse an exported JSON backup (v1.3.0 `exportBackup` shape or the v1.4.0
+ * LocalApi export) into a normalized state object. Throws on invalid input.
+ */
+export function parseBackupJson(text) {
+  let parsed = null;
+  try { parsed = JSON.parse(text); } catch { throw new Error('The backup file is not valid JSON.'); }
+  const root = parsed && typeof parsed === 'object' ? parsed : null;
+  if (!root) throw new Error('The backup file is empty.');
+  const rawState = root.state && typeof root.state === 'object' ? root.state : root;
+  if (!rawState || typeof rawState !== 'object') throw new Error('The backup file does not contain a Dentiva state payload.');
+  if (Array.isArray(rawState.patients) && rawState.patients.length === 0 && !rawState.schemaVersion && !rawState.settings) {
+    // allow genuinely empty backups
+  }
+  const state = migrateState(rawState);
+  if (!Array.isArray(state.audit)) state.audit = [];
+  return { state, attachments: root.attachments && typeof root.attachments === 'object' ? root.attachments : null, manifest: root.manifest || null };
+}
+
+/**
+ * Restore a parsed JSON backup into the live store.
+ * - No `modules`: whole-workspace replace (settings + all collections), then
+ *   re-externalize attachment bytes.
+ * - With `modules`: module-grouped restore using the shared plan/apply
+ *   functions with the caller's strategy and optional patient scoping.
+ */
+export function restoreJsonBackup(ws, parsed, { modules = null, strategy = 'Replace', patientIds = null } = {}) {
+  const { state: incoming, attachments } = parsed;
+  if (!incoming) throw new Error('Backup state is missing.');
+
+  // Current state snapshot (plain objects) for the restore planner.
+  const current = {};
+  for (const collection of ARRAY_COLLECTIONS) current[collection] = [];
+  const tableFor = { patients: 'patients', appointments: 'appointments', visits: 'visits', prescriptions: 'prescriptions', dentalRecords: 'dental_records', treatmentPlans: 'treatment_plans', invoices: 'invoices', payments: 'payments', paymentAdjustments: 'payment_adjustments', expenses: 'expenses', inventory: 'inventory', stockMovements: 'stock_movements', suppliers: 'suppliers', staff: 'staff', referrals: 'referrals', attachments: 'attachments', followUpTasks: 'follow_up_tasks', notifications: 'notifications', users: 'users', treatments: 'treatments', medicationCatalog: 'medication_catalog', notificationRules: 'notification_rules', rooms: 'rooms', savedFilters: 'saved_filters', savedReports: 'saved_reports' };
+  for (const collection of ARRAY_COLLECTIONS) {
+    const table = tableFor[collection];
+    const rows = ws.query(`SELECT * FROM ${table}`);
+    current[collection] = rows.map((row) => rowToRecord(row)).filter(Boolean);
+  }
+  const meta = ws.getAllMeta();
+  for (const key of ['settings', 'counters', 'dashboard', 'navigation', 'notificationRead', 'lastBackupAt', 'setupComplete', 'schemaVersion', 'appVersion']) {
+    if (meta[key] !== undefined) current[key] = meta[key];
+  }
+
+  let resultState;
+  let mode;
+  if (Array.isArray(modules) && modules.length) {
+    const plan = buildRestorePlan(current, incoming, { modules, strategy, patientIds: Array.isArray(patientIds) ? patientIds : null });
+    resultState = applyRestorePlan(current, plan);
+    mode = 'modules';
+  } else {
+    resultState = { ...current, ...incoming };
+    mode = 'full';
+  }
+
+  ws.transaction(() => {
+    // children first on full replace; module restores only touch planned sets,
+    // so write in the standard order and let upsert keep references intact.
+    const order = ['audit', 'notifications', 'followUpTasks', 'attachments', 'referrals', 'stockMovements', 'inventory', 'expenses', 'paymentAdjustments', 'payments', 'invoices', 'treatmentPlans', 'dentalRecords', 'prescriptions', 'visits', 'appointments', 'treatments', 'savedReports', 'savedFilters', 'medicationCatalog', 'notificationRules', 'rooms', 'suppliers', 'staff', 'patients', 'users'];
+    for (const collection of order) {
+      const table = tableFor[collection];
+      if (!table || !(collection in resultState)) continue;
+      const rows = Array.isArray(resultState[collection]) ? resultState[collection] : [];
+      // Full replace clears the table first; module mode is additive/upsert only.
+      if (mode === 'full') ws.run(`DELETE FROM ${table}`);
+      for (const record of rows) {
+        if (!record || !record.id) continue;
+        ws.upsertRecord(collection, record);
+      }
+    }
+    for (const key of ['settings', 'counters', 'dashboard', 'navigation', 'notificationRead', 'setupComplete', 'schemaVersion', 'appVersion']) {
+      if (key in resultState && resultState[key] !== undefined) ws.setMeta(key, resultState[key]);
+    }
+    ws.setMeta('lastRestoreAt', new Date().toISOString());
+    // Re-externalize attachment bytes from the JSON payload.
+    if (attachments) {
+      for (const [id, entry] of Object.entries(attachments)) {
+        const dataUrl = entry && typeof entry === 'string' ? entry : entry?.dataUrl;
+        const match = typeof dataUrl === 'string' ? /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl) : null;
+        if (!match) continue;
+        const bytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+        const written = ws.writeAttachmentFile(id, bytes);
+        const table = 'attachments';
+        const existing = ws.queryOne(`SELECT id FROM ${table} WHERE id = ?`, [id]);
+        if (existing) {
+          ws.run(`UPDATE ${table} SET file_path = ?, checksum = ?, size_bytes = ? WHERE id = ?`, [written.relativePath, written.checksum, written.bytes, id]);
+        }
+      }
+    }
+  });
+  return { mode, counts: ws.recordCounts() };
+}
+
+import { rowToRecord } from './records.mjs';

@@ -134,6 +134,15 @@ export function migrateWorkspace(directory, { log = () => {} } = {}) {
       result.errors.push(`v4 database could not be read: ${error.message}`);
     }
   }
+  if (!sourceState && layout === 'v5') {
+    // The primary was corrupt and a healthy v5 recovery copy (.bak) exists.
+    try {
+      sourceState = Workspace.readV5State(sourcePath);
+      result.from = result.from || 'v5-bak-recovery';
+    } catch (error) {
+      result.errors.push(`The recovery database could not be read: ${error.message}`);
+    }
+  }
   if (!sourceState) {
     for (const candidate of [path.join(dir, LEGACY_FILENAME), path.join(dir, `${LEGACY_FILENAME}.bak`)]) {
       const legacy = Workspace.readLegacyJson(candidate);

@@ -10,11 +10,11 @@ This report separates implementation from acceptance evidence. A label, route, b
 
 ## 1. Current decision
 
-**CURRENT STATE: RELEASE CANDIDATE — WINDOWS GATES PASSED; PUBLICATION PENDING.**
+**CURRENT STATE: PUBLISHED WITH DOCUMENTED LIMITATIONS.**
 
-The v1.3.0 source transformation is implemented without restarting the project or removing prior workflows. Local deterministic and build checks pass. Windows CI run `35708916503` completed successfully: tests/build, Chromium visual checks, Windows packaging, PE inspection, portable persistence smoke, ZIP inspection and checksum verification all passed, and the three workflow evidence artifacts were uploaded.
+The v1.3.0 source transformation is implemented without restarting the project or removing prior workflows. Local deterministic and build checks pass. Windows CI run `35710031145` completed successfully: tests/build, Chromium visual checks, Windows packaging, PE inspection, portable persistence smoke, ZIP inspection and checksum verification all passed, and the three workflow evidence artifacts were uploaded. The [v1.3.0 GitHub release](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.3.0) is public with the portable EXE, NSIS installer, application ZIP and checksum asset.
 
-The GitHub artifact blob cannot be downloaded from this sandbox because the connection terminates with `EOF`; this does not change the successful workflow result. No `v1.3.0` tag or GitHub release exists yet. Publication remains a separate explicit workflow-dispatch step.
+The GitHub release/blob download endpoints terminate with `EOF` from this sandbox, so the archive could not be unpacked locally. The workflow's own PE/ZIP/checksum verification passed, and GitHub release API metadata exposes the published SHA-256 asset digests below. v1.0.0, v1.1.0 and v1.2.0 remain preserved.
 
 ## 2. Implemented flagship scope
 
@@ -53,9 +53,9 @@ The benchmark data is synthetic and remains process-local; it is never written t
 
 ### Windows CI evidence
 
-- Run `35708916503` — **success** on `arena/01a0c66a-dentiva-pro`; Chromium was installed and all six required viewport projects passed.
-- The same run passed `npm run check`, Windows portable/NSIS packaging, PE `MZ` checks, the required portable launch/restart persistence smoke, application-only ZIP extraction/content inspection and independent SHA-256 verification.
-- Uploaded evidence: `Dentiva-Pro-35-Windows-x64`, `Dentiva-Pro-35-viewport-regression` and `Dentiva-Pro-35-windows-portable-smoke-evidence`. The release artifact archive is 416,894,938 bytes according to GitHub metadata.
+- Run `35710031145` — **success** on `arena/01a0c66a-dentiva-pro`; Chromium was installed and all six required viewport projects passed.
+- The same run passed `npm run check`, Windows portable/NSIS packaging, PE `MZ` checks, the required portable launch/restart persistence smoke, application-only ZIP extraction/content inspection and independent SHA-256 verification before publishing v1.3.0.
+- Uploaded evidence: `Dentiva-Pro-37-Windows-x64` (416,894,656 bytes), `Dentiva-Pro-37-viewport-regression` (5,626,704 bytes) and `Dentiva-Pro-37-windows-portable-smoke-evidence` (794 bytes), according to GitHub metadata.
 
 ### Not passed / unavailable locally
 
@@ -91,15 +91,20 @@ The Windows workflow must produce and independently verify these new v1.3.0 name
 - `Dentiva-Pro-1.3.0-Windows-x64.zip`
 - `Dentiva-Pro-1.3.0-checksums.txt`
 
-The Windows workflow created these outputs and its own existence, PE header, ZIP content and hash checks passed on run `35708916503`. The uploaded release artifact archive cannot be downloaded into this sandbox because the signed GitHub blob request ends with `EOF`; that is an environment limitation, not an unverified workflow step.
+The Windows workflow created these outputs and its own existence, PE header, ZIP content and hash checks passed on run `35710031145`. The public release contains the four named assets. GitHub release API digests are recorded below; direct archive download cannot be completed in this sandbox because the signed connection ends with `EOF`.
 
-## 7. Remaining publication evidence
+| Published asset | Bytes | GitHub SHA-256 digest |
+|---|---:|---|
+| `Dentiva-Pro-1.3.0-Windows-x64.exe` | 104,174,827 | `f443a712aa385c485125830a4147b68a53fc98d726599a9668330819e9302a42` |
+| `Dentiva-Pro-1.3.0-Windows-x64-Setup.exe` | 104,402,996 | `ca823b5f59be11cb079b13853b686ac5d2afc92c1c49cb41c3bc2b578626bffe` |
+| `Dentiva-Pro-1.3.0-Windows-x64.zip` | 208,422,246 | `986e3cb9b741ad1ff75e8265b648e583b12cfb25b79f42361a59cabcd7a455ca` |
+| `Dentiva-Pro-1.3.0-checksums.txt` | 309 | `f5c5c1902bbdb8d0fd45d5b58d7ed24772e5dc9e815bcec435686dd7b82d2b87` |
 
-1. The successful Windows workflow result and uploaded artifact metadata are retained as release evidence; direct archive download is still unavailable from this sandbox.
-2. The explicit publication workflow must create a new `v1.3.0` tag/release without touching v1.0.0, v1.1.0 or v1.2.0.
-3. Native Bengali and printed/PDF document review is performed by a human reviewer.
-4. Commercial license/dependency and metadata/icon review is recorded.
-5. The user performs the installed-app launch/restart/uninstall workflow manually.
+## 7. Remaining human/manual evidence
+
+1. Native Bengali and printed/PDF document review is performed by a human reviewer.
+2. Commercial license/dependency and metadata/icon review is recorded.
+3. The user performs the installed-app launch/restart/uninstall workflow manually.
 
 ## 8. Explicit manual acceptance statement
 

@@ -27,7 +27,7 @@ node -e "for (const p of ['sql.js','electron','electron-builder','vite','@playwr
 
 On 2026-09-22, `npm audit --json` reported **0 info, 0 low, 0 moderate, 0 high and 0 critical vulnerabilities** for the complete installed dependency tree after upgrading Electron to 44.4.3 and electron-builder to 26.15.3. `npm audit --omit=dev` also reported zero vulnerabilities.
 
-The prior local audit identified vulnerabilities in the old Electron 33/electron-builder 25 development toolchain. That toolchain was upgraded rather than ignored; the resolved audit is the evidence used for the v1.3 candidate.
+The prior local audit identified vulnerabilities in the old Electron 33/electron-builder 25 development toolchain. That toolchain was upgraded rather than ignored; the resolved audit is the evidence used for the published v1.3.0 release.
 
 ## Commercial distribution boundary
 

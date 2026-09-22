@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 — 2026-09-22 — flagship candidate
+## 1.3.0 — 2026-09-22 — published
 
 ### Command center and insight surfaces
 
@@ -25,6 +25,7 @@
 - Upgraded the build toolchain to Electron 44.4.3 and electron-builder 26.15.3; complete `npm audit` reports zero vulnerabilities in the resolved dependency tree.
 - Added deterministic domain tests; the local Node suite now passes 46 tests and the Vite production build passes.
 - Updated release identity and documentation for the new v1.3.0 semantic version. v1.0.0, v1.1.0 and v1.2.0 remain preserved.
+- Windows CI run `35710031145` passed the six viewport, packaging, PE, portable persistence, ZIP and checksum gates and published the v1.3.0 release with the portable EXE, NSIS installer, application ZIP and checksum asset.
 - The Windows installed-app launch/restart/uninstall smoke remains intentionally excluded from automated release gating and is **MANUAL USER VERIFICATION REQUIRED**.
 
 ## 1.2.0 — 2026-09-22 — published

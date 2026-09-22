@@ -13,7 +13,7 @@
 - [x] Offline/local operation remains the default; no mandatory cloud, telemetry, paid API or external patient-data service.
 - [x] Light-only premium visual direction and Bangladesh defaults remain in place.
 - [x] No automated diagnosis, treatment recommendation or prescribing is introduced.
-- [~] Windows CI artifact, checksum and packaging gates passed on run `35708916503`; `v1.3.0` tag/GitHub release publication remains pending the explicit workflow-dispatch step.
+- [x] Windows CI run `35710031145` passed artifact, checksum and packaging gates and published the new `v1.3.0` tag/GitHub release; v1.0.0, v1.1.0 and v1.2.0 remain preserved.
 
 ## Design system, navigation and command center
 
@@ -22,7 +22,7 @@
 - [x] Dashboard provides schedule, queue, follow-up, signal, metric and shortcut command-center surfaces.
 - [x] Dashboard widget visibility, order and reset-to-default are configurable and persisted locally.
 - [x] Command palette supports commands, permission-scoped navigation and local record search.
-- [x] Six-viewport visual/layout regression — Windows CI run `35708916503` installed Chromium and passed the required 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 projects; local Chromium remains unavailable.
+- [x] Six-viewport visual/layout regression — Windows CI run `35710031145` installed Chromium and passed the required 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 projects; local Chromium remains unavailable.
 - [~] Subjective premium visual review — human review remains required even if automated layout checks pass.
 
 ## Clinical and patient workflows
@@ -107,11 +107,11 @@
 - [x] Synthetic dataset benchmark passes at 1,000, 5,000, 10,000 and 25,000 records with zero relationship errors; synthetic records are never written to the app store.
 - [x] Proprietary license/creator metadata, icon configuration, artifact names and build date remain explicit.
 - [x] Resolved dependency audit is clean after the Electron 44.4.3/electron-builder 26.15.3 upgrade; license inventory is documented in `docs/THIRD_PARTY_LICENSES.md`.
-- [x] Playwright visual checks and Windows packaging/artifact checks — Windows CI run `35708916503` passed visual, packaging, PE, portable smoke, ZIP and checksum gates; direct archive download is unavailable from this sandbox.
+- [x] Playwright visual checks and Windows packaging/artifact checks — Windows CI run `35710031145` passed visual, packaging, PE, portable smoke, ZIP and checksum gates; direct archive download is unavailable from this sandbox.
 - [~] Commercial license/dependency review — technical inventory is complete; final legal owner review of packaged Electron/Chromium notices remains required before broad distribution.
 
 ## Current release decision
 
-**NOT YET PUBLISHED in this working-tree evidence.** Local deterministic gates and Windows CI artifact/visual/package gates pass on run `35708916503`. The explicit publication workflow, remaining native Bengali/document/security human review and final commercial owner review are still reported separately and honestly.
+**PUBLISHED WITH DOCUMENTED LIMITATIONS.** Local deterministic gates and Windows CI artifact/visual/package gates pass; run `35710031145` published the four v1.3.0 assets and tag without changing v1.0.0, v1.1.0 or v1.2.0. Remaining native Bengali/document/security human review, commercial owner review and the explicitly manual installed-app workflow are reported honestly and are not claimed as automated PASS.
 
 **The Windows installed-app launch/restart/uninstall smoke was intentionally excluded from automated release gating and remains for manual user verification.** It is not a release blocker and is not a claimed PASS.

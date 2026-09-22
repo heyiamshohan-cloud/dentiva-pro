@@ -6,7 +6,7 @@ Dentiva Pro is a local dental-practice workspace for clinics in Bangladesh. The 
 
 The repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records.
 
-> **Release status:** v1.3.0 is the verified release candidate on `arena/01a0c66a-dentiva-pro`. Windows CI run `35708916503` passed tests/build, six viewport checks, portable/NSIS packaging, PE, ZIP, checksum and portable persistence gates. An explicit publication workflow still must create the new tag/release; v1.0.0, v1.1.0 and v1.2.0 remain preserved. The installed-app launch/restart/uninstall smoke is intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. See [`docs/FINAL_AUDIT_REPORT_1.3.0.md`](docs/FINAL_AUDIT_REPORT_1.3.0.md) and [`docs/V1.3_PROGRESS.md`](docs/V1.3_PROGRESS.md).
+> **Release status:** v1.3.0 is published from `arena/01a0c66a-dentiva-pro`. Windows CI run `35710031145` passed tests/build, six viewport checks, portable/NSIS packaging, PE, ZIP, checksum and portable persistence gates, then published the [v1.3.0 GitHub release](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.3.0). v1.0.0, v1.1.0 and v1.2.0 remain preserved. The installed-app launch/restart/uninstall smoke is intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. See [`docs/FINAL_AUDIT_REPORT_1.3.0.md`](docs/FINAL_AUDIT_REPORT_1.3.0.md) and [`docs/V1.3_PROGRESS.md`](docs/V1.3_PROGRESS.md).
 
 ## Flagship modules
 
@@ -115,9 +115,9 @@ WhatsApp: 01516591935
 
 ## Release identity
 
-Current code identity: **1.3.0**, build **2026.09.22**. This is a new semantic version after v1.2.0; earlier release tags and artifacts are not overwritten.
+Current code identity: **1.3.0**, build **2026.09.22**. This is the published new semantic version after v1.2.0; earlier release tags and artifacts are not overwritten.
 
-The v1.3 artifact contract is:
+The v1.3 artifact contract is published at [github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.3.0](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.3.0):
 
 - `Dentiva-Pro-1.3.0-Windows-x64.exe` — portable PE executable
 - `Dentiva-Pro-1.3.0-Windows-x64-Setup.exe` — assisted NSIS installer

@@ -58,3 +58,4 @@ NOT PUBLISHED. Target version v1.5.0 (features + fixes vs v1.4.0); tag via CI pu
 - 2026-09-22: Notification engine + RBAC fixes (67/70→70/70 with scheduler + audit).
 - 2026-09-22: Backup scheduler (real tick test w/ real workspace backup + prune).
 - 2026-09-22: Activity log page + CSV export; dead audit modal removed.
+- 2026-09-22: SANDBOX CRASH + RECOVERY — new clean sandbox; workspace self-restored to 0bbafce incl. node_modules + audit-v140; git fsck clean; npm ci fresh (441 pkgs); full suite 71/71; production build OK. Session GH token auto-recovered. Pushes verified on origin with hash-identical ls-remote; branch tracking refs established after fixing the restored clone's narrowed fetch refspec (only main was mapped) — local↔origin divergence now tracked at 0/0. CI status evidence: runs for notifications/backup/audit milestones all SUCCESS; custom-fields run in progress.

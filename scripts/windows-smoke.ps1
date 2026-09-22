@@ -48,7 +48,13 @@ function Start-AndCheck([string]$path, [string]$dataDir, [string]$phase = 'verif
     Write-Host "Application completed smoke phase with exit code $($process.ExitCode)."
   }
   $log = Get-Content $logPath -Raw -ErrorAction SilentlyContinue
-  if ($log -notmatch 'DENTIVA_SMOKE_RESULT:.*"ok":true') { throw "Electron smoke phase $phase did not report success.`n$log" }
+  $errorLog = Get-Content "$logPath.err" -Raw -ErrorAction SilentlyContinue
+  if ($log -notmatch 'DENTIVA_SMOKE_RESULT:.*"ok":true') {
+    $diagnostic = (($log + "`n" + $errorLog).Trim() -replace "\r?\n", ' | ')
+    if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
+    Write-Host "::error title=Electron smoke phase $phase::$diagnostic"
+    throw "Electron smoke phase $phase did not report success.`n$log`n$errorLog"
+  }
   return $log
 }
 

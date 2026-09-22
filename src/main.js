@@ -2165,9 +2165,17 @@ async function saveSetupStep(data) {
 async function handleClick(event) {
   const target = event.target.closest('[data-action]');
   if (!target) {
-    if (event.target.closest('.modal-overlay')) return closeModal();
+    // Backdrop clicks (the overlay itself) close the dialog. Clicks on any
+    // descendant — inputs, labels, submit buttons — must never close it, or
+    // the form is disconnected mid-submission and the browser cancels the
+    // submit ("Form submission canceled because the form is not connected").
+    if (event.target.classList && event.target.classList.contains('modal-overlay')) return closeModal();
     return;
   }
+  // Custom actions never perform a native form submission. Buttons inside
+  // forms default to type="submit"; without this, "Add line", "Cancel" and
+  // similar action buttons would also fire the form's save handler.
+  if (target.tagName === 'BUTTON' && target.closest('form') && !target.hasAttribute('data-submit-action')) event.preventDefault();
   const action = target.dataset.action;
   const id = target.dataset.id || '';
   const navigate = (page) => { ui.page = page; ui.modal = null; op('navigation.pushRecent', { page }).catch(() => {}); render(); };

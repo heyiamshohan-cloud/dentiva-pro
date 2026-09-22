@@ -66,7 +66,7 @@ release.
   Administrator PIN) → local PIN sign-in → all 16 key surfaces render with correct headers
   and no page-renderer error state.
 
-### First CI validation run (run 35734256848) — findings fixed before release
+### First CI validation runs — findings fixed before release
 
 The rewritten visual spec (driving the real first-run setup + PIN sign-in flow) failed on
 Windows CI exactly where a real clinic would hit it: the setup modal could not advance.
@@ -84,8 +84,22 @@ by a new `tests/first-run.test.mjs` regression suite (5 tests, both runtimes):
    digest (`Buffer.from(toHex(x))` vs `Buffer.from(hex,'hex')`) — lengths never match, so
    **every** Electron sign-in failed. Fixed to compare digest bytes directly.
 
+Run `35740200177`'s annotation diagnostics then exposed a **fourth, UI-level defect** that
+the DOM harnesses could not see (they dispatched `submit` events directly instead of
+clicking buttons):
+
+4. `handleClick`'s backdrop-close test used `event.target.closest('.modal-overlay')`, which
+   matches **every** click inside the dialog. Clicking any submit button (or input) closed
+   the modal and disconnected the form mid-submission — Chromium logged "Form submission
+   canceled because the form is not connected" and **no modal form in the app could ever be
+   submitted by clicking its button** (setup, patient, invoice, prescription, every save).
+   Backdrop-close now fires only when the click target is the overlay itself; `data-action`
+   buttons inside forms additionally `preventDefault()` so implicit `type="submit"`
+   activation (Cancel / Add line / Save template buttons) never fires a form save.
+
 Post-fix: 60/60 unit tests, green Vite build, and the full jsdom first-run→sign-in→16-page
-harness passes against the production bundle.
+harness passes against the production bundle with REAL button clicks (and asserts the modal
+survives each submit click).
 - - Placeholder/demo-data scan — clean
 - `git diff --check` — clean
 

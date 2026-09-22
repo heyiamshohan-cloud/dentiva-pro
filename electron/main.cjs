@@ -172,31 +172,39 @@ function smokeVerify() {
   const waitFor = async (predicate, timeout = 12000) => {
     const started = Date.now();
     while (Date.now() - started < timeout) {
-      if (predicate()) return;
+      if (predicate()) return true;
       await wait(100);
     }
-    throw new Error('Timed out waiting for the renderer restart state.');
+    return false;
+  };
+  const snapshot = () => {
+    const stored = globalThis.dentivaDesktop?.storeLoad?.() || {};
+    return {
+      body: (document.body.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 1200),
+      forms: [...document.querySelectorAll('form[data-form]')].map((form) => form.dataset.form),
+      storedPatients: Array.isArray(stored.patients) ? stored.patients.map((patient) => patient.fullName).slice(0, 4) : [],
+      storedUsers: Array.isArray(stored.users) ? stored.users.map((user) => ({ name: user.name, active: user.active, hasPin: Boolean(user.pinHash) })).slice(0, 4) : []
+    };
   };
   return (async () => {
     if (document.querySelector('form[data-form="user-login"]')) {
       const pin = document.querySelector('[name="pin"]');
-      if (!pin) throw new Error('sign-in PIN field is missing during restart verification');
+      if (!pin) return { ok: false, reason: 'sign-in PIN field is missing', ...snapshot() };
       pin.value = '2468';
       pin.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('form[data-form="user-login"] button[type="submit"]')?.click();
-      await waitFor(() => !document.querySelector('form[data-form="user-login"]'));
+      if (!await waitFor(() => !document.querySelector('form[data-form="user-login"]'))) return { ok: false, reason: 'sign-in did not complete', ...snapshot() };
     }
-    await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]'));
+    if (!await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]'))) return { ok: false, reason: 'patients navigation was unavailable', ...snapshot() };
     document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
-    await waitFor(() => document.body.textContent.includes('Windows Smoke Patient'));
+    const hasPatient = await waitFor(() => document.body.textContent.includes('Windows Smoke Patient'));
     const patientText = document.body.textContent || '';
-    const hasPatient = patientText.includes('Windows Smoke Patient');
-    await waitFor(() => document.querySelector('[data-action="navigate"][data-page="backup"]'));
+    if (!hasPatient) return { ok: false, reason: 'patient was not rendered after restart', hasPatient, ...snapshot() };
+    if (!await waitFor(() => document.querySelector('[data-action="navigate"][data-page="backup"]'))) return { ok: false, reason: 'backup navigation was unavailable', hasPatient, ...snapshot() };
     document.querySelector('[data-action="navigate"][data-page="backup"]')?.click();
-    await waitFor(() => /Backup/i.test(document.body.textContent || ''));
+    const hasBackup = await waitFor(() => /Backup/i.test(document.body.textContent || ''));
     const backupText = document.body.textContent || '';
-    const hasBackup = backupText.includes('Backup') || backupText.includes('backup');
-    return { ok: hasPatient && hasBackup, hasPatient, hasBackup };
+    return { ok: hasPatient && hasBackup, hasPatient, hasBackup, patientText: patientText.slice(0, 600), backupText: backupText.slice(0, 600), ...snapshot() };
   })();
 }
 

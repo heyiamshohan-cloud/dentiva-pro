@@ -80,6 +80,13 @@ jobs:
           Get-ChildItem $stage -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "$stage\checksums.txt"
           Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
           if (!(Test-Path $zip)) { throw "Release ZIP was not created" }
+          $inspect = Join-Path $env:TEMP "dentiva-pro-zip-inspect-$version"
+          if (Test-Path $inspect) { Remove-Item $inspect -Recurse -Force }
+          Expand-Archive -Path $zip -DestinationPath $inspect
+          if (!(Test-Path "$inspect\DentivaPro.exe")) { throw "Application ZIP is missing DentivaPro.exe" }
+          $forbidden = Get-ChildItem $inspect -Recurse -Force | Where-Object { $_.Name -in @('.git', 'node_modules', 'tests', 'test-data') -or $_.FullName -match '\\(node_modules|tests|test-data)\\' }
+          if ($forbidden) { throw "Application ZIP contains development or test content: $($forbidden[0].FullName)" }
+          Remove-Item $inspect -Recurse -Force
           Get-ChildItem release -File | Where-Object { $_.Name -like 'Dentiva-Pro-*' -and $_.Extension -in @('.exe', '.zip') } | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Set-Content "release\Dentiva-Pro-$version-checksums.txt"
           Get-FileHash $zip -Algorithm SHA256 | Format-List
 

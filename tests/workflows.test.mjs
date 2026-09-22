@@ -1,17 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ARRAY_COLLECTIONS,
+  appointmentsOverlap,
+  applyRestorePlan,
   buildBackupManifest,
+  buildRestorePlan,
   calculateInvoice,
   canAcceptPayment,
+  canonicalJson,
   detectPatientDuplicates,
+  paymentStatusFor,
   restoreCollection,
-  validateAttachmentFile
+  validateAttachmentFile,
+  validateMoney,
+  validateBackupPayload,
+  validateRelationships
 } from '../src/core.js';
 
 function makeRecordStore() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    dentalRecords: [],
+    treatments: [],
+    stockMovements: [],
+    staff: [],
+    referrals: [],
+    paymentAdjustments: [],
+    notifications: [],
+    followUpTasks: [],
     patients: [],
     appointments: [],
     visits: [],
@@ -83,7 +100,8 @@ test('inventory movements expose low stock and expiry inputs', () => {
 });
 
 test('attachments reject unsafe types and oversized files', () => {
-  assert.equal(validateAttachmentFile({ type: 'application/pdf', size: 1024 }).allowed, true);
+  assert.equal(validateAttachmentFile({ type: 'application/pdf', size: 1024, data: 'data:application/pdf;base64,AA==' }).allowed, true);
+  assert.equal(validateAttachmentFile({ type: 'application/pdf', size: 1024, data: 'javascript:alert(1)' }).allowed, false);
   assert.equal(validateAttachmentFile({ type: 'application/x-msdownload', size: 1024 }).allowed, false);
   assert.equal(validateAttachmentFile({ type: 'image/png', size: 7 * 1024 * 1024 }).allowed, false);
 });
@@ -92,9 +110,9 @@ test('backup manifest preserves modules, schema and record counts', () => {
   const store = makeRecordStore();
   store.patients.push({ id: 'p1' }, { id: 'p2' });
   store.visits.push({ id: 'v1' });
-  const manifest = buildBackupManifest(store, '1.0.0', ['patients', 'visits', 'payments']);
+  const manifest = buildBackupManifest(store, '1.1.0', ['patients', 'visits', 'payments']);
   assert.equal(manifest.product, 'Dentiva Pro');
-  assert.equal(manifest.schemaVersion, 1);
+  assert.equal(manifest.schemaVersion, 2);
   assert.deepEqual(manifest.recordCounts, { patients: 2, visits: 1, payments: 0 });
 });
 
@@ -114,4 +132,79 @@ test('large patient histories do not impose an application count limit', () => {
   const patients = Array.from({ length: 10000 }, (_, index) => ({ id: `p${index}`, patientCode: `PT-${index}` }));
   assert.equal(patients.length, 10000);
   assert.equal(patients.at(-1).patientCode, 'PT-9999');
+});
+
+
+test('refunds reduce invoice balance without mutating the original payment amount', () => {
+  const status = paymentStatusFor(1000, [{ id: 'pay1', amount: 1000, refundedAmount: 250, status: 'Partially Refunded' }]);
+  assert.deepEqual(status, { paid: 750, due: 250, status: 'Partially Paid' });
+  assert.equal(paymentStatusFor(1000, [{ amount: 1000, refundedAmount: 1000, status: 'Refunded' }]).status, 'Unpaid');
+});
+
+test('backup validation rejects malformed relationships and accepts a complete store', () => {
+  const store = makeRecordStore();
+  store.dentalRecords = [];
+  store.paymentAdjustments = [];
+  store.patients.push({ id: 'p1', patientCode: 'PT-1' });
+  store.invoices.push({ id: 'inv1', invoiceNumber: 'INV-1', patientId: 'p1', total: 100 });
+  store.payments.push({ id: 'pay1', invoiceId: 'inv1', patientId: 'p1', amount: 100 });
+  const valid = validateBackupPayload(store, ARRAY_COLLECTIONS);
+  assert.equal(valid.valid, true);
+  const malformed = validateBackupPayload({ ...store, payments: [{ id: 'pay2', invoiceId: 'missing', patientId: 'p1', amount: 5 }] }, ARRAY_COLLECTIONS);
+  assert.equal(malformed.valid, false);
+  assert.match(malformed.errors.join(' '), /missing invoice/);
+});
+
+test('patient-scoped restore keeps dependent records and leaves unrelated modules alone', () => {
+  const local = { ...makeRecordStore(), patients: [{ id: 'local', patientCode: 'PT-L' }], visits: [{ id: 'old', patientId: 'local' }] };
+  const incoming = { ...makeRecordStore(), patients: [{ id: 'p1', patientCode: 'PT-1' }, { id: 'p2', patientCode: 'PT-2' }], visits: [{ id: 'v1', patientId: 'p1' }, { id: 'v2', patientId: 'p2' }], expenses: [{ id: 'e1', amount: 10 }] };
+  const plan = buildRestorePlan(local, incoming, { modules: ['patients', 'clinical'], strategy: 'Keep Existing', patientIds: ['p1'] });
+  const applied = applyRestorePlan(local, plan);
+  assert.deepEqual(applied.state.patients.map((p) => p.id), ['local', 'p1']);
+  assert.deepEqual(applied.state.visits.map((v) => v.id), ['old', 'v1']);
+  assert.equal(applied.state.expenses.length, 0);
+});
+
+test('create-new-copy restore remaps patient and invoice relationships', () => {
+  const local = { ...makeRecordStore(), patients: [{ id: 'p1', patientCode: 'PT-1' }], invoices: [{ id: 'i1', invoiceNumber: 'INV-1', patientId: 'p1' }], payments: [{ id: 'pay1', invoiceId: 'i1', patientId: 'p1' }] };
+  const incoming = { ...makeRecordStore(), patients: [{ id: 'p1', patientCode: 'PT-1-B' }], invoices: [{ id: 'i1', invoiceNumber: 'INV-1-B', patientId: 'p1' }], payments: [{ id: 'pay1', invoiceId: 'i1', patientId: 'p1' }] };
+  const plan = buildRestorePlan(local, incoming, { modules: ['patients', 'finance'], strategy: 'Create New Copy' });
+  const applied = applyRestorePlan(local, plan);
+  const copiedPatient = applied.state.patients.find((p) => p.patientCode === 'PT-1-B');
+  const copiedInvoice = applied.state.invoices.find((i) => i.invoiceNumber === 'INV-1-B');
+  const copiedPayment = applied.state.payments.find((payment) => payment.id !== 'pay1');
+  assert.ok(copiedPatient);
+  assert.equal(copiedInvoice.patientId, copiedPatient.id);
+  assert.equal(copiedPayment.invoiceId, copiedInvoice.id);
+  assert.equal(copiedPayment.patientId, copiedPatient.id);
+});
+
+test('relationship validator catches orphaned payment adjustments', () => {
+  const store = makeRecordStore();
+  store.paymentAdjustments = [{ id: 'adj1', paymentId: 'missing', amount: 10 }];
+  assert.match(validateRelationships(store).join(' '), /paymentAdjustments:adj1 references missing payment/);
+});
+
+
+test('appointment resource overlap catches chair and dentist collisions but permits separate resources', () => {
+  const existing = { id: 'a1', date: '2026-09-22', time: '10:00', duration: 60, chair: 'Chair 1', dentistId: 'd1', status: 'Scheduled' };
+  assert.equal(appointmentsOverlap({ id: 'a2', date: '2026-09-22', time: '10:30', duration: 30, chair: 'Chair 1', dentistId: 'd2' }, existing), true);
+  assert.equal(appointmentsOverlap({ id: 'a3', date: '2026-09-22', time: '10:30', duration: 30, chair: 'Chair 2', dentistId: 'd1' }, existing), true);
+  assert.equal(appointmentsOverlap({ id: 'a4', date: '2026-09-22', time: '10:30', duration: 30, chair: 'Chair 2', dentistId: 'd2' }, existing), false);
+  assert.equal(appointmentsOverlap({ id: 'a5', date: '2026-09-22', time: '11:00', duration: 30, chair: 'Chair 1', dentistId: 'd2' }, existing), false);
+});
+
+
+test('canonical backup serialization is stable regardless of object insertion order', () => {
+  assert.equal(canonicalJson({ b: 2, a: 1 }), canonicalJson({ a: 1, b: 2 }));
+  assert.equal(canonicalJson({ nested: { z: true, a: false } }), '{"nested":{"a":false,"z":true}}');
+});
+
+
+test('money validation rejects negative, empty and over-precise values', () => {
+  assert.equal(validateMoney('0'), true);
+  assert.equal(validateMoney('1250.50'), true);
+  assert.equal(validateMoney('1250.501'), false);
+  assert.equal(validateMoney('-1'), false);
+  assert.equal(validateMoney('', { allowZero: false }), false);
 });

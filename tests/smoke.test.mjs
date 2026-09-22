@@ -11,7 +11,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 
 test('release identity and desktop target are configured', () => {
   assert.equal(pkg.name, 'dentiva-pro');
-  assert.equal(pkg.version, '1.0.0');
+  assert.equal(pkg.version, '1.1.0');
   assert.match(JSON.stringify(pkg.build), /Windows-x64/);
   assert.match(source, /Md\. Shohan Khan|helloiamshohan@gmail\.com/);
 });
@@ -20,7 +20,7 @@ test('local schema contains the core relational collections', () => {
   for (const collection of ['patients', 'appointments', 'visits', 'prescriptions', 'dentalRecords', 'invoices', 'payments', 'inventory', 'suppliers', 'staff', 'expenses', 'attachments', 'audit']) {
     assert.match(source, new RegExp(`${collection}: \\[\\]`), `${collection} collection missing`);
   }
-  assert.match(source, /schemaVersion: 1/);
+  assert.match(source, /CURRENT_SCHEMA_VERSION/);
   assert.match(source, /buildBackupManifest/);
 });
 
@@ -31,7 +31,7 @@ test('financial source-of-truth formula is present and deterministic', () => {
   const total = subtotal - discount + tax;
   assert.equal(total, 3780);
   assert.match(source, /function invoiceTotals/);
-  assert.match(source, /const due = Math\.max\(0, totals\.total - paid\)/);
+  assert.match(source, /paymentStatusFor/);
   assert.match(source, /canAcceptPayment/);
 });
 

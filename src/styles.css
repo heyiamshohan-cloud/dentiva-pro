@@ -369,3 +369,70 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .security-control-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
 .security-modal-icon { width: 52px; height: 52px; display: grid; place-items: center; margin: 0 auto 17px; border-radius: 15px; color: var(--teal); background: var(--teal-soft); }
 @media (max-width: 520px) { .lock-screen { padding: 14px; }.lock-card { padding: 27px 20px; }.security-control { align-items: flex-start; flex-direction: column; }.security-control-actions { justify-content: flex-start; } }
+
+/* Audit and restore controls */
+.table-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.table-pager .btn { min-height: 30px; }
+.table-pager .btn:disabled { opacity: .4; cursor: not-allowed; }
+.restore-preview { margin-top: 16px; border: 1px solid #d5e9e5; border-radius: 10px; background: #fbfefd; padding: 14px; }
+.restore-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.restore-preview-head strong, .restore-preview-head small { display: block; }
+.restore-preview-head strong { margin-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.restore-preview-head small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.restore-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 14px 0; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.restore-summary > div { padding: 9px; background: #fff; }
+.restore-summary strong, .restore-summary span { display: block; }
+.restore-summary strong { font-size: 15px; }
+.restore-summary span { color: var(--muted); font-size: 9px; margin-top: 2px; }
+.restore-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; }
+.restore-options > label:first-child { grid-column: 1 / -1; }
+.restore-options label:not(.check-line) { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 9px; }
+.restore-options select { border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 7px; color: var(--ink-2); font-size: 10px; }
+.check-line { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 10px; }
+.check-line input { accent-color: var(--teal); }
+.restore-warnings { padding: 8px 10px; border-radius: 7px; background: var(--amber-soft); color: var(--amber); margin-bottom: 11px; }
+.restore-warnings p { display: flex; gap: 6px; margin: 3px 0; font-size: 9px; line-height: 1.45; }
+.inline-error { padding: 8px 10px; border-radius: 7px; background: var(--red-soft); color: var(--red); font-size: 9px; line-height: 1.45; }
+.restore-patient-picker { margin: 13px 0; border-top: 1px solid var(--line); padding-top: 11px; }
+.restore-patient-picker summary { cursor: pointer; color: var(--teal-dark); font-size: 10px; font-weight: 600; }
+.restore-patient-actions { display: flex; gap: 10px; margin: 9px 0; }
+.restore-patient-list { max-height: 180px; overflow: auto; display: grid; gap: 7px; padding: 8px; background: #fff; border: 1px solid var(--line); border-radius: 7px; }
+.field-hint { display: block; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.adjustment-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #d5e9e5; border-radius: 8px; background: var(--teal-pale); margin-bottom: 15px; }
+.adjustment-summary strong { color: var(--teal-dark); font: 700 18px 'Segoe UI'; }
+.adjustment-summary span { color: var(--muted); font-size: 9px; text-align: right; }
+.attachment-preview-stage { min-height: 240px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: #f8fbfb; overflow: hidden; }
+.attachment-preview-image { display: block; max-width: 100%; max-height: 58vh; object-fit: contain; }
+.attachment-preview-frame { display: block; width: 100%; height: min(60vh, 620px); border: 0; background: #fff; }
+.attachment-no-preview { padding: 32px; text-align: center; color: var(--muted); }
+.attachment-no-preview .icon { color: var(--teal); margin-bottom: 10px; }
+.attachment-no-preview strong, .attachment-no-preview p { display: block; }
+.attachment-no-preview strong { color: var(--ink-2); font-size: 11px; }
+.attachment-no-preview p { max-width: 280px; margin: 6px auto 0; font-size: 10px; line-height: 1.5; }
+@media (max-width: 760px) {
+  .table-pager { align-items: stretch; flex-direction: column; text-align: center; }
+  .table-pager .btn { justify-content: center; }
+  .restore-options { grid-template-columns: 1fr; }
+  .restore-options > label:first-child { grid-column: auto; }
+  .adjustment-summary { align-items: flex-start; flex-direction: column; }
+  .adjustment-summary span { text-align: left; }
+}
+@media (max-width: 760px) {
+  .filter-drawer.open { align-items: stretch; flex-wrap: wrap; gap: 8px; }
+  .filter-drawer label { flex: 1 1 145px; align-items: stretch; flex-direction: column; gap: 4px; }
+  .filter-drawer select, .filter-drawer input { width: 100%; }
+  .filter-drawer > span { flex-basis: 100%; }
+}
+.calculated-status { min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas-soft); }
+.calculated-status small { color: var(--muted); font-size: 9px; }
+.audit-list { max-height: min(55vh, 500px); overflow: auto; display: grid; gap: 1px; border: 1px solid var(--line); border-radius: 8px; background: var(--line); }
+.audit-row { display: flex; gap: 9px; padding: 10px; background: #fff; }
+.audit-row-icon { width: 27px; height: 27px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 7px; background: var(--teal-soft); color: var(--teal); }
+.audit-row > div { min-width: 0; }
+.audit-row strong, .audit-row small, .audit-row p { display: block; }
+.audit-row strong { font-size: 10px; }
+.audit-row small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+.audit-row p { margin: 4px 0 0; color: var(--ink-2); font-size: 9px; overflow-wrap: anywhere; }
+
+.schema-warning .lock-icon.warning { background: var(--amber-soft); color: var(--amber); }
+.schema-actions { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 20px; }

@@ -1,6 +1,6 @@
 # Dentiva Pro release checklist
 
-This is the implementation audit for the 1.0.0 source release.
+This is the implementation audit for the 1.1.0 audited release.
 
 ## Delivered in the offline workspace
 
@@ -21,33 +21,34 @@ This is the implementation audit for the 1.0.0 source release.
 - [x] Referrals with reason, specialty, response and follow-up notes
 - [x] Invoices, discounts, configurable tax rate, due calculation and payment statuses
 - [x] Multiple payment methods including configurable Bangladesh MFS names
-- [x] Partial payment validation and traceable receipt records
-- [x] Inventory, suppliers, stock movements, reorder thresholds and expiry warnings
+- [x] Partial payment validation, auditable refund/reversal adjustments and traceable receipt records
+- [x] Inventory, suppliers, purchase/usage/stock-out/expiry/damage/correction movements, reorder thresholds and expiry warnings
 - [x] Staff directory and role concepts
 - [x] Separate accounting workspace with income, expense and net-result calculations
 - [x] Reports with date ranges, preview-ready tables, print and UTF-8 CSV export
-- [x] Structured JSON backup manifest with record counts and schema version
-- [x] Import validation preview, selective module selection and conflict strategies
+- [x] Structured JSON backup manifest with record counts, schema version and SHA-256 payload hash
+- [x] Import validation preview, module/patient selection, conflict strategies, relationship-safe ID remapping and atomic rollback
 - [x] Print layouts for queue, billing, invoices, receipts, prescriptions, patients, charts and reports
 - [x] English-first terminology with Bengali locale labels for core navigation and common actions
 - [x] Offline service-worker shell for browser deployments and Electron-safe local renderer
 - [x] Hardened Electron shell configuration: context isolation, sandbox and no Node integration
 - [x] Windows x64 portable and per-user NSIS packaging configuration with branded ICO assets
+- [x] A4, Letter and 80 mm receipt print profiles plus hardened desktop PDF export
 - [x] GitHub Actions Windows runner workflow that builds, verifies and uploads the EXE, installer and final application ZIP
 - [x] README, user guide, build guide, changelog and automated smoke checks
 
 ## Verified Windows release
 
-The local Linux sandbox cannot execute the Windows binary, but the pinned GitHub Actions Windows x64 runner successfully built and verified the release. The workflow checked PE `MZ` headers for both the portable executable and NSIS installer, assembled the final application ZIP, generated SHA-256 checksums and published all assets to the `v1.0.0` GitHub release.
+Final status is recorded in `docs/FINAL_AUDIT_REPORT.md` after the Windows x64 workflow completes. Browser/desktop and visual verification limitations are not hidden in the scorecard. The release must remain separate from `v1.0.0` and must include the PE-verified portable EXE, installer, application ZIP and checksum file.
 
-- Portable executable: `Dentiva-Pro-1.0.0-Windows-x64.exe`
-- Installer: `Dentiva-Pro-1.0.0-Windows-x64-Setup.exe`
-- Application ZIP: `Dentiva-Pro-1.0.0-Windows-x64.zip`
+- Portable executable: `Dentiva-Pro-1.1.0-Windows-x64.exe`
+- Installer: `Dentiva-Pro-1.1.0-Windows-x64-Setup.exe`
+- Application ZIP: `Dentiva-Pro-1.1.0-Windows-x64.zip`
 
 The workflow also ran the renderer build and test suite on Windows before packaging.
 
 ## Deliberate product boundaries
 
-- The current release is a local single-profile workspace. The data collections and resource fields are structured for future SQLite/network adapters, but network multi-user sync is not enabled.
+- The current release is a local single-profile workspace. The Electron store is durable JSON rather than a multi-user database; staff roles are descriptive metadata and do not provide per-user authorization or network sync.
 - Printing uses the native/browser print dialog and Save as PDF rather than shipping a proprietary printer driver.
 - There is no automatic medical diagnosis, automated prescribing, external SMS/WhatsApp gateway or cloud telemetry.

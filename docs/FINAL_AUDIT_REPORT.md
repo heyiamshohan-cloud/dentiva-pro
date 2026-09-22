@@ -136,7 +136,7 @@ The sandbox could not complete a direct CDN download of the large release assets
 - Checksum workflow hardening commit: `f43551f647e9218ad222c776ad6834d59923f7eb` (`ci: verify release checksums before publishing`).
 - `package.json` and `package-lock.json`: version `1.1.0`.
 - Renderer `APP_VERSION`: `1.1.0`.
-- Remote branch `arena/01a0c66a-dentiva-pro` points to the final report commit `a1b08cb1a7ccdc131aa84a7af3f2b34110ba70f8`.
+- Remote branch `arena/01a0c66a-dentiva-pro` points to the final report commit `39db07f`.
 - `v1.0.0` remains at its existing commit; `v1.1.0` is a separate tag/release pointing to the new 1.1.0 implementation commit.
 - Release URL: <https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.1.0>
 - Release assets are not committed to Git; they are published through the GitHub Release and kept out of the source checkout by repository ignore rules.

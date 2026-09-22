@@ -2,7 +2,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$PortablePath,
   [Parameter(Mandatory = $true)][string]$InstallerPath,
-  [int]$StartupSeconds = 8
+  [int]$StartupSeconds = 25
 )
 
 $ErrorActionPreference = 'Stop'

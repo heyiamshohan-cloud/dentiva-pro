@@ -1572,6 +1572,7 @@ function modalAppointmentDetail(data = {}) {
     </div>
     <div class="queue-card-actions">
       ${['Checked In', 'Waiting', 'In Treatment', 'Completed', 'No Show'].map((status) => `<button class="chip-button ${a.status === status ? 'selected' : ''}" data-action="queue-status" data-id="${attr(a.id)}" data-status="${attr(status)}">${esc(status)}</button>`).join('')}
+      ${can('visits.create') && !['Completed', 'Cancelled', 'No Show'].includes(a.status) ? `<button class="chip-button primary" data-action="start-visit" data-id="${attr(a.id)}">${icon('clipboard', 13)} Start visit</button>` : ''}
       ${can('appointments.cancel') ? `<button class="chip-button danger" data-action="cancel-appointment" data-id="${attr(a.id)}">Cancel</button>` : ''}
       ${can('appointments.edit') ? `<button class="chip-button" data-action="open-appointment" data-id="${attr(a.id)}">Edit</button>` : ''}
       <button class="chip-button" data-action="print-appointment" data-id="${attr(a.id)}">Print slip</button>
@@ -1583,7 +1584,7 @@ function modalAppointmentDetail(data = {}) {
 function modalVisit(data = {}) {
   const v = data.visit || {};
   const editing = Boolean(v.id);
-  return `<form data-form="visit"><input type="hidden" name="id" value="${attr(v.id || '')}">${modalHead('CLINICAL RECORD', editing ? 'Edit visit' : 'Record visit', 'What happened, what was found, what was done — and when to follow up.')}
+  return `<form data-form="visit"><input type="hidden" name="id" value="${attr(v.id || '')}"><input type="hidden" name="appointmentId" value="${attr(v.appointmentId || '')}">${modalHead('CLINICAL RECORD', editing ? 'Edit visit' : 'Record visit', 'What happened, what was found, what was done — and when to follow up.')}
     <div class="form-grid two">
       ${selectField('Patient', 'patientId', patientOptions(v.patientId || ui.patientId), v.patientId || ui.patientId, 'required')}
       ${field('Date', 'date', v.date || today(), 'date', 'required')}
@@ -2331,6 +2332,12 @@ async function handleClick(event) {
       const appointment = (await q('record', { collection: 'appointments', id })).record;
       ui.modal = { type: 'appointmentDetail', data: { appointment } };
       return render();
+    }
+    case 'start-visit': {
+      const a = (await q('record', { collection: 'appointments', id })).record;
+      if (!a) return;
+      if (['Scheduled', 'Checked In', 'Waiting'].includes(a.status)) await op('appointment.setStatus', { id: a.id, status: 'In Treatment' });
+      return openModal('visit', { visit: { patientId: a.patientId, appointmentId: a.id, date: today(), reason: a.reason || '', procedures: a.treatment || '', dentistId: a.dentistId || '', room: a.room || '', chair: a.chair || '' } });
     }
     case 'queue-status': {
       const result = await op('appointment.setStatus', { id, status: target.dataset.status });

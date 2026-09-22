@@ -228,6 +228,16 @@ function buildInvoice(repo, payload, ctx, existing = null) {
 // Operation registry
 // ---------------------------------------------------------------------------
 
+function syncAppointmentProgress(repo, appointmentId, ctx, audit) {
+  if (!appointmentId) return;
+  const appointment = repo.get('appointments', appointmentId);
+  if (!appointment) return;
+  if (['Scheduled', 'Checked In', 'Waiting', 'In Treatment'].includes(appointment.status)) {
+    repo.update('appointments', { ...appointment, status: 'Completed', completedAt: ctx.now(), updatedAt: ctx.now() });
+    audit.push({ action: 'Appointment completed', entity: 'Appointment', entityId: appointment.id, summary: `${appointment.appointmentCode || appointment.reason || 'Appointment'} · closed by clinical visit` });
+  }
+}
+
 export const OPS = {
   // ------------------------------------------------------------------ settings
   'settings.update': {
@@ -503,6 +513,8 @@ export const OPS = {
       const status = str(payload.status);
       if (!APPOINTMENT_STATUSES.includes(status)) return { ok: false, error: 'Unknown appointment status.' };
       const record = { ...existing, status, updatedAt: ctx.now() };
+      if (status === 'In Treatment' && !record.startedAt) record.startedAt = ctx.now();
+      if (status === 'Completed' && !record.completedAt) record.completedAt = ctx.now();
       if (['Checked In', 'Waiting'].includes(status) && !record.checkedInAt) {
         record.checkedInAt = ctx.now();
         if (!record.serial) {
@@ -569,6 +581,7 @@ export const OPS = {
       }
       const audit = [{ action: 'Visit created', entity: 'Visit', entityId: record.id, summary: `${patient?.fullName || record.patientId} · ${record.date} · ${record.reason}` }];
       // Automation allowed by §85: a due follow-up date becomes an actionable task.
+      syncAppointmentProgress(repo, record.appointmentId, ctx, audit);
       if (record.followUpDate) {
         const followUp = {
           id: makeId('followup'), patientId: record.patientId, visitId: record.id, appointmentId: '',

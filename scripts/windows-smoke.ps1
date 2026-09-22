@@ -82,6 +82,13 @@ try {
   if ($uninstall.ExitCode -ne 0) { throw "Uninstaller returned $($uninstall.ExitCode)" }
   Write-Host 'Windows packaged launch/restart/install/uninstall smoke passed.'
 }
+catch {
+  $diagnostic = ($_.Exception.ToString() -replace "\r?\n", ' | ')
+  if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
+  Write-Host "::error title=Windows smoke failure::$diagnostic"
+  if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows smoke failure`n`n$diagnostic" }
+  throw
+}
 finally {
   $evidenceDir = if ($env:GITHUB_WORKSPACE) { Join-Path $env:GITHUB_WORKSPACE 'windows-smoke-evidence' } else { Join-Path (Get-Location) 'windows-smoke-evidence' }
   New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null

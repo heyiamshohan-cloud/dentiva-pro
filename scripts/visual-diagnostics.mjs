@@ -18,7 +18,9 @@ function walk(suites) {
   for (const suite of suites || []) {
     for (const spec of suite.specs || []) {
       for (const t of spec.tests || []) {
-        flat.push({ file: (spec.file || '').split('\\').pop(), title: spec.title, status: t.status, error: t.errors?.[0]?.message || '' });
+        const fromErrors = (t.errors || []).map((e) => e?.message || '').join(' | ');
+        const fromResults = (t.results || []).map((r) => r?.error?.message || '').join(' | ');
+        flat.push({ file: (spec.file || '').split('\\').pop(), title: spec.title, status: t.status, error: fromErrors || fromResults || '' });
       }
     }
     if (suite.suites?.length) walk(suite.suites);

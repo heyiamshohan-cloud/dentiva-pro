@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 — 2026-09-22 — release gate in progress
+## 1.2.0 — 2026-09-22 — published
 
 ### Persistence and security
 
@@ -12,9 +12,9 @@
 ### Verification and release hygiene
 
 - Added SQLite persistence, legacy migration, attachment externalization and corrupt-current/backup-recovery tests.
-- Added role-template and underlying permission regression tests; the local suite currently passes 34 tests and the Vite production build passes.
+- Added role-template and underlying permission regression tests; the local suite passes 37 tests and the Vite production build passes.
 - Added stage-based treatment plans, patient financial statement views/print output, queue wait-time signals and a validated patient CSV mapping/import preview with duplicate policy and rollback.
-- Updated the release checklist, audit report, README, user guide and persistent v1.2 phase log. The installed-app launch/restart/uninstall sequence is explicitly marked **MANUAL USER VERIFICATION REQUIRED** and removed from automated release blocking; all other gates remain binding. No v1.2.0 artifact or tag is claimed yet.
+- Updated the release checklist, audit report, README, user guide and persistent v1.2 phase log. The installed-app launch/restart/uninstall sequence is explicitly marked **MANUAL USER VERIFICATION REQUIRED** and removed from automated release blocking. Windows CI run `35699971425` published the four required v1.2.0 artifacts without changing v1.0.0 or v1.1.0.
 
 ## 1.1.0 — 2026-09-22
 

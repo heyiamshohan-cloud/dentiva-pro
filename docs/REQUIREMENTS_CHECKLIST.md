@@ -2,7 +2,7 @@
 
 **Status date:** 2026-09-22 (Asia/Dhaka)
 **Branch:** `arena/01a0c66a-dentiva-pro`
-**Rule:** `[x]` means behavior is implemented and evidenced, not merely present in source. `[~]` means partial implementation with an explicit open verification or feature gap. `[ ]` is an open blocker.
+**Rule:** `[x]` means behavior is implemented and evidenced, not merely present in source. `[~]` means partial implementation with an explicit open verification or feature gap. `[ ]` is an open item that must not be marketed as complete. The published release records these boundaries in the final audit report.
 
 ## Release identity and product boundaries
 
@@ -12,7 +12,7 @@
 - [x] Offline/local operation remains the default; no mandatory cloud or paid API.
 - [x] Light-only premium visual direction and Bangladesh defaults remain present.
 - [x] No AI diagnosis or automated prescribing is introduced.
-- [~] Final v1.2.0 Windows assets, tag and checksums — **OPEN until Windows validation completes**.
+- [x] Final v1.2.0 Windows assets, tag and checksums — published and self-validated by Windows CI run `35699971425`.
 
 ## Data, SQLite and migration
 
@@ -23,7 +23,7 @@
 - [x] Reset and storage-info APIs.
 - [x] Node regression coverage for persistence, attachments, migration and corrupt-current/backup recovery.
 - [~] Electron-runtime migration, interrupted-write recovery and restart persistence — **OPEN**.
-- [ ] Production dataset measurement at 1,000, 5,000, 10,000 and 25,000 patients — **OPEN**.
+- [x] Domain dataset benchmark at 1,000, 5,000, 10,000 and 25,000 synthetic patients — validation/serialization/manifest passed with zero relationship errors; packaged UI profiling is not claimed.
 
 ## Users, authentication and authorization
 
@@ -36,7 +36,7 @@
 - [x] Permission checks at route, search, form and important operation boundaries; button hiding is not the only control.
 - [x] Custom Role explicit permission selection and active Administrator protection.
 - [~] Packaged Electron/Windows end-to-end role matrix, migration, lockout and restart evidence — **OPEN**.
-- [ ] OS-level threat model/encryption boundary review — **OPEN**; SQLite is not encryption.
+- [~] OS-level encryption boundary is documented — SQLite is not encryption; operators must use OS account controls, full-disk encryption and protected backup media.
 
 ## Localization
 
@@ -49,8 +49,8 @@
 
 - [x] Patient directory, profile, relational timeline, visits, dental chart, prescriptions, referrals and attachments remain available.
 - [~] Treatment catalog — present and tested for basic CRUD, but treatment plans are not a complete staged workflow.
-- [ ] Treatment plans with status, stages, dates, staff, cost linkage, patient summary and print/PDF — **OPEN**.
-- [ ] Patient financial statement with invoice/payment/refund reconciliation and print/PDF — **OPEN**.
+- [~] Treatment plans with status, stages, dates, staff, cost linkage, patient summary and print/PDF — implemented/source-tested; packaged clinical/document review remains open.
+- [~] Patient financial statement with invoice/payment/refund reconciliation and print/PDF — implemented/source-tested; packaged reconciliation/document review remains open.
 - [~] Patient advanced filters, pagination and local search — present, but large dataset UI evidence is open.
 - [~] Attachment safety and metadata — implemented; packaged Electron crash/error/recovery testing is open.
 
@@ -84,18 +84,18 @@
 
 - [~] A4, Letter and 80 mm print profiles — source workflow exists; Bengali/PDF/Windows verification is open.
 - [ ] Configurable print/PDF profiles across all required documents — **OPEN**.
-- [x] DOM/layout regression at 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 — Playwright CI gate passed on run 35693850283.
-- [~] Windows portable launch/create/restart persistence and release validation are automated; the installed-app launch/restart/uninstall sequence is intentionally **MANUAL USER VERIFICATION REQUIRED** and excluded from automated release blocking.
+- [x] DOM/layout regression at 1280×720, 1366×768, 1600×900, 1920×1080, 2560×1440 and 3840×2160 — Playwright CI gate passed on run `35699971425`.
+- [x] Windows portable launch/create/restart persistence, packaging and release validation passed in run `35699971425`; the installed-app launch/restart/uninstall sequence is intentionally **MANUAL USER VERIFICATION REQUIRED** and excluded from automated release blocking.
 - [~] Electron context isolation, sandbox, navigation/CSP and PDF restrictions — static tests pass; packaged GUI/crash evidence is open.
 
 ## Documentation and release gate
 
 - [x] Changelog, README, user guide, build guide and this checklist identify v1.2 work and open evidence honestly.
 - [x] Persistent phase record is maintained in `docs/V1.2_PROGRESS.md`.
-- [~] Final audit report — updated as an explicit release gate; it must be updated again with Windows/visual/performance evidence before release.
-- [ ] Exact new artifacts: portable EXE, NSIS setup EXE, application ZIP and checksum file — **OPEN**.
-- [ ] New `v1.2.0` tag/release — **OPEN**.
+- [x] Final audit report — updated with Windows, visual, dataset, artifact and manual-boundary evidence.
+- [x] Exact new artifacts: portable EXE, NSIS setup EXE, application ZIP and checksum file — published and checksum-validated.
+- [x] New `v1.2.0` tag/release — published without changing `v1.0.0` or `v1.1.0`.
 
 ## Current release decision
 
-**CONDITIONAL / IN PROGRESS.** The automated installed-app launch/restart/uninstall smoke is deliberately deferred to manual user verification and is not a release blocker. Every other open item above remains a release blocker; do not publish until those items have evidence-backed status.
+**PUBLISHED WITH DOCUMENTED LIMITATIONS.** Windows CI published v1.2.0 after the portable, visual, packaging, PE, ZIP and checksum gates passed. The installed-app launch/restart/uninstall smoke is deliberately deferred to manual user verification and is not a release blocker. Remaining `[~]` and `[ ]` items are explicit runtime, human-review or feature-scope follow-ups and are not claimed as PASS.

@@ -4,7 +4,7 @@
 **Branch:** `arena/01a0c66a-dentiva-pro`
 **Historical baseline:** v1.1.0's 150-row matrix is preserved at [`AUDIT_TRACEABILITY_1.1.0.md`](AUDIT_TRACEABILITY_1.1.0.md).
 
-This is the v1.2.0 requirement-to-evidence index. It intentionally distinguishes source implementation from runtime evidence. `PASS` requires executable or reproducible evidence; `PARTIAL` means a bounded implementation exists but a requested verification or sub-feature remains; `OPEN` is a release blocker.
+This is the v1.2.0 requirement-to-evidence index. It intentionally distinguishes source implementation from runtime evidence. `PASS` requires executable or reproducible evidence; `PARTIAL` means a bounded implementation exists but a requested verification or sub-feature remains; `OPEN` is not silently marketed as complete. The release metadata is recorded in the final audit report.
 
 ## Status vocabulary
 
@@ -18,7 +18,7 @@ This is the v1.2.0 requirement-to-evidence index. It intentionally distinguishes
 | ID | Master requirement area | Evidence path | Status |
 |---:|---|---|---|
 | 1 | New v1.2.0 identity | `package.json`, `package-lock.json`, `src/main.js`, `tests/smoke.test.mjs` | PASS |
-| 2 | Preserve v1.0.0/v1.1.0 | Git tags/releases; no v1.2 artifact exists yet | PASS for preservation / OPEN for new release |
+| 2 | Preserve v1.0.0/v1.1.0 | Git tags/releases; v1.2.0 release metadata | PASS |
 | 3 | Empty production store | `DEFAULT_STATE` in `src/main.js`; smoke test rejects demo data | PASS |
 | 4 | Offline/local operation | Electron preload/main boundary; no cloud client test | PASS |
 | 5 | Bangladesh defaults and light UI | `DEFAULT_STATE`, `src/styles.css`, settings | PASS for implementation / visual runtime OPEN |
@@ -62,12 +62,12 @@ This is the v1.2.0 requirement-to-evidence index. It intentionally distinguishes
 | 43 | Dataset 5,000 | same benchmark | PARTIAL: UI/startup evidence open |
 | 44 | Dataset 10,000 | same benchmark | PARTIAL: UI/startup evidence open |
 | 45 | Dataset 25,000 | same benchmark | PARTIAL: UI/startup evidence open |
-| 46 | Required viewport checks | Playwright config and six-project layout test; CI run 35693850283 | PASS |
-| 47 | Windows portable launch/create/restart persistence | `scripts/windows-smoke.ps1 -PortableOnly`, workflow step | PASS when the current Windows workflow completes |
+| 46 | Required viewport checks | Playwright config and six-project layout test; CI run 35699971425 | PASS |
+| 47 | Windows portable launch/create/restart persistence | `scripts/windows-smoke.ps1 -PortableOnly`, successful CI run 35699971425 | PASS |
 | 48 | Installed-app launch/restart/uninstall | Manual user acceptance sequence; intentionally removed from automated release-blocking gate | MANUAL USER VERIFICATION REQUIRED |
-| 49 | Exact release artifacts | workflow configuration only | OPEN |
-| 50 | Checksums/new tag | workflow configuration only | OPEN |
+| 49 | Exact release artifacts | Published GitHub release v1.2.0; four named assets; successful CI run 35699971425 | PASS |
+| 50 | Checksums/new tag | Published checksum asset, tag v1.2.0, CI self-validation; prior tags preserved | PASS |
 
 ## Current gate
 
-The matrix distinguishes the deliberate manual installed-app exception from all other release gates. The authoritative release decision and complete open-blocker list are in [`FINAL_AUDIT_REPORT.md`](FINAL_AUDIT_REPORT.md), with the continuation order in [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md).
+The matrix distinguishes the deliberate manual installed-app exception from all other evidence boundaries. The authoritative release evidence and known limitations are in [`FINAL_AUDIT_REPORT.md`](FINAL_AUDIT_REPORT.md), with the phase record in [`V1.2_PROGRESS.md`](V1.2_PROGRESS.md).

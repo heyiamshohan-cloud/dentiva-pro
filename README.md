@@ -1,12 +1,12 @@
 # Dentiva Pro
 
-**Professional Dental Practice Management · v1.2.0 release gate**
+**Professional Dental Practice Management · v1.2.0**
 
 Dentiva Pro is an offline-first dental practice workspace for clinics in Bangladesh. It is designed around a calm daily workflow: register a patient, book and queue an appointment, capture the clinical record, manage the dental chart, prescribe, bill, record payment, track inventory and protect local data with verified backups.
 
 This repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records.
 
-> **Release status:** v1.2.0 implementation is in progress. The automated installed-app launch/restart/uninstall smoke is intentionally deferred to manual user verification; portable persistence, visual, packaging, security, Bengali, data and feature gates remain release-blocking. v1.0.0 and v1.1.0 are preserved. See [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md) and [`docs/V1.2_PROGRESS.md`](docs/V1.2_PROGRESS.md).
+> **Release status:** v1.2.0 is published. The portable, visual, packaging, PE, archive and checksum gates passed in Windows CI; the installed-app launch/restart/uninstall smoke was intentionally excluded from automated release gating and remains **MANUAL USER VERIFICATION REQUIRED**. v1.0.0 and v1.1.0 are preserved. See [`docs/FINAL_AUDIT_REPORT.md`](docs/FINAL_AUDIT_REPORT.md) and [`docs/V1.2_PROGRESS.md`](docs/V1.2_PROGRESS.md).
 
 ## Included modules
 
@@ -64,7 +64,7 @@ Run the Windows target on a Windows x64 machine with the Electron binary availab
 npm run dist:win
 ```
 
-The Windows release workflow is designed to produce a new v1.2.0 portable executable, an assisted NSIS installer (per-user capable; machine scope is selected by default for current Windows compatibility), an application-only ZIP and a SHA-256 checksum file after tests, packaging and validation pass. It runs a blocking portable create/restart persistence smoke; the installed-app launch/restart/uninstall sequence is intentionally reserved for manual user verification. Current v1.2.0 artifacts are not yet published.
+The Windows release workflow is designed to produce a new v1.2.0 portable executable, an assisted NSIS installer (per-user capable; machine scope is selected by default for current Windows compatibility), an application-only ZIP and a SHA-256 checksum file after tests, packaging and validation pass. It runs a blocking portable create/restart persistence smoke; the installed-app launch/restart/uninstall sequence is intentionally reserved for manual user verification. The v1.2.0 artifacts are published at [GitHub Releases](https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.2.0).
 
 ## Data handling and backup
 
@@ -74,7 +74,7 @@ Keep a verified backup in a trusted location. Attachments are limited to 6 MB ea
 
 ## Printing and reports
 
-Documents use a branded print layout and the operating-system print dialog. Settings support A4, Letter and 80 mm receipt profiles; reports can use the hardened Electron HTML-to-PDF path when running in the desktop app. A Windows printer can be selected, or the document can be saved as PDF. Bengali output and all requested print/PDF surfaces remain part of the v1.2 release gate until reviewed on runtime. The installed-app launch/restart/uninstall smoke is the sole explicitly deferred automated sequence and remains manual user verification.
+Documents use a branded print layout and the operating-system print dialog. Settings support A4, Letter and 80 mm receipt profiles; reports can use the hardened Electron HTML-to-PDF path when running in the desktop app. A Windows printer can be selected, or the document can be saved as PDF. Bengali output and all requested print/PDF surfaces retain the documented human-review boundary. The installed-app launch/restart/uninstall smoke is the sole explicitly deferred automated sequence and remains manual user verification.
 
 ## Project structure
 
@@ -96,7 +96,7 @@ WhatsApp: 01516591935
 
 ## Release identity
 
-Current code identity: **1.2.0**, build **2026.09.22**. This is intended to be a new release and must not overwrite the existing 1.0.0 or 1.1.0 tags/assets.
+Current code identity: **1.2.0**, build **2026.09.22**. This is a published release and does not overwrite the existing 1.0.0 or 1.1.0 tags/assets.
 
 The eventual artifact contract is:
 

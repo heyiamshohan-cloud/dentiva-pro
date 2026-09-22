@@ -183,7 +183,9 @@ function smokeVerify() {
       body: (document.body.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 1200),
       forms: [...document.querySelectorAll('form[data-form]')].map((form) => form.dataset.form),
       storedPatients: Array.isArray(stored.patients) ? stored.patients.map((patient) => patient.fullName).slice(0, 4) : [],
-      storedUsers: Array.isArray(stored.users) ? stored.users.map((user) => ({ name: user.name, active: user.active, hasPin: Boolean(user.pinHash) })).slice(0, 4) : []
+      storedUsers: Array.isArray(stored.users) ? stored.users.map((user) => ({ name: user.name, active: user.active, hasPin: Boolean(user.pinHash) })).slice(0, 4) : [],
+      storageInfo: globalThis.dentivaDesktop?.storeInfo?.() || null,
+      location: window.location.href
     };
   };
   return (async () => {

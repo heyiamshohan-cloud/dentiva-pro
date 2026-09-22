@@ -2070,6 +2070,7 @@ async function handleSubmit(event) {
   }
   if (formName === 'unlock') {
     const result = await unlockWorkspace(data.pin);
+    idleLastActivity = performance.now();
     if (result) render();
     return;
   }
@@ -3278,7 +3279,31 @@ document.addEventListener('change', (event) => {
 });
 document.addEventListener('keydown', handleKeydown);
 
+/* idle lock — application lockout after autoLockMinutes without interaction */
+const IDLE_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'];
+let idleLastActivity = performance.now();
+let idleWatch = null;
+function idleLockMinutes() {
+  const minutes = Number(appState.settings?.autoLockMinutes || 0);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 0;
+}
+function idleTick() {
+  const minutes = idleLockMinutes();
+  if (!minutes || ui.locked || requiresLogin() || appState.unsupportedSchema) return;
+  if (performance.now() - idleLastActivity >= minutes * 60000) {
+    ui.locked = true;
+    ui.modal = null;
+    notify(`Workspace locked after ${minutes} min without activity.`, 'info');
+    render();
+  }
+}
+function armIdleLock() {
+  IDLE_EVENTS.forEach((name) => document.addEventListener(name, () => { idleLastActivity = performance.now(); }, { passive: true }));
+  idleWatch = window.setInterval(idleTick, 15000);
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   initPermissionGroups();
+  armIdleLock();
   boot();
 });

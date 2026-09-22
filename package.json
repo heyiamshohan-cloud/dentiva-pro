@@ -60,7 +60,7 @@
     "publish": null,
     "nsis": {
       "artifactName": "Dentiva-Pro-${version}-Windows-x64-Setup.exe",
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

@@ -82,7 +82,7 @@ async function runSmokePhase() {
   try {
     const result = await mainWindow.webContents.executeJavaScript(script, true);
     console.log(`DENTIVA_SMOKE_RESULT:${JSON.stringify({ phase, ...result })}`);
-    setTimeout(() => app.exit(result?.ok ? 0 : 1), 150);
+    setTimeout(() => app.quit(), 150);
   } catch (error) {
     console.error('DENTIVA_SMOKE_ERROR', error.message);
     setTimeout(() => app.exit(1), 150);

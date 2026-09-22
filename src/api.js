@@ -202,7 +202,9 @@ class LocalApi {
     if (!result || !result.ok || !result.pinToSet) return;
     const { userId, pin } = result.pinToSet;
     const derived = await browserHashPin(pin);
-    this.repo.setUserSecrets(userId, { ...derived, failedAttempts: 0, lockedUntil: 0 });
+    // The repo stores secrets under pinHash/pinSalt (v1.3.0-compatible keys) —
+    // map them explicitly; spreading {salt, hash} would break first-run sign-in.
+    this.repo.setUserSecrets(userId, { pinHash: derived.hash, pinSalt: derived.salt, kdf: derived.kdf, iterations: derived.iterations, failedAttempts: 0, lockedUntil: 0 });
     delete result.pinToSet;
   }
 
@@ -261,7 +263,7 @@ class LocalApi {
     const secrets = { failedAttempts: 0, lockedUntil: 0, lastLogin: new Date(this.now()).toISOString() };
     if (verification.upgradeNeeded) {
       const upgraded = await browserHashPin(pinString);
-      Object.assign(secrets, upgraded);
+      Object.assign(secrets, { pinHash: upgraded.hash, pinSalt: upgraded.salt, kdf: upgraded.kdf, iterations: upgraded.iterations });
     }
     this.repo.setUserSecrets(user.id, secrets);
     this.session = {

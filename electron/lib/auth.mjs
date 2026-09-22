@@ -34,9 +34,8 @@ export function verifyPin(pin, user) {
   const iterations = kdf === KDF_ID ? ITERATIONS_V2 : LEGACY_ITERATIONS;
   try {
     const derived = crypto.pbkdf2Sync(String(pin), Buffer.from(user.pinSalt, 'hex'), iterations, 32, 'sha256');
-    const a = Buffer.from(toHex(derived));
-    const b = Buffer.from(user.pinHash, 'hex');
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false, reason: 'mismatch' };
+    const stored = Buffer.from(user.pinHash, 'hex');
+    if (derived.length !== stored.length || !crypto.timingSafeEqual(derived, stored)) return { ok: false, reason: 'mismatch' };
     return { ok: true, upgradeNeeded: kdf !== KDF_ID };
   } catch {
     return { ok: false, reason: 'invalid-kdf-material' };

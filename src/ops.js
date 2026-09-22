@@ -1649,11 +1649,14 @@ function userUpsert(repo, payload, ctx, editing) {
     updatedAt: ctx.now()
   };
   if (record.active === false && record.id === ctx.userId) return { ok: false, error: 'You cannot deactivate the signed-in account.' };
+  // Project the admin population after this upsert. On create the new record
+  // is not in the table yet (its id was just generated); on edit it replaces
+  // the stored row. Either way the workspace must end with >=1 active admin.
   const allUsers = repo.usersList();
-  const projectedAdmins = allUsers.filter((candidate) => {
-    if (candidate.id === record.id) return record.active !== false && record.role === 'Administrator';
-    return candidate.active !== false && candidate.role === 'Administrator';
-  }).length;
+  const otherAdmins = allUsers
+    .filter((candidate) => candidate.id !== record.id)
+    .filter((candidate) => candidate.active !== false && candidate.role === 'Administrator').length;
+  const projectedAdmins = otherAdmins + (record.active !== false && record.role === 'Administrator' ? 1 : 0);
   if (projectedAdmins < 1) return { ok: false, error: 'Keep at least one active Administrator account.' };
   const pinRequest = payload.pin !== undefined && payload.pin !== '' ? str(payload.pin) : null;
   if (pinRequest !== null) {

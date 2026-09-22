@@ -85,7 +85,9 @@ test.describe('v1.4.0 workspace layout', () => {
         await nav.click();
       }
       await expect(page.locator('#main-content .page-header')).toBeVisible();
-      await expect(page.locator('#main-content .page-header h1')).toHaveText(label);
+      // The dashboard header is a greeting ("Good morning/afternoon/evening, <name>"),
+      // not the navigation label; every other page uses the label verbatim.
+      if (pageId !== 'dashboard') await expect(page.locator('#main-content .page-header h1')).toHaveText(label);
       // A thrown page renderer shows this fallback — fail loudly instead of
       // screenshotting an error state as if it were the real page.
       await expect(page.locator('#main-content .empty-state h3', { hasText: 'View could not be loaded' })).toHaveCount(0);

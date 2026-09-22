@@ -16,7 +16,7 @@ The v1.3.0 → v1.4.0 transformation is complete without restarting the project:
 relational `node:sqlite` storage, a shared service layer with server-side
 validation/RBAC/audit, a rebuilt async paginated renderer, Design System 2.0
 (light-only), v1.3.0 data migration, backup/restore with validation and
-module groups, and a 55-test suite. The Electron GUI cannot run in this Linux
+module groups, and a 60-test suite. The Electron GUI cannot run in this Linux
 sandbox, so the packaged-app evidence (launch/restart persistence, PE checks,
 packaging, checksums) is produced by the Windows CI pipeline that gates the
 release.
@@ -35,7 +35,7 @@ release.
 | `docs/FINAL_AUDIT_REPORT_1.4.0.md` | This document | — |
 | Release artifacts + checksums + tag + GitHub release | `Dentiva-Pro-1.4.0-Windows-x64.exe/-Setup.exe/.zip/checksums.txt` via Windows CI; tag `v1.4.0` | See §5 / release verification |
 | No placeholders/TODO/fake features/demo data | Static scan clean (placeholder grep, no-seed design, empty-store start) | — |
-| Financial invariants (integer cents), backup/restore round-trip, workflows | Cents columns + server-side invariants; round-trip test with tamper rejection; 55-test suite | Local suites green |
+| Financial invariants (integer cents), backup/restore round-trip, workflows | Cents columns + server-side invariants; round-trip test with tamper rejection; 60-test suite | Local suites green |
 | Bengali + English localization | 449-entry dictionary carried over 1:1; bn-BD formatters; `translateDom`; release-critical label coverage asserted in tests | Native Bengali visual review remains human-required |
 | No autonomous diagnosis/prescribing/treatment recommendation | Safety wording preserved on prescription/treatment-plan surfaces; no clinical decision code added | — |
 
@@ -43,8 +43,8 @@ release.
 
 ### Passed (deterministic, this environment)
 
-- `npm test` — **55 passed, 0 failed** (smoke, security, storage, workflows, domain, release-gate)
-- `npm run build` — Vite production bundle (338.75 kB JS / 38.10 kB CSS)
+- `npm test` — **60 passed, 0 failed** (smoke, security, storage, first-run, workflows, domain, release-gate)
+- `npm run build` — Vite production bundle (338.89 kB JS / 38.10 kB CSS)
 - `node --check` — all changed source files
 - Ops/queries functional suite (`/tmp/opstest.mjs`, ~60 checks): setup, 62 patients, appointment conflict + confirm, visit/follow-up automation, dental supersede, full money cycle (invoice → payment → adjustment → refund) with exact balances, overpayment/reprice guards, inventory guards (negative stock blocked, movement vocabulary, low stock), RBAC denials (op + query), pagination disjointness, Bengali search, reports (all kinds + aging + analytics), statement invariants, audit attribution, workspace integrity, bootstrap
 - The **same suite green against `LocalRepo`** (browser parity)
@@ -61,7 +61,32 @@ release.
 
 - `npm audit` — **0 vulnerabilities**; runtime dependencies: **none**
 - Static wiring cross-check: 57 `data-action`s, 25 `data-form`s, 29 `op()` names, 13 query names — all resolve
-- Placeholder/demo-data scan — clean
+- jsdom end-to-end harness of the **real production bundle** (fresh browser profile): boot →
+  auto-opened first-run setup → 3-step setup (clinic identity, language/currency, first
+  Administrator PIN) → local PIN sign-in → all 16 key surfaces render with correct headers
+  and no page-renderer error state.
+
+### First CI validation run (run 35734256848) — findings fixed before release
+
+The rewritten visual spec (driving the real first-run setup + PIN sign-in flow) failed on
+Windows CI exactly where a real clinic would hit it: the setup modal could not advance.
+Local DOM-harness reproduction found **three first-run/auth defects**, all fixed and covered
+by a new `tests/first-run.test.mjs` regression suite (5 tests, both runtimes):
+
+1. `userUpsert` admin-coverage guard counted only stored users, so the **very first**
+   `user.create` (the setup Administrator) was rejected — first run could never complete.
+   The guard now projects the population after the upsert, including the new record.
+2. Browser runtime `#applyPinToSet`/legacy-upgrade spread `browserHashPin` output
+   (`{salt, hash}`) instead of mapping it to the repo's `pinHash`/`pinSalt` keys — the
+   first account got no usable PIN hash, `firstRun` stayed true (setup looped on every
+   open) and sign-in failed with "no PIN set".
+3. Desktop `verifyPin` compared the UTF-8 bytes of the hex string against the decoded
+   digest (`Buffer.from(toHex(x))` vs `Buffer.from(hex,'hex')`) — lengths never match, so
+   **every** Electron sign-in failed. Fixed to compare digest bytes directly.
+
+Post-fix: 60/60 unit tests, green Vite build, and the full jsdom first-run→sign-in→16-page
+harness passes against the production bundle.
+- - Placeholder/demo-data scan — clean
 - `git diff --check` — clean
 
 ### Not verifiable locally (documented limitation)

@@ -5,10 +5,11 @@ on:
   push:
     branches:
       - arena/01a0c66a-dentiva-pro
+    paths-ignore:
+      - 'windows-build-failure-*.log'
 
 permissions:
-  contents: read
-  issues: write
+  contents: write
 
 env:
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -68,23 +69,18 @@ jobs:
           if (!(Test-Path $zip)) { throw "Release ZIP was not created" }
           Get-FileHash $zip -Algorithm SHA256 | Format-List
 
-      - name: Publish Windows packaging diagnostics
+      - name: Publish Windows packaging diagnostics to branch
         if: failure()
-        uses: actions/github-script@v7
-        env:
-          BUILD_LOG_PATH: release-build.log
-        with:
-          script: |
-            const fs = require('fs');
-            const path = process.env.BUILD_LOG_PATH;
-            const raw = fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : 'No build log was produced.';
-            const clipped = raw.length > 60000 ? raw.slice(-60000) : raw;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 1,
-              body: ['Windows packaging diagnostics for run ' + context.runId, '', '---', '', clipped].join('\\n')
-            });
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = "windows-build-failure-$env:GITHUB_RUN_ID.log"
+          if (Test-Path release-build.log) { Copy-Item release-build.log $target -Force } else { Set-Content $target 'No build log was produced.' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $target
+          git commit -m "ci: capture Windows packaging diagnostics [skip ci]"
+          git push origin HEAD:$env:GITHUB_REF_NAME
 
       - name: Upload Windows build log
         if: always()

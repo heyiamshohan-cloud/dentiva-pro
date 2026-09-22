@@ -58,7 +58,7 @@ The targets are a self-contained Windows x64 portable executable and a per-user 
 
 ## Data handling
 
-Dentiva Pro creates no records until the clinic creates them. Use **Backup & Restore → Export full backup** to create a structured, versioned JSON package with record counts and relationship-preserving arrays. Import always shows a preview and conflict strategy before modifying local records. Use the optional local administrator PIN lock plus system-level encryption and access control for the machine and backup media. The PIN is stored only as a local SHA-256 digest; Dentiva Pro cannot recover a forgotten PIN.
+Dentiva Pro creates no records until the clinic creates them. Use **Backup & Restore → Export full backup** to create a structured, versioned JSON package with record counts and relationship-preserving arrays. Import always shows a preview and conflict strategy before modifying local records. Use the optional local administrator PIN lock plus system-level encryption and access control for the machine and backup media. The PIN is stored only as a salted PBKDF2-SHA-256 derived key; Dentiva Pro cannot recover a forgotten PIN.
 
 ## Printing and reports
 

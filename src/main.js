@@ -51,6 +51,7 @@ const DEFAULT_STATE = {
     notifications: true,
     applicationLock: false,
     pinHash: '',
+    pinSalt: '',
     lowStockThreshold: 5,
     accent: 'teal',
     density: 'comfortable'
@@ -118,8 +119,10 @@ const Store = {
 };
 
 let state = Store.load();
-if (state.settings.applicationLock && !state.settings.pinHash) {
+if (state.settings.applicationLock && (!state.settings.pinHash || !state.settings.pinSalt)) {
   state.settings.applicationLock = false;
+  state.settings.pinHash = '';
+  state.settings.pinSalt = '';
   Store.save(state);
 }
 let ui = {
@@ -378,10 +381,14 @@ function topbar() {
   const unread = state.notifications.filter((n) => !n.read).length;
   return `<header class="topbar"><div class="topbar-left"><button class="icon-button menu-button" data-action="toggle-mobile-nav" aria-label="Open navigation">${icon('menu', 20)}</button><div class="breadcrumb"><span>Workspace</span>${ui.page !== 'dashboard' ? `${icon('chevron', 13)}<strong>${esc(pageTitle())}</strong>` : ''}</div></div><div class="topbar-actions"><button class="global-search" data-action="open-search" aria-label="Search"><span>${icon('search', 17)}<span>Search anything</span></span><kbd>Ctrl K</kbd></button><button class="icon-button notification-button" data-action="open-notifications" aria-label="Notifications">${icon('bell', 19)}${unread ? `<b>${unread > 9 ? '9+' : unread}</b>` : ''}</button><div class="topbar-divider"></div><button class="user-menu" data-action="open-user-menu"><span class="avatar avatar-small">${initials(state.settings.dentistName || 'Dr')}</span><span class="user-meta"><strong>${esc(state.settings.dentistName || 'Practice admin')}</strong><small>${esc(state.settings.professionalTitle || 'Administrator')}</small></span>${icon('down', 14)}</button></div></header>`;
 }
-async function hashPin(pin) {
-  if (!globalThis.crypto?.subtle) throw new Error('Secure local PIN hashing is unavailable in this environment.');
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+function bytesToHex(bytes) { return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(''); }
+function hexToBytes(hex) { return Uint8Array.from((hex.match(/.{1,2}/g) || []).map((pair) => Number.parseInt(pair, 16))); }
+async function hashPin(pin, saltHex = '') {
+  if (!globalThis.crypto?.subtle || !globalThis.crypto?.getRandomValues) throw new Error('Secure local PIN hashing is unavailable in this environment.');
+  const salt = saltHex || bytesToHex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+  const key = await globalThis.crypto.subtle.importKey('raw', new TextEncoder().encode(pin), { name: 'PBKDF2' }, false, ['deriveBits']);
+  const bits = await globalThis.crypto.subtle.deriveBits({ name: 'PBKDF2', salt: hexToBytes(salt), iterations: 120000, hash: 'SHA-256' }, key, 256);
+  return { salt, hash: bytesToHex(new Uint8Array(bits)) };
 }
 function lockScreen() {
   return `<main class="lock-screen"><section class="lock-card"><div class="lock-brand"><span class="brand-symbol">${icon('tooth', 23)}</span><strong>DENTIVA<span> PRO</span></strong></div><div class="lock-icon">${icon('lock', 28)}</div><span class="eyebrow">WORKSPACE LOCKED</span><h1>Enter your application PIN</h1><p>This local workspace is protected. Your records remain on this device.</p><form data-form="unlock" class="lock-form">${field('Application PIN', 'pin', '', 'password', 'required inputmode="numeric" autocomplete="current-password" placeholder="Enter 4–12 digits" autofocus')}<button class="btn btn-primary btn-wide" type="submit">${icon('unlock', 16)}<span>Unlock workspace</span></button></form>${ui.toast?.type === 'error' ? `<p class="lock-error">${esc(ui.toast.message)}</p>` : ''}<small class="lock-help">Forgotten PINs cannot be recovered by Dentiva Pro. Use a verified backup according to your clinic policy.</small></section></main>`;
@@ -754,8 +761,8 @@ async function handleSubmit(event) {
     if (type === 'unlock') {
       if (!state.settings.pinHash) { ui.locked = false; render(); return; }
       if (!/^\d{4,12}$/.test(data.pin || '')) return notify('Enter the 4–12 digit application PIN.', 'error');
-      const candidateHash = await hashPin(data.pin);
-      if (candidateHash !== state.settings.pinHash) return notify('That PIN is not correct. Try again.', 'error');
+      const candidateHash = await hashPin(data.pin, state.settings.pinSalt);
+      if (candidateHash.hash !== state.settings.pinHash) return notify('That PIN is not correct. Try again.', 'error');
       ui.locked = false;
       ui.toast = null;
       render();
@@ -765,7 +772,9 @@ async function handleSubmit(event) {
     if (type === 'security') {
       if (!/^\d{4,12}$/.test(data.pin || '')) return notify('PIN must contain 4–12 digits.', 'error');
       if (data.pin !== data.confirmPin) return notify('The PIN confirmation does not match.', 'error');
-      state.settings.pinHash = await hashPin(data.pin);
+      const derivedPin = await hashPin(data.pin);
+      state.settings.pinHash = derivedPin.hash;
+      state.settings.pinSalt = derivedPin.salt;
       state.settings.applicationLock = true;
       audit('Application lock enabled', 'Security', '', 'Local administrator PIN configured');
       Store.save(state);
@@ -841,6 +850,7 @@ function handleClick(event) {
     if (!window.confirm('Disable the application lock for this workspace?')) return;
     state.settings.applicationLock = false;
     state.settings.pinHash = '';
+    state.settings.pinSalt = '';
     audit('Application lock disabled', 'Security', '', 'Local administrator PIN removed');
     Store.save(state);
     closeModal();

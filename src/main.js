@@ -692,6 +692,7 @@ async function renderPatientTab(p, tab, patient) {
             <div><dt>Preferred contact</dt><dd>${esc(p.preferredContact || 'Phone')}</dd></div>
             <div><dt>Registered</dt><dd>${dateFull(p.registrationDate)}</dd></div>
             ${p.tags?.length ? `<div><dt>Tags</dt><dd>${p.tags.map((t) => badge(t, 'neutral')).join(' ')}</dd></div>` : ''}
+            ${(appState.settings.customPatientFields || []).filter((definition) => (p.customFields || {})[definition.key]).map((definition) => `<div><dt>${esc(definition.label || definition.key)}</dt><dd>${esc((p.customFields || {})[definition.key])}</dd></div>`).join('')}
           </dl>
         </section>
         <section class="card"><div class="card-title"><div class="card-title-text">${icon('warning', 17)}<h2>Clinical alerts</h2></div></div>
@@ -1319,6 +1320,14 @@ async function renderSettings() {
           <label class="check-label"><input type="checkbox" name="showClinicContact" ${(s.documentTemplate || {}).showClinicContact !== false ? 'checked' : ''}> Show clinic contact in documents</label>
         </div>
       </section>
+      <section class="card"><div class="card-title"><div class="card-title-text">${icon('settings', 17)}<h2>Custom patient fields</h2></div></div>
+        <p class="form-note">Define additional practice-specific details captured on every patient form (stored on the patient record, searchable in profile; e.g. Guardian name, Referral source).</p>
+        <div class="form-grid">
+          ${(s.customPatientFields || []).map((definition, index) => `<div class="custom-field-row"><input type="text" name="customFieldLabel" value="${attr(definition.label || '')}" placeholder="Field label" aria-label="Custom field ${index + 1} label"><select name="customFieldType" aria-label="Custom field ${index + 1} type">${['text', 'number', 'date', 'textarea'].map((type) => `<option value="${type}" ${definition.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select><button type="button" class="icon-button tiny" data-action="remove-custom-field" data-index="${index}" aria-label="Remove field">${icon('trash', 14)}</button></div>`).join('') || '<p class="form-note muted">No custom fields defined.</p>'}
+        </div>
+        <button type="button" class="btn btn-secondary" data-action="add-custom-field">${icon('plus', 15)}<span>Add custom field</span></button>
+      </section>
+
       <section class="card"><div class="card-title"><div class="card-title-text">${icon('backup', 17)}<h2>Backup behaviour</h2></div></div>
         <div class="form-grid two">
           <label class="check-label"><input type="checkbox" name="backupEnabled" ${s.backupEnabled !== false ? 'checked' : ''}> Automatically back up this workspace</label>
@@ -1513,6 +1522,7 @@ function modalPatient(data = {}) {
       ${field('Important alerts', 'importantAlerts', p.importantAlerts, 'textarea', 'rows="2"')}
       ${field('Communication notes', 'communicationNotes', p.communicationNotes, 'textarea', 'rows="2"')}
       ${field('Notes', 'notes', p.notes, 'textarea', 'rows="3"')}
+      ${(appState.settings.customPatientFields || []).map((definition) => field(definition.label || definition.key, `custom_${definition.key}`, (p.customFields || {})[definition.key], definition.type === 'textarea' ? 'textarea' : definition.type === 'date' ? 'date' : definition.type === 'number' ? 'number' : 'text')).join('')}
     </div>
     ${modalFooter('Cancel', editing ? 'Save patient' : 'Add patient')}
   </form>`;
@@ -2204,6 +2214,11 @@ async function handleSubmit(event) {
     if (payload.backupRetention !== undefined) payload.backupRetention = Number(payload.backupRetention || 10);
     if (payload.sessionTimeoutMinutes !== undefined) payload.sessionTimeoutMinutes = Number(payload.sessionTimeoutMinutes || 30);
     if (payload.autoLockMinutes !== undefined) payload.autoLockMinutes = Number(payload.autoLockMinutes || 0);
+    payload.customPatientFields = (() => {
+      const labels = [...form.querySelectorAll('input[name="customFieldLabel"]')].map((input) => String(input.value || '').trim());
+      const types = [...form.querySelectorAll('select[name="customFieldType"]')].map((input) => input.value);
+      return labels.map((label, index) => label ? ({ label, type: types[index] || 'text', key: label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || `field_${index + 1}` }) : null).filter(Boolean).slice(0, 40);
+    })();
     payload.documentTemplate = {
       ...(appState.settings.documentTemplate || {}),
       footer: String(payload.documentFooter ?? (appState.settings.documentTemplate || {}).footer ?? ''),
@@ -2516,6 +2531,18 @@ async function handleClick(event) {
 
     case 'open-notifications': ui.modal = { type: 'notifications', data: {} }; return render();
     case 'mark-notifications-read': await op('notification.markAllRead', {}); await refreshNotifications(); return render();
+    case 'add-custom-field': {
+      const grid = target.closest('.card')?.querySelector('.form-grid');
+      if (grid) {
+        const count = grid.querySelectorAll('.custom-field-row').length;
+        if (count >= 40) return notify('Up to 40 custom fields are supported.', 'error');
+        grid.querySelector('.form-note.muted')?.remove();
+        grid.insertAdjacentHTML('beforeend', `<div class="custom-field-row"><input type="text" name="customFieldLabel" value="" placeholder="Field label" aria-label="Custom field label"><select name="customFieldType" aria-label="Custom field type">${['text', 'number', 'date', 'textarea'].map((type) => `<option value="${type}">${type}</option>`).join('')}</select><button type="button" class="icon-button tiny" data-action="remove-custom-field" aria-label="Remove field">${icon('trash', 14)}</button></div>`);
+        grid.querySelector('.custom-field-row:last-child input')?.focus();
+      }
+      return;
+    }
+    case 'remove-custom-field': { target.closest('.custom-field-row')?.remove(); return; }
     case 'notification-dismiss': { const dismissed = await op('notification.dismiss', { id }); if (dismissed) await refreshNotifications(); return render(); }
     case 'audit-details': { const state = auditState(); const result = await q('auditList', { page: state.page, pageSize: state.pageSize, query: state.query, entity: state.filters.entity || '', userId: state.filters.userId || '', from: state.filters.from || '', to: state.filters.to || '' }); const row = (result.rows || []).find((entry) => entry.id === id) || {}; ui.modal = { type: 'audit-detail', data: { row } }; return render(); }
     case 'audit-export': {

@@ -598,3 +598,6 @@ tr.clickable-row:hover td { background: var(--teal-50); }
 /* Activity log (v1.5.0) */
 .code-chip { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11px; background: var(--line-100, #eef3f3); border-radius: 4px; padding: 1px 6px; }
 .audit-payload { background: var(--surface-100, #f6f8f8); border: 1px solid var(--line-200); border-radius: 8px; padding: 10px 12px; font-size: 11.5px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+
+/* Custom patient fields editor (v1.5.0) */
+.custom-field-row { display: grid; grid-template-columns: 1fr 110px 34px; gap: 8px; align-items: center; margin-bottom: 6px; }

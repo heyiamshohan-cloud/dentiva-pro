@@ -89,7 +89,7 @@ export function defaultState(nowIso = new Date().toISOString()) {
   return state;
 }
 
-function normalizeCustomFields(fields) {
+export function normalizeCustomFields(fields) {
   return (Array.isArray(fields) ? fields : []).map((definition) => {
     const label = typeof definition === 'string' ? definition : String(definition?.label || definition?.key || 'Custom field');
     const key = typeof definition === 'object' && definition.key

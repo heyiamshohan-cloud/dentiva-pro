@@ -21,6 +21,7 @@ import {
   MOVEMENT_TYPES, FOLLOWUP_STATUSES, REFERRAL_STATUSES, INVOICE_STATUSES, APPOINTMENT_STATUSES
 } from './core.js';
 import { deriveNotifications, reconcileNotifications, normalizeNotificationRules } from './notifications.js';
+import { normalizeCustomFields } from './migrate-state.js';
 import { normaliseTags, validatePatientInput, validateTreatmentPlanInput } from './domain.js';
 
 export function makeId(prefix = 'id') {
@@ -253,6 +254,7 @@ export const OPS = {
       }
       if (next.documentFooter !== undefined) next.documentTemplate = { ...(next.documentTemplate && typeof next.documentTemplate === 'object' ? next.documentTemplate : {}), footer: str(next.documentFooter) };
       if (next.notificationRules !== undefined) next.notificationRules = normalizeNotificationRules(next.notificationRules);
+      if (next.customPatientFields !== undefined) next.customPatientFields = normalizeCustomFields(next.customPatientFields);
       if (Array.isArray(next.paymentMethods)) next.paymentMethods = [...new Set(next.paymentMethods.map(str).filter(Boolean))].slice(0, 30);
       if (Array.isArray(next.expenseCategories)) next.expenseCategories = [...new Set(next.expenseCategories.map(str).filter(Boolean))].slice(0, 40);
       if (Array.isArray(next.inventoryCategories)) next.inventoryCategories = [...new Set(next.inventoryCategories.map(str).filter(Boolean))].slice(0, 40);
@@ -355,7 +357,7 @@ export const OPS = {
         phone: str(merged.phone),
         email: str(merged.email),
         tags: normaliseTags(merged.tags),
-        customFields: Object.fromEntries((settings.customPatientFields || []).map((definition) => [definition.key, str(merged.customFields?.[definition.key] ?? existing.customFields?.[definition.key] ?? '')])),
+        customFields: Object.fromEntries((settings.customPatientFields || []).map((definition) => [definition.key, str(payload.customFields?.[definition.key] ?? payload[`custom_${definition.key}`] ?? existing.customFields?.[definition.key] ?? '')])),
         status: str(merged.status) || 'Active',
         archived: merged.archived === true || merged.status === 'Archived',
         balanceCents: existing.balanceCents ?? 0,

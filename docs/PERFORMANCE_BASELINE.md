@@ -1,17 +1,24 @@
-# Dentiva Pro v1.2.0 performance baseline
+# Performance baseline — v1.4.0 (real relational store)
 
-**Date:** 2026-09-22 (Asia/Dhaka)  
-**Command:** `npm run benchmark:datasets`  
-**Runtime:** Node.js 22.22.3  
-**Scope:** synthetic domain objects only; no records are written to the clinic store.
+Measured with `scripts/dataset-benchmark.mjs` on the actual v1.4.0 engine
+(Workspace + SqlRepo + shared query registry) in throwaway workspaces.
+Synthetic data only; never written to a clinic store. Machine: sandbox Linux,
+Node 22 (node:sqlite 3.51.3).
 
-This baseline is useful for tracking regression in relationship validation, canonical backup serialization and manifest creation. It is **not** a substitute for Electron startup, browser search/list rendering, patient profiles, timelines, reports, SQLite backup/restore or memory measurements.
+| Size | Records | List p1 | List last | Search BN | Revenue rpt | Accounting | Analytics | Statement | Integrity | Backup |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | 9,536 | 1.9 ms | 2.0 ms | 3.2 ms | 3.3 ms | 5.2 ms | 4.1 ms | 0.8 ms | 25 ms | 42 ms |
+| 10,000 | 94,586 | 2.4 ms | 18.0 ms | 23.2 ms | 15.2 ms | 31.7 ms | 29.2 ms | 0.5 ms | 236 ms | 171 ms |
+| 25,000 | 236,336 | 4.6 ms | 38.4 ms | 55.1 ms | 32.9 ms | 66.9 ms | 64.5 ms | 0.4 ms | 489 ms | 410 ms |
+| 100,000 | 945,086 | 18.0 ms | 159.5 ms | 220.6 ms | 137.9 ms | 274.8 ms | 312.7 ms | 0.6 ms | 2.4 s | 1.6 s (412 MB) |
 
-| Patients | Visits | Appointments | Relationship validation (ms) | Canonical serialization (ms) | Manifest (ms) | Payload bytes | Errors |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1,000 | 1,000 | 1,000 | 1.05 | 15.13 | 0.35 | 302,747 | 0 |
-| 5,000 | 5,000 | 5,000 | 3.97 | 40.12 | 0.06 | 1,538,747 | 0 |
-| 10,000 | 10,000 | 10,000 | 6.38 | 71.52 | 0.06 | 3,083,748 | 0 |
-| 25,000 | 25,000 | 25,000 | 20.32 | 193.01 | 0.07 | 7,808,748 | 0 |
-
-The generated names/phones are clearly synthetic and are never loaded by `src/main.js` or included in a release artifact. The remaining performance gate is to run a packaged Windows/Electron harness that measures startup, local SQLite load, patient search, paginated lists, profile/timeline navigation, report generation, backup and restore, including peak memory and failure behavior.
+Notes:
+- Cold open + migration no-op on an existing store: < 3 ms at every size.
+- Global search (3 collections, patient-join, capped at 8 per collection) is the
+  slowest interactive operation: ~1.0 s at 100k — acceptable for a
+  "search the whole workspace" action; the per-page list search stays ≤ 221 ms.
+- Patient-scoped operations (statement, aggregate, invoice detail) stay
+  sub-millisecond thanks to patient indexes — patient history is never loaded
+  whole into the renderer.
+- v1.3.0 baseline (whole-state canonical JSON validation/serialization) is
+  obsolete by design: v1.4.0 never serializes the whole store on a save.

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - arena/01a0c66a-dentiva-pro
+      - arena/01a0c8bf-dentiva-pro
 
 permissions:
   contents: write

@@ -1,8 +1,22 @@
-# Dentiva Pro v1.3.0 user guide
+# Dentiva Pro v1.4.0 user guide
 
 ## Release note
 
-The v1.3.0 flagship workflows below describe the current implementation. Evidence boundaries and open review items are listed in [`FINAL_AUDIT_REPORT_1.3.0.md`](FINAL_AUDIT_REPORT_1.3.0.md). v1.0.0, v1.1.0 and v1.2.0 remain separate releases.
+The v1.4.0 workflows below describe the current implementation. Evidence
+boundaries and open review items are listed in
+[`FINAL_AUDIT_REPORT_1.4.0.md`](FINAL_AUDIT_REPORT_1.4.0.md). Earlier releases
+(v1.0.0–v1.3.0) remain separate; **upgrading is automatic on first launch** —
+the v1.3.0 local database migrates in place with every record preserved (the
+source file is kept as `dentiva-pro.sqlite.v4-preserved.sqlite`), and a fresh
+backup is always recommended before upgrading.
+
+New in this release: the relational local database (no size limits — the
+workspace scales with your hardware, benchmarked at 100,000 patients),
+faster lists and search at every size, a premium light interface with a
+⌘K command palette, dashboard 3.0 with configurable cards, an Accounting
+center with receivables aging, a Diagnostics page, backup/restore with
+validation and module groups (patients / clinical / finance / operations),
+and server-side permission enforcement on every operation.
 
 ## Start here
 

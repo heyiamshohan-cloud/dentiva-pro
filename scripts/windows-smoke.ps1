@@ -23,7 +23,7 @@ function Stop-ChildApp([System.Diagnostics.Process]$process) {
 function Start-AndCheck([string]$path, [string]$dataDir, [string]$phase = 'verify') {
   Write-Host "Starting $path ($phase)"
   New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
-  $arguments = @('--disable-gpu', '--no-sandbox')
+  $arguments = @('--disable-gpu', '--no-sandbox', "--user-data-dir=$dataDir")
   $logPath = Join-Path $root "$phase-$([guid]::NewGuid().ToString('N')).log"
   $previousUserData = $env:DENTIVA_USER_DATA
   $previousSmoke = $env:DENTIVA_SMOKE

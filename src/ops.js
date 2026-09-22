@@ -1547,8 +1547,42 @@ export const OPS = {
       repo.update('notifications', { ...found.record, dismissed: true });
       return { ok: true, audit: [{ action: 'Notification dismissed', entity: 'Notification', entityId: found.record.id, summary: found.record.title }] };
     }
+  },
+
+  /* Nuclear option — reachable from Settings → Danger zone and the
+   * unsupported-schema lock screen. Children are wiped before parents so
+   * relational constraints hold; local accounts and settings survive, and the
+   * audit row recording this reset is written by the caller AFTER the wipe so
+   * it remains. confirmToken guards against automation. */
+  'workspace.reset': {
+    permission: 'settings.edit',
+    run(repo, payload, ctx) {
+      if (payload.confirmToken !== 'RESET') return { ok: false, error: 'Type RESET to confirm that this entire workspace will be erased.', code: 'reset-token' };
+      const baseCounters = { patient: 1, appointment: 1, invoice: 1, visit: 1, prescription: 1, receipt: 1, serial: 1, staff: 1 };
+      const wipe = () => {
+        for (const collection of RESET_ORDER) {
+          if (collection === 'users') continue; // local accounts survive a data reset
+          if (typeof repo.clearCollection === 'function') repo.clearCollection(collection);
+        }
+      };
+      if (typeof repo.transaction === 'function') repo.transaction(wipe);
+      else wipe();
+      repo.setMeta('counters', baseCounters);
+      repo.setMeta('setupComplete', true);
+      return { ok: true, audit: [{ action: 'Workspace reset', entity: 'Workspace', entityId: '', summary: 'All practice records erased; settings and accounts preserved' }] }
+    }
   }
 };
+
+/* Children before parents — the reverse of the relational write order, so a
+ * full wipe can never violate a foreign key in either runtime. */
+const RESET_ORDER = [
+  'audit', 'notifications', 'followUpTasks', 'attachments', 'referrals',
+  'stockMovements', 'inventory', 'expenses', 'paymentAdjustments', 'payments',
+  'invoices', 'treatmentPlans', 'dentalRecords', 'prescriptions', 'visits',
+  'appointments', 'treatments', 'savedReports', 'savedFilters', 'medicationCatalog',
+  'notificationRules', 'rooms', 'suppliers', 'staff', 'patients'
+];
 
 export function sanitizeUser(record) {
   if (!record) return null;

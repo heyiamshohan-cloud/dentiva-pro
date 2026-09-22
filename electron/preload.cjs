@@ -1,13 +1,26 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Keep the renderer API intentionally small. No Node primitives or arbitrary IPC channels
-// are exposed to the application UI.
-contextBridge.exposeInMainWorld('dentivaDesktop', {
-  info: () => ipcRenderer.invoke('app:info'),
-  printPdf: (options) => ipcRenderer.invoke('print:pdf', options),
-  printHtmlPdf: (html, options) => ipcRenderer.invoke('print:html-pdf', { html, options }),
-  storeLoad: () => ipcRenderer.sendSync('store:load'),
-  storeSave: (payload) => ipcRenderer.sendSync('store:save', payload),
-  storeReset: () => ipcRenderer.sendSync('store:reset'),
-  storeInfo: () => ipcRenderer.sendSync('store:info')
+// v1.4.0 preload: the renderer receives ONE method — an allowlisted invoke.
+// No Node primitives, no arbitrary channels, no synchronous calls. The main
+// process re-validates every channel and every call against the live session.
+
+const ALLOWED_CHANNELS = [
+  'auth:bootstrap', 'auth:login', 'auth:logout', 'auth:session',
+  'ops:invoke', 'query:run',
+  'attachment:read',
+  'backup:create', 'backup:restore', 'backup:list', 'backup:delete', 'backup:validate', 'backup:prune',
+  'diagnostics:run', 'workspace:info',
+  'app:info', 'print:pdf', 'print:html-pdf'
+];
+
+function invoke(channel, args) {
+  if (!ALLOWED_CHANNELS.includes(channel)) {
+    return Promise.reject(new Error('Blocked IPC channel'));
+  }
+  return ipcRenderer.invoke(channel, args && typeof args === 'object' ? args : {});
+}
+
+contextBridge.exposeInMainWorld('dentiva', {
+  isDesktop: true,
+  invoke
 });

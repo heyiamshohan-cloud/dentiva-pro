@@ -42,6 +42,10 @@ export class SqlRepo {
 
   remove(collection, id) { this.ws.deleteRecord(collection, id); }
 
+  clearCollection(collection) { this.ws.run(`DELETE FROM ${tableFor(collection)}`); }
+
+  transaction(fn) { return this.ws.transaction(fn); }
+
   all(collection, order = '') {
     return this.ws.listRecords(collection, { order, limit: 5000 });
   }

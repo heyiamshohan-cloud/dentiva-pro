@@ -12,7 +12,7 @@ This report separates implementation from acceptance evidence. A label, route, b
 
 **CURRENT STATE: RELEASE CANDIDATE — WINDOWS GATES PASSED; PUBLICATION PENDING.**
 
-The v1.3.0 source transformation is implemented without restarting the project or removing prior workflows. Local deterministic and build checks pass. Windows CI run `35707666589` completed successfully: tests/build, Chromium visual checks, Windows packaging, PE inspection, portable persistence smoke, ZIP inspection and checksum verification all passed, and the three workflow evidence artifacts were uploaded.
+The v1.3.0 source transformation is implemented without restarting the project or removing prior workflows. Local deterministic and build checks pass. Windows CI run `35708916503` completed successfully: tests/build, Chromium visual checks, Windows packaging, PE inspection, portable persistence smoke, ZIP inspection and checksum verification all passed, and the three workflow evidence artifacts were uploaded.
 
 The GitHub artifact blob cannot be downloaded from this sandbox because the connection terminates with `EOF`; this does not change the successful workflow result. No `v1.3.0` tag or GitHub release exists yet. Publication remains a separate explicit workflow-dispatch step.
 
@@ -53,9 +53,9 @@ The benchmark data is synthetic and remains process-local; it is never written t
 
 ### Windows CI evidence
 
-- Run `35707666589` — **success** on `arena/01a0c66a-dentiva-pro`; Chromium was installed and all six required viewport projects passed.
+- Run `35708916503` — **success** on `arena/01a0c66a-dentiva-pro`; Chromium was installed and all six required viewport projects passed.
 - The same run passed `npm run check`, Windows portable/NSIS packaging, PE `MZ` checks, the required portable launch/restart persistence smoke, application-only ZIP extraction/content inspection and independent SHA-256 verification.
-- Uploaded evidence: `Dentiva-Pro-34-Windows-x64`, `Dentiva-Pro-34-viewport-regression` and `Dentiva-Pro-34-windows-portable-smoke-evidence`. The release artifact archive is 416,894,292 bytes according to GitHub metadata.
+- Uploaded evidence: `Dentiva-Pro-35-Windows-x64`, `Dentiva-Pro-35-viewport-regression` and `Dentiva-Pro-35-windows-portable-smoke-evidence`. The release artifact archive is 416,894,938 bytes according to GitHub metadata.
 
 ### Not passed / unavailable locally
 
@@ -91,7 +91,7 @@ The Windows workflow must produce and independently verify these new v1.3.0 name
 - `Dentiva-Pro-1.3.0-Windows-x64.zip`
 - `Dentiva-Pro-1.3.0-checksums.txt`
 
-The Windows workflow created these outputs and its own existence, PE header, ZIP content and hash checks passed on run `35707666589`. The uploaded release artifact archive cannot be downloaded into this sandbox because the signed GitHub blob request ends with `EOF`; that is an environment limitation, not an unverified workflow step.
+The Windows workflow created these outputs and its own existence, PE header, ZIP content and hash checks passed on run `35708916503`. The uploaded release artifact archive cannot be downloaded into this sandbox because the signed GitHub blob request ends with `EOF`; that is an environment limitation, not an unverified workflow step.
 
 ## 7. Remaining publication evidence
 

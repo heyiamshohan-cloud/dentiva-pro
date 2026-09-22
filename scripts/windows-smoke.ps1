@@ -50,10 +50,11 @@ function Start-AndCheck([string]$path, [string]$dataDir, [string]$phase = 'verif
   $log = Get-Content $logPath -Raw -ErrorAction SilentlyContinue
   $errorLog = Get-Content "$logPath.err" -Raw -ErrorAction SilentlyContinue
   if ($log -notmatch 'DENTIVA_SMOKE_RESULT:.*"ok":true') {
-    $diagnostic = (($log + "`n" + $errorLog).Trim() -replace "\r?\n", ' | ')
+    $profileFiles = if (Test-Path $dataDir) { (Get-ChildItem $dataDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName.Replace($dataDir, '<profile>')):$($_.Length)" }) -join ', ' } else { '<profile missing>' }
+    $diagnostic = (($log + "`n" + $errorLog + "`nprofile=$profileFiles").Trim() -replace "\r?\n", ' | ')
     if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
     Write-Host "::error title=Electron smoke phase $phase::$diagnostic"
-    throw "Electron smoke phase $phase did not report success.`n$log`n$errorLog"
+    throw "Electron smoke phase $phase did not report success.`n$log`n$errorLog`nprofile=$profileFiles"
   }
   return $log
 }

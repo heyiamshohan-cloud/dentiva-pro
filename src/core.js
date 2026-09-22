@@ -2,8 +2,11 @@
 // Keeping financial, import, relationship and file-safety rules here makes them auditable
 // without a browser and prevents UI code from becoming the source of truth.
 
-export const CURRENT_SCHEMA_VERSION = 4;
-export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+export const CURRENT_SCHEMA_VERSION = 5;
+// Attachment ceilings are configurable, resource-aware guards (settings.attachmentMaxMb) —
+// never a fixed product limit. This default is deliberately generous for clinical imaging.
+export const DEFAULT_ATTACHMENT_MAX_BYTES = 256 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = DEFAULT_ATTACHMENT_MAX_BYTES;
 export const ALLOWED_ATTACHMENT_TYPES = [
   'image/png',
   'image/jpeg',
@@ -13,6 +16,18 @@ export const ALLOWED_ATTACHMENT_TYPES = [
   'application/dicom',
   'text/plain'
 ];
+// Executable/dangerous extensions are rejected regardless of the declared MIME type.
+export const BLOCKED_ATTACHMENT_EXTENSIONS = [
+  'exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh',
+  'ps1', 'psm1', 'jar', 'app', 'dll', 'sys', 'drv', 'ocx', 'cpl', 'hta', 'lnk', 'reg',
+  'msc', 'gadget', 'inf', 'sh', 'bash', 'apk', 'iso', 'img', 'vhd', 'vhdx'
+];
+
+export const APPOINTMENT_STATUSES = ['Scheduled', 'Confirmed', 'Checked In', 'Waiting', 'In Treatment', 'Completed', 'Cancelled', 'No Show'];
+export const INVOICE_STATUSES = ['Draft', 'Issued', 'Partially Paid', 'Paid', 'Cancelled', 'Refunded', 'Adjusted'];
+export const MOVEMENT_TYPES = ['Purchase', 'Usage', 'Return', 'Damage', 'Expiry', 'Correction', 'Adjustment'];
+export const FOLLOWUP_STATUSES = ['Open', 'Contacted', 'Scheduled', 'Completed', 'Cancelled'];
+export const REFERRAL_STATUSES = ['Sent', 'Acknowledged', 'Report received', 'Closed', 'Cancelled'];
 
 export const ARRAY_COLLECTIONS = [
   'patients', 'appointments', 'visits', 'prescriptions', 'dentalRecords',
@@ -64,6 +79,8 @@ const roleTemplates = {
   ],
   Receptionist: ['patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'patients.import', 'patients.export', 'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.cancel', 'appointments.move', 'appointments.queue', 'queue.manage', 'billing.view', 'billing.create', 'payments.view', 'payments.create', 'inventory.view', 'reports.view', 'data.export', 'backup.create', 'backup.validate', 'settings.view'],
   'Dental Assistant': ['patients.view', 'clinical.view', 'clinical.create', 'clinical.attachments', 'appointments.view', 'appointments.queue', 'queue.manage', 'prescriptions.view', 'prescriptions.print', 'inventory.view', 'inventory.consume', 'inventory.expiry', 'reports.view', 'settings.view'],
+  Cleaner: ['settings.view'],
+  Other: [],
   'Custom Role': []
 };
 
@@ -194,15 +211,30 @@ export function detectPatientDuplicates(incoming, existing) {
   }));
 }
 
-export function validateAttachmentFile({ type = '', size = 0, name = '', data } = {}) {
+export function attachmentMaxBytes(settings) {
+  const configuredMb = Number(settings?.attachmentMaxMb);
+  if (!Number.isFinite(configuredMb) || configuredMb <= 0) return DEFAULT_ATTACHMENT_MAX_BYTES;
+  return Math.round(Math.min(configuredMb, 4096) * 1024 * 1024);
+}
+
+export function hasBlockedExtension(name) {
+  const base = String(name || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
+  const parts = base.split('.').slice(1);
+  return parts.some((part) => BLOCKED_ATTACHMENT_EXTENSIONS.includes(part));
+}
+
+export function validateAttachmentFile({ type = '', size = 0, name = '', data } = {}, settings = null) {
   const filename = String(name || '').replace(/\\/g, '/').split('/').pop();
-  const safeName = filename.replace(/[\u0000<>:"|?*]/g, '_').trim();
+  const safeName = filename.replace(/[\u0000<>:"|?*]/g, '_').replace(/\s+/g, ' ').trim();
+  const maxBytes = attachmentMaxBytes(settings);
   const dataText = data === undefined || data === null || data === '' ? '' : String(data);
   const dataSafe = !dataText || (ALLOWED_ATTACHMENT_TYPES.includes(type) && new RegExp(`^data:${String(type).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')};base64,[A-Za-z0-9+/=\\s]+$`).test(dataText));
+  const extensionBlocked = hasBlockedExtension(filename);
   return {
-    allowed: ALLOWED_ATTACHMENT_TYPES.includes(type) && toNumber(size) >= 0 && toNumber(size) <= MAX_ATTACHMENT_BYTES && Boolean(safeName || !name) && dataSafe,
+    allowed: ALLOWED_ATTACHMENT_TYPES.includes(type) && !extensionBlocked && toNumber(size) >= 0 && toNumber(size) <= maxBytes && Boolean(safeName || !name) && dataSafe,
     allowedTypes: ALLOWED_ATTACHMENT_TYPES,
-    maxBytes: MAX_ATTACHMENT_BYTES,
+    maxBytes,
+    extensionBlocked,
     safeName: safeName || 'attachment'
   };
 }

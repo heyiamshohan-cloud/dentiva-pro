@@ -31,19 +31,27 @@ export function inDateRange(value, bounds) {
 }
 
 export function statementEntries({ invoices = [], payments = [], adjustments = [] } = {}, patientId = '') {
-  const patientInvoices = invoices.filter((record) => !patientId || record.patientId === patientId);
-  const patientPayments = payments.filter((record) => !patientId || record.patientId === patientId);
+  // v1.4.0 unified statement semantics (§32): integer cents are authoritative.
+  // Invoice = debit (cancelled invoices never debit — ops guarantee cancelled
+  // invoices have zero collected), payment = gross credit, refund/adjustment =
+  // debit rows. Decimal fields are only a fallback for legacy v4-shaped data.
+  const totalCentsOf = (record) => (record.totalCents !== undefined ? Math.max(0, Number(record.totalCents || 0)) : moneyToCents(record.total));
+  const amountCentsOf = (record) => (record.amountCents !== undefined ? Math.max(0, Number(record.amountCents || 0)) : moneyToCents(record.amount));
+  const refundedCentsOf = (record) => (record.refundedCents !== undefined ? Math.max(0, Number(record.refundedCents || 0)) : moneyToCents(record.refundedAmount || 0));
+  const patientInvoices = invoices.filter((record) => (!patientId || record.patientId === patientId) && record.status !== 'Cancelled');
+  const patientPayments = payments.filter((record) => (!patientId || record.patientId === patientId) && record.status !== 'Voided' && record.status !== 'Cancelled');
   const paymentIds = new Set(patientPayments.map((record) => record.id));
   const patientAdjustments = adjustments.filter((record) => (!patientId || record.patientId === patientId) && (!record.paymentId || paymentIds.has(record.paymentId)));
   const entries = [
-    ...patientInvoices.map((record) => ({ date: record.date, type: 'Invoice', reference: record.invoiceNumber || record.id, debitCents: moneyToCents(record.total), creditCents: 0, note: `${record.items?.length || 0} item(s)` })),
-    ...patientPayments.map((record) => ({ date: record.date, type: 'Payment', reference: record.receiptNumber || record.id, debitCents: 0, creditCents: Math.max(0, moneyToCents(record.amount) - moneyToCents(record.refundedAmount || 0)), note: record.method || 'Payment' })),
-    ...patientAdjustments.filter((record) => record.type === 'Refund').map((record) => ({ date: record.date || record.createdAt?.slice(0, 10), type: 'Refund', reference: record.id, debitCents: moneyToCents(record.amount), creditCents: 0, note: record.reason || 'Refund / reversal' }))
+    ...patientInvoices.map((record) => ({ date: record.date, type: 'Invoice', reference: record.invoiceNumber || record.id, debitCents: totalCentsOf(record), creditCents: 0, note: `${record.items?.length || 0} item(s)` })),
+    ...patientPayments.map((record) => ({ date: record.date, type: 'Payment', reference: record.receiptNumber || record.id, debitCents: 0, creditCents: amountCentsOf(record), note: record.method || 'Payment' })),
+    ...patientAdjustments.filter((record) => record.type === 'Refund').map((record) => ({ date: record.date || record.createdAt?.slice(0, 10), type: 'Refund', reference: record.receiptNumber || record.id, debitCents: amountCentsOf(record), creditCents: 0, note: record.reason || 'Refund / reversal' })),
+    ...patientAdjustments.filter((record) => record.type === 'Adjustment').map((record) => ({ date: record.date || record.createdAt?.slice(0, 10), type: 'Adjustment', reference: record.id, debitCents: 0, creditCents: amountCentsOf(record), note: record.reason || 'Balance adjustment' }))
   ].sort((a, b) => `${a.date || ''}${a.reference}`.localeCompare(`${b.date || ''}${b.reference}`));
   let runningCents = 0;
   return entries.map((entry) => {
     runningCents += entry.debitCents - entry.creditCents;
-    return { ...entry, debit: centsToMoney(entry.debitCents), credit: centsToMoney(entry.creditCents), balance: centsToMoney(Math.max(0, runningCents)) };
+    return { ...entry, balanceCents: Math.max(0, runningCents), debit: centsToMoney(entry.debitCents), credit: centsToMoney(entry.creditCents), balance: centsToMoney(Math.max(0, runningCents)) };
   });
 }
 

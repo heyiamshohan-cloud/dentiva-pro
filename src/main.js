@@ -995,6 +995,7 @@ async function renderAccounting() {
 
 async function renderInventory() {
   const result = await listQuery('inventory');
+  const ledgerCard = await inventoryLedgerCard();
   const rows = (result.rows || []).map((item) => `<tr class="clickable-row" data-action="open-inventory-item" data-id="${attr(item.id)}">
     <td>${esc(item.itemCode || '—')}</td><td><strong>${esc(item.name)}</strong>${item.batch ? `<small>batch ${esc(item.batch)}</small>` : ''}</td><td>${esc(item.category || 'Other')}</td><td><strong class="${Number(item.currentStock) <= Number(item.minimumStock || 0) ? 'text-warning' : ''}">${number(item.currentStock)} ${esc(item.unit || '')}</strong></td><td>${currency(item.purchasePrice || 0)}</td><td>${currency(item.salePrice || 0)}</td><td>${item.expiryDate ? badge(date(item.expiryDate), item.expiryDate < today() ? 'danger' : 'neutral') : '<span class="muted">—</span>'}</td><td>${Number(item.currentStock) <= Number(item.minimumStock || 0) ? badge('Low stock', 'warning') : statusBadge('In stock')}</td>
     <td class="row-actions">${button('Move stock', 'open-stock-adjustment', 'swap', 'link', `data-id="${attr(item.id)}"`)}</td>
@@ -1008,7 +1009,17 @@ async function renderInventory() {
       <label class="check-label"><input type="checkbox" data-change="inventory-expiring" ${filters.expiringBefore ? 'checked' : ''}> Expiring soon</label>`, '')}
     ${dataTable(['Code', 'Item', 'Category', 'On hand', 'Purchase', 'Sale', 'Expiry', 'Status', ''], rows, emptyState('box', 'No matching records', 'Add stock items to track purchases and usage.', button('Add stock', 'open-stock', 'plus', 'secondary')))}
     ${tablePager(result.total || 0, listState.inventory.page, 'inventory')}
+    ${ledgerCard}
   </div>`;
+}
+async function inventoryLedgerCard() {
+  const ledger = await q('list', { collection: 'stockMovements', page: 1, pageSize: 12, query: '', filters: {}, sort: 'date-desc' }).catch(() => ({ rows: [] }));
+  const items = new Map(((await q('list', { collection: 'inventory', page: 1, pageSize: 1000, query: '', filters: {} }).catch(() => ({ rows: [] }))).rows || []).map((item) => [item.id, item.name]));
+  const userRows = ((await q('users', {}).catch(() => ({ rows: [] }))).rows) || [];
+  const userNames = new Map(userRows.map((user) => [user.id, user.name]));
+  const rows = (ledger.rows || []).map((move) => `<tr><td><small>${date(move.date)} ${esc(String(move.createdAt || '').slice(11, 16))}</small></td><td><strong>${esc(items.get(move.itemId) || '—')}</strong></td><td>${statusBadge(move.type)}</td><td class="${Number(move.quantity) < 0 ? 'text-danger' : 'text-success'}"><strong>${Number(move.quantity) > 0 ? '+' : ''}${number(move.quantity)}</strong></td><td><small>${number(move.before)} → ${number(move.after)}</small></td><td>${esc(move.reason || '—')}${move.notes ? `<small>${esc(move.notes)}</small>` : ''}</td><td><small>${esc(userNames.get(move.userId) || '—')}</small></td></tr>`).join('');
+  if (!rows) return `<section class="card movement-ledger-card"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Movement ledger</h2></div></div><p class="form-note">Every purchase, usage and correction lands here, attributed and immutable. No movements recorded yet.</p></section>`;
+  return `<section class="card movement-ledger-card"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Movement ledger</h2></div><small class="muted">Most recent ${number(ledger.rows?.length || 0)} of ${number(ledger.total || 0)} — full history in the Activity log</small></div>${dataTable(['When', 'Item', 'Type', 'Δ', 'Stock', 'Reason', 'By'], rows)}</section>`;
 }
 
 async function renderSuppliers() {

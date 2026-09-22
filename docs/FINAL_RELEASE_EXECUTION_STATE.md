@@ -1,28 +1,25 @@
 # FINAL RELEASE — EXECUTION STATE (authoritative continuation checkpoint)
 
 ## Current phase
-PHASE 2 — Release-blocker elimination: blockers A–D + RBAC/roles done and pushed. In progress: backend-only features (E), remaining dead settings, PO receive→stock workflow, then docs/parity, CI validation, scale re-run, final audit.
+PHASE 4 — Publish gate. All fix work complete + documented; waiting for CI green on tip; then `[publish-release]` marker commit which tags v1.5.0 and publishes the GitHub release from that SHA.
 
 ## Completed phases
-- Phase 0 — Preserve & audit (baseline docs, v1.4.0 tree import at 3ac0305).
-- Blocker A — PRINTING: full pipeline (electron/lib/print.mjs, print:html channel with native print dialog + PDF save dialog, isolated JS-disabled window, A4/A5/Letter/Legal/80mm, in-app sandboxed preview modal, logo/contact honors documentTemplate, Bengali font stack + lang, new documents: report print, appointment slip (80mm), treatment estimate; receipts default 80mm). Tests: security print-IPC suite updated.
-- Blocker B — NOTIFICATIONS: real engine `src/notifications.js` (derive+reconcile, stable ids auto_<kind>_<date>, read/dismiss preserved, self-clearing), op `notifications.scan`, rules settings store unified (settings.notificationRules object; legacy array translated), renderer triggers (post-login, post-op debounce, 120s interval), Notifications page w/ per-kind toggles + per-row dismiss + priority. tests/notifications.test.mjs 7 tests on BOTH runtimes.
-- Blocker C — AUTO-BACKUP: src/backup-schedule.mjs (pure due logic) + electron/lib/backup-scheduler.mjs (single-flight tick, retention prune, error recording to meta, same-second collision retry) wired into main process; settings UI (enable/interval/retention); backup page live scheduler status; default backupEnabled=true. tests/backup-scheduler.test.mjs 3 tests incl. real end-to-end.
-- Blocker D — GLOBAL AUDIT LOG: Activity log page (nav System), filters (type/user/date range/search), pagination, secret-stripped detail modal, streaming CSV export (audit.export perm), dead modal removed.
-- RBAC hardening: real Accountant template; Manager/Cleaner/Other selectable in UI; fixed v1.4.0 live bug -> `expenses: 'expenses.view'`→'accounting.view' (expenses page was permission-blocked for EVERYONE incl. Administrator).
-- Settings groundwork: documentTemplate (showLogo/showClinicContact/footer) fully honored + UI toggles; settings.update clamps for scheduler numbers.
+- Phase 0 — Preserve & audit
+- Phase 1 — All v1.4.0 forensic blockers closed (printing / notifications engine / auto-backup scheduler / Activity log / RBAC incl. expenses live-bug / dead settings)
+- Phase 2 — Backend-only feature resolution (custom fields built; 6 proven absent; corrigendum committed)
+- Phase 3 — Consistency & polish: appointment↔visit lifecycle + Start-visit; movement ledger; idle lock; i18n sweep (+130 strings); queue responsive fix; 100,000-patient benchmark re-measured on final engine; 10-journey both-runtime contract tests; v1.4.0→v1.5.0 upgrade-safety tests; version bump v1.5.0 (package/APP_VERSION/smoke pin); CHANGELOG/README/docs parity; FINAL_COMMERCIAL_RELEASE_AUDIT.md (zero unresolved critical; 6 documented limitations); FINAL_RELEASE_CHECKLIST.md; baseline resolution tracker.
 
 ## Current task
-Backend-only feature decisions (waitlist / custom fields / treatment templates / progress / forensics / request log / signature).
+Publish gate.
 
 ## Current file/component
-src/ops.js + src/main.js feature surfaces.
+.github/workflows/windows-release.yml (marker commit); docs/FINAL_COMMERCIAL_RELEASE_REPORT.md (to be filled post-publish).
 
 ## Last successful command
-git push of audit-log milestone (70/70 tests green); CI run history: baseline import run green end-to-end on Windows (18m), printing milestone run queued/in-progress.
+git push ea90ed9 (docs closeout); npm test = 104 pass / 0 fail; CI history: runs for print/notifications/backup/audit/custom-fields/i18n/corrigendum all SUCCESS.
 
 ## Last failed command
-(none outstanding)
+CI status of tip run in progress at checkpoint write time.
 
 ## Failure reason
 —
@@ -31,31 +28,30 @@ git push of audit-log milestone (70/70 tests green); CI run history: baseline im
 —
 
 ## Next exact action
-Read the 7 backend ops; implement or remove per decision; then dead settings (autoLock idle-lock, taxEnabled default propagation, chairs/rooms selects), PO receive→stock movement + partial receive, appointment Completed consistency, admin unlock; BN dictionary; docs parity; benchmark 1k/5k/10k/25k/50k/100k; final audit + report; CI publish.
+1. `gh run list` → confirm both tip runs (35770586036, 35770931957) green.
+2. Commit empty `[publish-release]` marker → push → watch run until publish step done.
+3. `gh release view v1.5.0 --json assets,url` → verify 4 artefacts + checksums correspondence.
+4. Fill docs/FINAL_COMMERCIAL_RELEASE_REPORT.md (commit SHA, tag, artefacts, SHA-256s, release URL) → commit + push (non-marker).
+5. Final `npm test` + `gh run list` re-verify; close checklist publish boxes.
 
 ## Tests already passed
-- 70/70 node:test suites locally (60 inherited + notifications 7 + scheduler 3; one security test modernized for print lib).
-- Windows CI: baseline v1.4.0 tree — full green (tests, build, 6-viewport visual, PE check, portable launch/restart smoke, ZIP + SHA-256 verification). Later pushes revalidate automatically.
+- 104/104 node:test suites (60 inherited + notifications 7 + scheduler 3 + audit 6 + journeys 10 + custom-fields + RBAC + upgrade 4 + lifecycle 1).
+- Windows CI: 6 consecutive green on the branch before tag.
+- Scale: 100k patients / 945,086 records, page1 < 25 ms, integrity ✓, re-run 2026-09-22 on the final engine.
 
 ## Tests still required
-- CI green re-confirm on each milestone; visual 6-viewport on final; scale benchmark incl. 5k/50k on final code; upgrade test v1.4.0→v1.5.0 data; final release-gate additions for new features.
+Windows CI on the marker commit (includes packaging smoke + publish).
 
 ## Packaging status
-CI pipeline proven green on Windows (baseline). Final version/packaging pending after feature freeze. Publish gate `[publish-release]` NOT yet used.
+Portable EXE + NSIS Setup + ZIP + checksums produced by CI publish step only; gate: `[publish-release]` in commit message (or workflow_dispatch). Not yet triggered.
 
 ## Release status
-NOT PUBLISHED. Target version v1.5.0 (features + fixes vs v1.4.0); tag via CI publish step only after all gates.
+NOT PUBLISHED — awaiting marker commit. Tag will be `v1.5.0`, created by CI with `--target $GITHUB_SHA`.
 
 ## Known remaining risks
-- Notification query per-op scan adds small writes; bounded and debounced (OK at 100k scale — verify in final benchmark).
-- Print native-dialog verification only possible on Windows CI (headless dialog cannot be asserted; pipeline smoke covers app boot, not printing — recorded limitation for the final audit; markup/validation/preview fully test-covered).
-- mailto/Windows GUI behaviors unverifiable in sandbox — CI runners cover boot; manual clinic acceptance noted in report.
+- Historical v1.4.0 artefacts on GitHub remain as-is by policy (untouched).
+- MANUAL follow-up recommended on real clinic hardware: one Bengali print, one 80 mm receipt (fonts/OS variations; documented in audit limitations).
 
 ## Work log (append most recent at bottom)
-- 2026-09-22: 3ac0305 v1.4.0 import; workflow trigger widened to arena/**; baseline+checkpoint docs.
-- 2026-09-22: CI run 35757956488 (import commit): SUCCESS (18m) — workflow + build chain fully functional on current runners.
-- 2026-09-22: Printing pipeline committed (lib + channel + preview modal + new docs + receipt width + logo/contact + report/slip/estimate).
-- 2026-09-22: Notification engine + RBAC fixes (67/70→70/70 with scheduler + audit).
-- 2026-09-22: Backup scheduler (real tick test w/ real workspace backup + prune).
-- 2026-09-22: Activity log page + CSV export; dead audit modal removed.
-- 2026-09-22: SANDBOX CRASH + RECOVERY — new clean sandbox; workspace self-restored to 0bbafce incl. node_modules + audit-v140; git fsck clean; npm ci fresh (441 pkgs); full suite 71/71; production build OK. Session GH token auto-recovered. Pushes verified on origin with hash-identical ls-remote; branch tracking refs established after fixing the restored clone's narrowed fetch refspec (only main was mapped) — local↔origin divergence now tracked at 0/0. CI status evidence: runs for notifications/backup/audit milestones all SUCCESS; custom-fields run in progress.
+- 2026-09-22: v1.4.0 import; CI trigger widened; baseline docs; first green CI after i18n/corrigendum commits; sandbox crash + recovery (tip restored from origin hash-identity; fetchspec fix).
+- 2026-09-22 19:00Z: suites 104/104; journeys & upgrade tests in repo; v1.5.0 bump; docs closeout pushed (ea90ed9); publish gate armed.

@@ -77,5 +77,8 @@ try {
   Write-Host 'Windows packaged launch/restart/install/uninstall smoke passed.'
 }
 finally {
+  $evidenceDir = if ($env:GITHUB_WORKSPACE) { Join-Path $env:GITHUB_WORKSPACE 'windows-smoke-evidence' } else { Join-Path (Get-Location) 'windows-smoke-evidence' }
+  New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
+  if (Test-Path $root) { Get-ChildItem $root -Filter '*.log*' -File -ErrorAction SilentlyContinue | Copy-Item -Destination $evidenceDir -Force -ErrorAction SilentlyContinue }
   if (Test-Path $root) { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 }

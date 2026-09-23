@@ -106,7 +106,8 @@ export function migrateWorkspace(directory, { log = () => {} } = {}) {
       const corruptCopy = path.join(dir, `${DB_FILENAME}.corrupt-${Date.now()}`);
       try { fs.renameSync(dbPath, corruptCopy); result.preservedFile = corruptCopy; } catch { /* best effort */ }
       layout = 'missing';
-      result.errors.push('Primary and recovery database files are unreadable. The corrupt file was preserved and a fresh workspace was prepared.');
+      result.errors.push(`Primary and recovery database files are unreadable. The corrupt file was preserved (${corruptCopy}) and a fresh workspace was prepared.`);
+      log(`Primary database unreadable after probe retries; preserved at ${corruptCopy}. Proceeding with a fresh workspace.`);
     }
   }
 

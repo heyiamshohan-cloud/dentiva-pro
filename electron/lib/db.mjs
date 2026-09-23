@@ -100,19 +100,33 @@ export class Workspace {
   /** Inspect an existing database file and classify its layout. */
   static detectLayout(dbPath) {
     if (!fs.existsSync(dbPath)) return 'missing';
-    try {
-      const probe = new DatabaseSync(dbPath, { readOnly: true });
+    // An open failure can be TRANSIENT (SQLITE_BUSY from a winding-down prior
+    // instance, antivirus scan windows, OS file-flush delay after a force-kill).
+    // "corrupt" must only be declared after the lock has had time to clear —
+    // a false positive here renames a healthy database and renders a fresh
+    // empty workspace, which is a silent-data-invisibility disaster.
+    let lastError = null;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
       try {
-        const tables = new Set(probe.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
-        if (tables.has('patients') && tables.has('meta')) return 'v5';
-        if (tables.has('records') && tables.has('metadata')) return 'v4-blob';
-        return tables.size ? 'unknown-tables' : 'empty';
-      } finally {
-        probe.close();
+        const probe = new DatabaseSync(dbPath, { readOnly: true });
+        try {
+          const tables = new Set(probe.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+          if (tables.has('patients') && tables.has('meta')) return 'v5';
+          if (tables.has('records') && tables.has('metadata')) return 'v4-blob';
+          return tables.size ? 'unknown-tables' : 'empty';
+        } finally {
+          probe.close();
+        }
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error);
+        const transient = /busy|locked|being used|access|denied|EACCES|EPERM|share/i.test(message);
+        if (!transient) break;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250 + attempt * 250);
       }
-    } catch {
-      return 'corrupt';
     }
+    if (lastError) console.error(`detectLayout: probe failed after retries (${String(lastError?.message || lastError)})`);
+    return 'corrupt';
   }
 
   /** Read a v4 sql.js-generated database (standard SQLite file) into a raw state object. */

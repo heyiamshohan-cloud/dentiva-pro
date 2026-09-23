@@ -9,6 +9,14 @@
 // Offline-first by design: no network, no cloud, no telemetry. This machine
 // is the only copy; backups are explicit.
 
+// Boot-stage markers (also used by the Windows packaging smoke gate to
+// distinguish "bundle never executed" from "boot hung" vs "rendered late";
+// harmless in production: three window fields + two passive listeners).
+window.__bootStatus = 'module-eval-start';
+window.__bootError = null;
+window.addEventListener('error', (event) => { window.__bootError = window.__bootError || String(event.message || event.error || 'unknown'); });
+window.addEventListener('unhandledrejection', (event) => { window.__bootError = window.__bootError || `rejection:${String(event.reason).slice(0, 300)}`; });
+
 import './styles.css';
 import { createApi } from './api.js';
 import { hasPermission, validateAttachmentFile, buildRestorePlan, calculateInvoice, moneyToCents, centsToMoney } from './core.js';
@@ -3224,6 +3232,7 @@ async function initPermissionGroups() {
   permissionGroups = Object.entries(groups).map(([key, list]) => [key, list]);
 }
 async function boot() {
+  window.__bootStatus = 'boot-started';
   app.innerHTML = `<div class="boot-screen"><div class="boot-spinner"></div><p>Opening your local workspace…</p></div>`;
   const result = await api.bootstrap();
   if (!result || !result.ok) {
@@ -3245,6 +3254,7 @@ async function boot() {
   startNotificationInterval();
   appState.ready = true;
   render();
+  window.__bootStatus = 'ready';
   if (appState.firstRun && !appState.setupComplete) {
     ui.modal = { type: 'setup', data: { step: 1 } };
     render();

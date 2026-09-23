@@ -259,7 +259,14 @@ function smokeVerify() {
       forms: [...document.querySelectorAll('form[data-form]')].map((form) => form.dataset.form),
       storedPatients: patients,
       storageInfo,
-      location: window.location.href
+      location: window.location.href,
+      readyState: document.readyState,
+      bootStatus: window.__bootStatus || null,
+      bootError: window.__bootError || null,
+      bundleResources: performance.getEntriesByType('resource')
+        .filter((entry) => /\/assets\/.+\.(js|css)(\?|$)/.test(entry.name))
+        .map((entry) => `${entry.name.split('/').pop()}:${entry.responseEnd.toFixed(0)}`)
+        .slice(0, 4)
     };
   };
   return (async () => {

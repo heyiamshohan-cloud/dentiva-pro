@@ -58,6 +58,13 @@ function Start-AndCheck([string]$path, [string]$dataDir, [string]$phase = 'verif
   }
   $log = Get-Content $logPath -Raw -ErrorAction SilentlyContinue
   $errorLog = Get-Content "$logPath.err" -Raw -ErrorAction SilentlyContinue
+  # Surface per-phase diagnostics as job annotations (visible without artifacts).
+  $diagLines = ((($log, $errorLog) -join "`n") -split "\r?\n") | Where-Object { $_ -match 'DENTIVA_SMOKE_DIAG|DENTIVA_RENDERER_CONSOLE|LOAD_FAILED|exited unexpectedly' } | Select-Object -First 6
+  foreach ($line in $diagLines) {
+    $safe = ($line -replace "[%\r\n]", ' ')
+    if ($safe.Length -gt 1200) { $safe = $safe.Substring(0, 1200) }
+    Write-Host "::warning title=smoke-diag-$phase::$safe"
+  }
   $profileFiles = Profile-Snapshot $dataDir
   $streams = "$log`n$errorLog"
   # v1.5.1 hardening: a module-load defect (e.g. the v1.5.0 app.asar src/**

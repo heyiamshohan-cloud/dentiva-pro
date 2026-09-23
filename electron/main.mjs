@@ -14,7 +14,7 @@
 
 import { app, BrowserWindow, ipcMain, Menu, session, dialog } from 'electron';
 import path from 'node:path';
-import { promises as fsp } from 'node:fs';
+import { promises as fsp, existsSync, statSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { migrateWorkspace } from './lib/migrate.mjs';
 import { Workspace } from './lib/db.mjs';
@@ -109,12 +109,40 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+  if (isSmoke) {
+    // Smoke-only diagnostics bridge: surfaces renderer exceptions/load failures
+    // in the harness logs (installed-app phases run from a different executable
+    // context than the portable phases and must not fail opaquely).
+    mainWindow.webContents.on('console-message', (_event, level, message) => {
+      console.log(`DENTIVA_RENDERER_CONSOLE[level=${level}] ${String(message).slice(0, 400)}`);
+    });
+    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, url) => {
+      console.error(`DENTIVA_RENDERER_LOAD_FAILED code=${errorCode} ${errorDescription} ${url}`);
+    });
+    mainWindow.webContents.on('dom-ready', () => {
+      console.log(`DENTIVA_RENDERER_DOM_READY url=${mainWindow?.webContents.getURL?.() || '<none>'}`);
+    });
+  }
   mainWindow.loadURL(startUrl());
 }
 
 async function runSmokePhase() {
   if (!isSmoke || !mainWindow) return;
   const phase = process.env.DENTIVA_SMOKE_PHASE || 'verify';
+  // Main-side workspace diagnostic at phase start: proves whether the data the
+  // portable phases authored is visible to THIS executable before the renderer
+  // probe runs (installed vs portable failure isolation).
+  try {
+    const dbPath = path.join(app.getPath('userData'), 'dentiva-pro.sqlite');
+    const dbStat = existsSync(dbPath) ? statSync(dbPath).size : -1;
+    let mainCounts = null;
+    try {
+      if (repo?.storageInfo) mainCounts = repo.storageInfo()?.recordCounts || null;
+    } catch { /* optional capability probe */ }
+    console.log(`DENTIVA_SMOKE_DIAG phase=${phase} userData=${app.getPath('userData')} dbBytes=${dbStat} migration=${migrationResult?.status || 'n/a'} mainCounts=${JSON.stringify(mainCounts)}`);
+  } catch (diagError) {
+    console.error('DENTIVA_SMOKE_DIAG_FAILED', diagError.message);
+  }
   const script = phase === 'create' ? `(${smokeCreate.toString()})()` : `(${smokeVerify.toString()})()`;
   try {
     const result = await mainWindow.webContents.executeJavaScript(script, true);

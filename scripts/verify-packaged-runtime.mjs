@@ -28,23 +28,37 @@ function fail(message) {
 }
 
 function discoverAsar() {
-  const explicit = process.argv[2];
+  const explicit = process.argv[2] || process.env.PACKAGED_ASAR;
   if (explicit) {
     const resolved = path.resolve(explicit);
     if (!fs.existsSync(resolved)) fail(`specified asar not found: ${resolved}`);
     return resolved;
   }
   const outDir = path.join(root, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).build?.directories?.output || 'release');
-  const candidates = [
+  const named = [
     path.join(outDir, 'win-unpacked', 'resources', 'app.asar'),
     path.join(outDir, 'windows-unpacked', 'resources', 'app.asar'),
+    path.join(outDir, 'win32-unpacked', 'resources', 'app.asar'),
   ];
-  const found = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!found) {
-    console.error(`verify-packaged-runtime: app.asar not found. Checked:\n${candidates.join('\n')}`);
-    fail('run this after the electron-builder packaging step, or pass the asar path explicitly');
-  }
-  return found;
+  const found = named.find((candidate) => fs.existsSync(candidate));
+  if (found) return found;
+  // Fallback: bounded recursive search under the packaging output dir
+  // (installer/portable staging dirs vary by electron-builder target mix).
+  const hits = [];
+  (function scan(dir, depth) {
+    if (hits.length >= 3 || depth > 4) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) scan(full, depth + 1);
+      else if (entry.name === 'app.asar') hits.push(full);
+    }
+  })(outDir, 0);
+  console.error(`verify-packaged-runtime: named locations empty. Output dir scan (${outDir}): ${hits.length ? hits.join('; ') : '<no app.asar anywhere>'}`);
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) fail(`multiple app.asar candidates found (${hits.join('; ')}) — pass PACKAGED_ASAR=... explicitly`);
+  fail('run this after the electron-builder packaging step, or pass the asar path explicitly');
 }
 
 const asarPath = discoverAsar();

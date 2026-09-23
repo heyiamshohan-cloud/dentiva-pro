@@ -63,7 +63,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify packaged ASAR contains the complete runtime module closure
-        run: node scripts/verify-packaged-runtime.mjs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = node scripts/verify-packaged-runtime.mjs 2>&1 | Out-String
+          Write-Host $output
+          if ($LASTEXITCODE -ne 0) {
+            $diag = (($output + "`nrelease-tree=`n" + ((Get-ChildItem release -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }) -join ', ')).Trim() -replace "\r?\n", ' | ')
+            if ($diag.Length -gt 9000) { $diag = $diag.Substring(0, 9000) }
+            Write-Host "::error title=Packaged ASAR runtime closure failure::$diag"
+            exit $LASTEXITCODE
+          }
 
       - name: Verify Windows PE artifacts
         shell: pwsh

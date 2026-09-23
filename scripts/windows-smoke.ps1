@@ -117,7 +117,11 @@ try {
   if (!(Test-Path $installedAsar)) { throw "Installed application is missing resources/app.asar: $installDir" }
   & node (Join-Path $PSScriptRoot 'verify-packaged-runtime.mjs') $installedAsar
   if ($LASTEXITCODE -ne 0) { throw 'Installed app.asar failed the runtime module closure verification.' }
+  $preLaunchProfile = Profile-Snapshot $userData
+  Write-Host "user-data profile before installed launch: $preLaunchProfile"
   Start-AndCheck $installedExe.FullName $userData 'installed-verify' | Out-Null
+  $postLaunchProfile = Profile-Snapshot $userData
+  Write-Host "user-data profile after installed launch: $postLaunchProfile"
   $uninstaller = Get-ChildItem -Path $installDir -Filter 'unins*.exe' -Recurse -File | Select-Object -First 1
   if (!$uninstaller) { throw 'Generated uninstaller was not found.' }
   $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/S') -Wait -PassThru

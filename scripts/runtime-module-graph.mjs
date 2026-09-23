@@ -64,6 +64,16 @@ export function moduleClosure(entries) {
   return [...seen];
 }
 
+/**
+ * Normalize an app.asar member path to the repo-relative forward-slash form.
+ * @electron/asar's listPackage() returns platform-flavoured separators
+ * ("/dist/…" on POSIX, "\dist\…" on Windows) — the closure comparison must be
+ * OS-invariant or a Windows CI run reports the entire tree as absent.
+ */
+export function normalizePackedMember(entry) {
+  return String(entry).replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
 /** Convenience: closure reachable from the production Electron entry points. */
 export function electronRuntimeClosure(root) {
   const entries = ['electron/main.mjs', 'electron/preload.cjs'].map((f) => path.join(root, f));

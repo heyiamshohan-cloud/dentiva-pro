@@ -17,7 +17,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { electronRuntimeClosure } from './runtime-module-graph.mjs';
+import { electronRuntimeClosure, normalizePackedMember } from './runtime-module-graph.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -69,7 +69,7 @@ try {
   fail('@electron/asar is unavailable (npm ci must run before this script)');
 }
 
-const members = asar.listPackage(asarPath).map((entry) => entry.replace(/^\/+/, '').replace(/\\/g, '/'));
+const members = asar.listPackage(asarPath).map(normalizePackedMember);
 if (members.length < 10) fail(`app.asar looks suspiciously empty (${members.length} entries): ${asarPath}`);
 
 const closure = electronRuntimeClosure(root);

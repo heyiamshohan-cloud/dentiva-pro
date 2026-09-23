@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { electronRuntimeClosure } from '../scripts/runtime-module-graph.mjs';
+import { electronRuntimeClosure, normalizePackedMember } from '../scripts/runtime-module-graph.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -58,6 +58,21 @@ test('packaging: main entry + preload exist and use import.meta-derived paths on
   assert.doesNotMatch(main, /from ['"]\.\.\/\.\.\/dist\//, 'renderer must load through dist file URL, not dev paths');
   const preload = path.join(root, 'electron', 'preload.cjs');
   assert.ok(fs.existsSync(preload), 'preload.cjs exists');
+});
+
+test('packaging: packed-member normalization is OS-invariant (Windows CI backslash regression)', () => {
+  // @electron/asar listPackage() yields '\dist\assets\x.js' on Windows and
+  // '/dist/assets/x.js' on POSIX. Both must compare equal to repo-relative
+  // 'dist/assets/x.js' or the CI asar gate reports the entire tree as absent
+  // (observed as run 35843432912, step "Verify packaged ASAR …").
+  const cases = [
+    ['\\dist\\assets\\index.js', 'dist/assets/index.js'],
+    ['/dist/assets/index.js', 'dist/assets/index.js'],
+    ['\\src\\core.js', 'src/core.js'],
+    ['src/core.js', 'src/core.js'],
+    ['/package.json', 'package.json'],
+  ];
+  for (const [input, expected] of cases) assert.equal(normalizePackedMember(input), expected, input);
 });
 
 test('packaging: asar is enabled and service layer (src/**) ships inside it', () => {

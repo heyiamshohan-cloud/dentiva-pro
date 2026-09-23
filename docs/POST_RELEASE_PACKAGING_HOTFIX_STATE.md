@@ -67,9 +67,12 @@ v1.5.0 (tag `c4ddab8`) is PRESERVED and must never be edited/overwritten.
   electron/main.mjs; pwsh-side profile-DB persistency probe before installed launch.
 
 **⚠ EXTERNAL BLOCKER (in effect now):** sandbox GitHub credentials expired mid-session
-(gh: "Bad credentials", git push: prompts disabled). `faa6cf3` committed locally,
-NOT pushed. Retry auth before next CI iteration; if it stays 401, user must reconnect
-GitHub for the sandbox/session.
+(gh: "Bad credentials", git push: prompts disabled). **3 commits pending push**:
+`faa6cf3` (smoke main-side + renderer diagnostics), `a14d2c2` (pwsh profile persistency
+probe + pre/post launch snapshots), `ed13c39` (SOURCE-LEVEL fix: detectLayout busy-retry
+before 'corrupt' quarantine + loud preserved-path logging — the fresh-workspace symptom
+the installed gate caught is most plausibly this transient-lock false-positive). Remote
+tip is `f46a15b`. If 401 persists, **user must reconnect GitHub (Arena integration)**.
 
 ## Remaining work (in order)
 1. Push faa6cf3 (+ any fix) → CI run; read DENTIVA_SMOKE_DIAG + renderer bridge lines;

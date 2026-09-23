@@ -52,14 +52,32 @@ v1.5.0 (tag `c4ddab8`) is PRESERVED and must never be edited/overwritten.
 - Packaging gate directionality: red on v1.5.0 config (2/4), green on fixed config (4/4).
 - `verify-packaged-runtime.mjs` fail-path exercised (clean message when asar absent).
 
+## Live status (2026-09-23)
+**Core hotfix PROVEN on the installed artifact (CI run 35844145583):**
+- asar-closure step ✓ (all 21 runtime modules + 11 src files inside built app.asar)
+- portable create + restart-persistence ✓  (module graph boots from asar)
+- NSIS silent install ✓ → INSTALLED exe LAUNCHED with **NO ERR_MODULE_NOT_FOUND**
+  (its asar also re-verified before launch; DB opened, storageInfo live).
+**New gate found a SECOND (previously invisible) issue at installed-verify:**
+- `patients navigation was unavailable`, renderer `body:""`, all recordCounts 0 while
+  portable phases on the SAME `$userData` passed ⇒ installed exe either saw a fresh
+  workspace or the renderer shell died. This is EXACTLY why the gate exists.
+- Diagnosis commit `faa6cf3` (LOCAL, unpushed): smoke-only DENTIVA_SMOKE_DIAG
+  (userData/dbBytes/migration/main counts) + renderer console/load bridge in
+  electron/main.mjs; pwsh-side profile-DB persistency probe before installed launch.
+
+**⚠ EXTERNAL BLOCKER (in effect now):** sandbox GitHub credentials expired mid-session
+(gh: "Bad credentials", git push: prompts disabled). `faa6cf3` committed locally,
+NOT pushed. Retry auth before next CI iteration; if it stays 401, user must reconnect
+GitHub for the sandbox/session.
+
 ## Remaining work (in order)
-1. `npm run check` + `npm run test:visual` where feasible locally (playwright chromium may need sandbox deps).
-2. Commit everything → push branch → CI run green (incl. NEW asar-verify step + FULL smoke gate).
-3. `[publish-release]` marker commit → CI publishes **v1.5.1** (publish refuses existing tags; v1.5.0 safe).
-4. Verify release/tag↔commit↔assets↔checksums; record icon presence in published exe.
-5. Write `docs/POST_RELEASE_PACKAGING_HOTFIX_AUDIT.md` (root cause, affected versions (v1.5.0),
-   fix, asar/init verification evidence, CI gate changes, icon verification, hashes, final commit, release URL).
-6. Final §18-style verification checklist; closeout + this file's final status.
+1. Push faa6cf3 (+ any fix) → CI run; read DENTIVA_SMOKE_DIAG + renderer bridge lines;
+   root-cause the installed-verify fresh-workspace/blank-renderer state; fix real cause.
+2. CI fully green (asar ✓, portable ✓, installed launch+persistence ✓, uninstall ✓).
+3. `[publish-release]` marker commit → CI publishes **v1.5.1** (publish refuses existing tags).
+4. Verify release/tag↔commit↔assets↔checksums.
+5. Write `docs/POST_RELEASE_PACKAGING_HOTFIX_AUDIT.md`; final §18 checklist; closeout.
 
 ## STOP CONDITION (user-imposed)
 Task is DONE only when the actual installed Windows app launches from the installed location

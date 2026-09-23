@@ -104,6 +104,13 @@ try {
   Write-Host "Portable profile after NSIS install: $postInstallProfile"
   $installedExe = Get-ChildItem -Path $installDir -Filter '*.exe' -Recurse -File | Where-Object { @('DentivaPro.exe', 'Dentiva Pro.exe') -contains $_.Name } | Select-Object -First 1
   if (!$installedExe) { throw "Installed Dentiva Pro application executable was not found under $installDir." }
+  # Persistency probe BEFORE installed launch: if the portable phases really
+  # wrote to $userData, its database must be non-trivial here. Cadence matters
+  # — a missing DB at this point means the installed phase environments differ.
+  $profileDb = Join-Path $userData 'dentiva-pro.sqlite'
+  $profileDbSize = if (Test-Path $profileDb) { (Get-Item $profileDb).Length } else { -1 }
+  Write-Host "user-data database before installed launch: $profileDb ($profileDbSize bytes)"
+  if ($profileDbSize -le 0) { throw "Portable phases produced no persistent database at $profileDb; installed launch would see a fresh workspace." }
   # The installed copy is what real users run from Program Files: prove its
   # app.asar contains the complete runtime module closure before launching.
   $installedAsar = Join-Path $installDir 'resources/app.asar'

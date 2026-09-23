@@ -13,10 +13,10 @@ import './styles.css';
 import { createApi } from './api.js';
 import { hasPermission, validateAttachmentFile, buildRestorePlan, calculateInvoice, moneyToCents, centsToMoney } from './core.js';
 import { periodBounds } from './domain.js';
+import { APP_VERSION } from './migrate-state.js';
 
 const api = createApi();
 const app = document.querySelector('#app');
-const APP_VERSION = '1.4.0';
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const now = () => new Date().toISOString();

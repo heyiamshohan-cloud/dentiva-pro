@@ -8,16 +8,29 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/windows-rele
 const smoke = fs.readFileSync(path.join(root, 'scripts/windows-smoke.ps1'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
 
-test('release workflow blocks on portable persistence, not the deferred installed-app smoke', () => {
-  assert.match(workflow, /Run Windows portable launch and restart persistence smoke/);
-  assert.match(workflow, /-PortableOnly/);
-  assert.doesNotMatch(workflow, /Run Windows install, launch, restart and uninstall smoke/);
+test('release workflow blocks on the full installed-app packaging gate (v1.5.1 hotfix contract)', () => {
+  // The release pipeline must inspect the real app.asar AND install the real
+  // installer + launch the installed executable. The old '-PortableOnly'
+  // invocation shipped v1.5.0 while the installed app crashed on startup, so
+  // this contract forbids ever reverting to portable-only gating.
+  assert.match(workflow, /Verify packaged ASAR contains the complete runtime module closure/);
+  assert.match(workflow, /node scripts\/verify-packaged-runtime\.mjs/);
   assert.match(workflow, /Build portable and installer packages/);
   assert.match(workflow, /Verify Windows PE artifacts/);
+  assert.match(workflow, /Run Windows portable AND installed app launch smoke/);
   assert.match(workflow, /Publish GitHub release assets/);
-  assert.match(smoke, /\[switch\]\$PortableOnly/);
-  assert.match(smoke, /Portable create\/restart persistence smoke passed/);
-  assert.match(smoke, /Installed-app launch\/restart\/uninstall remains manual user verification/);
+  // The smoke invocation must NOT pass -PortableOnly (portable-only gating masked v1.5.0).
+  const smokeInvocation = workflow.split('\n').filter((line) => line.includes('windows-smoke.ps1') && !line.trim().startsWith('#'));
+  assert.ok(smokeInvocation.length >= 1, 'workflow must invoke windows-smoke.ps1');
+  for (const line of smokeInvocation) assert.ok(!line.includes('-PortableOnly'), `workflow smoke invocation must not pass -PortableOnly: ${line.trim()}`);
+  // The smoke script itself must refuse startup module-load errors loudly and
+  // must verify the INSTALLED app.asar module closure before launching it.
+  assert.match(smoke, /ERR_MODULE_NOT_FOUND\|ERR_REQUIRE/);
+  assert.match(smoke, /verify-packaged-runtime\.mjs/);
+  assert.match(smoke, /Installed application is missing resources\/app\.asar/);
+  // -PortableOnly stays available for local debugging, but must carry a loud warning.
+  assert.match(smoke, /\*\*|-PortableOnly skips the installed-app gate|\$PortableOnly/);
+  assert.match(smoke, /NOT sufficient for release verification/);
 });
 
 test('Bengali locale covers the release-critical document and workflow surfaces', () => {

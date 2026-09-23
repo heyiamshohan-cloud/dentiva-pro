@@ -58,12 +58,23 @@ function Start-AndCheck([string]$path, [string]$dataDir, [string]$phase = 'verif
   }
   $log = Get-Content $logPath -Raw -ErrorAction SilentlyContinue
   $errorLog = Get-Content "$logPath.err" -Raw -ErrorAction SilentlyContinue
+  $profileFiles = Profile-Snapshot $dataDir
+  $streams = "$log`n$errorLog"
+  # v1.5.1 hardening: a module-load defect (e.g. the v1.5.0 app.asar src/**
+  # omission) must fail the gate loudly and never be masked by a hanging or
+  # half-booted process, so detect the exact startup-error families first.
+  $moduleLoadPattern = 'ERR_MODULE_NOT_FOUND|ERR_REQUIRE|Cannot find module|Cannot find package|Failed to resolve module|MODULE_NOT_FOUND'
+  if ($streams -match $moduleLoadPattern) {
+    $diagnostic = ($streams.Trim() -replace "\r?\n", ' | ')
+    if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
+    Write-Host "::error title=Electron smoke phase $phase module-load failure::$diagnostic"
+    throw "Electron smoke phase $phase hit a startup module-load error (app.asar packaging defect).`n$streams"
+  }
   if ($log -notmatch 'DENTIVA_SMOKE_RESULT:.*"ok":true') {
-    $profileFiles = Profile-Snapshot $dataDir
-    $diagnostic = (($log + "`n" + $errorLog + "`nprofile=$profileFiles`npreInstall=$preInstallProfile`npostInstall=$postInstallProfile").Trim() -replace "\r?\n", ' | ')
+    $diagnostic = (($streams + "`nprofile=$profileFiles`npreInstall=$preInstallProfile`npostInstall=$postInstallProfile").Trim() -replace "\r?\n", ' | ')
     if ($diagnostic.Length -gt 9000) { $diagnostic = $diagnostic.Substring(0, 9000) }
     Write-Host "::error title=Electron smoke phase $phase::$diagnostic"
-    throw "Electron smoke phase $phase did not report success.`n$log`n$errorLog`nprofile=$profileFiles"
+    throw "Electron smoke phase $phase did not report success.`n$streams`nprofile=$profileFiles"
   }
   return $log
 }
@@ -78,7 +89,7 @@ try {
   if (!(Test-Path $userData)) { throw 'Portable launch did not create a user-data profile.' }
   Start-AndCheck $portable $userData 'portable-verify' | Out-Null
   if ($PortableOnly) {
-    Write-Host 'Portable create/restart persistence smoke passed. Installed-app launch/restart/uninstall remains manual user verification.'
+    Write-Host 'Portable create/restart persistence smoke passed. WARNING: -PortableOnly skips the installed-app gate and is NOT sufficient for release verification (it masked the v1.5.0 installed-app startup crash).'
     return
   }
 
@@ -91,8 +102,14 @@ try {
   if ($install.ExitCode -ne 0) { throw "NSIS installer returned $($install.ExitCode)" }
   $postInstallProfile = Profile-Snapshot $userData
   Write-Host "Portable profile after NSIS install: $postInstallProfile"
-  $installedExe = Get-ChildItem -Path $installDir -Filter '*.exe' -Recurse -File | Where-Object { $_.Name -eq 'Dentiva Pro.exe' } | Select-Object -First 1
-  if (!$installedExe) { throw 'Installed Dentiva Pro application executable was not found.' }
+  $installedExe = Get-ChildItem -Path $installDir -Filter '*.exe' -Recurse -File | Where-Object { @('DentivaPro.exe', 'Dentiva Pro.exe') -contains $_.Name } | Select-Object -First 1
+  if (!$installedExe) { throw "Installed Dentiva Pro application executable was not found under $installDir." }
+  # The installed copy is what real users run from Program Files: prove its
+  # app.asar contains the complete runtime module closure before launching.
+  $installedAsar = Join-Path $installDir 'resources/app.asar'
+  if (!(Test-Path $installedAsar)) { throw "Installed application is missing resources/app.asar: $installDir" }
+  & node (Join-Path $PSScriptRoot 'verify-packaged-runtime.mjs') $installedAsar
+  if ($LASTEXITCODE -ne 0) { throw 'Installed app.asar failed the runtime module closure verification.' }
   Start-AndCheck $installedExe.FullName $userData 'installed-verify' | Out-Null
   $uninstaller = Get-ChildItem -Path $installDir -Filter 'unins*.exe' -Recurse -File | Select-Object -First 1
   if (!$uninstaller) { throw 'Generated uninstaller was not found.' }

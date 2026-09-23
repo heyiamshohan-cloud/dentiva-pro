@@ -1,7 +1,7 @@
 {
   "name": "dentiva-pro",
-  "version": "1.5.0",
-  "description": "Dentiva Pro \u2014 offline-first dental practice management for Windows",
+  "version": "1.5.1",
+  "description": "Dentiva Pro — offline-first dental practice management for Windows",
   "private": true,
   "type": "module",
   "main": "electron/main.mjs",
@@ -33,6 +33,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "src/**/*",
       "package.json"
     ],
     "directories": {
@@ -71,10 +72,11 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Dentiva Pro"
     },
-    "copyright": "Copyright \u00a9 2026 Md. Shohan Khan",
+    "copyright": "Copyright © 2026 Md. Shohan Khan",
     "extraMetadata": {
       "dentivaBuild": "2026.09.22"
-    }
+    },
+    "executableName": "DentivaPro"
   },
   "author": {
     "name": "Md. Shohan Khan",

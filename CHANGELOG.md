@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.5.1 — Post-release packaging hotfix: installed-app startup restored, professional icon, packaging gates enforced
+
+**Fixes (release-blocking)**
+- **Installed Windows app crashed at startup** in v1.5.0 with `ERR_MODULE_NOT_FOUND: …\app.asar\src\core.js` (imported from `app.asar\electron\lib\records.mjs`). Root cause: electron-builder `build.files` shipped only `dist/`, `electron/`, `package.json` — the shared service layer `src/**` (`core.js`, `domain.js`, `migrate-state.js`, `notifications.js`, `ops.js`, `queries.js`, `backup-schedule.mjs`) was excluded from `app.asar` even though the production module graph (main → `lib/db.mjs` → `lib/records.mjs` → `../../src/core.js`) requires it at boot. `build.files` now ships `src/**/*`.
+- **New application icon**: programmatically rendered vector tooth mark — mathematically centered, balanced margins, teal brand tile retained — with a true multi-resolution Windows ICO (16/24/32/48/64/128/256 PNG layers, 256 PNG-compressed per Windows spec) plus a 1024×1024 PNG master and regenerated `icon.svg`. Replaces the cropped/uncentered artwork everywhere the OS consumes it (exe, installer, desktop/Start-menu shortcuts, taskbar, Add/Remove Programs).
+
+**Regression gates (this class of defect cannot pass silently again)**
+- `tests/packaging.test.mjs` computes the production runtime module closure from `electron/main.mjs` + `electron/preload.cjs` via shared `scripts/runtime-module-graph.mjs` and fails unless every runtime module is covered by `build.files` (verified to fail on the v1.5.0 config and pass on the fixed one).
+- New CI step **Verify packaged ASAR contains the complete runtime module closure** (`scripts/verify-packaged-runtime.mjs`) inspects the actual built `app.asar` after packaging, before any launch.
+- Windows smoke gate hardened: the previous `-PortableOnly` CI invocation masked the installed-app failure. CI now NSIS-installs silently, verifies the **installed** `resources/app.asar` module closure, launches the installed executable with a real UI data operation, verifies restart persistence, and uninstalls. Launch logs are rejected on any `ERR_MODULE_NOT_FOUND` / `ERR_REQUIRE*` / `Cannot find module` content explicitly.
+- `build.executableName: DentivaPro` for a consistent installed binary name.
+
+**Verification**
+- `node --test tests/*.test.mjs`: green on this commit; packaging regression gate proven both directions.
+- `v1.5.0` (tag `v1.5.0`, commit `c4ddab8`) remains published and untouched; no release history was rewritten.
+- Full post-release audit: `docs/POST_RELEASE_PACKAGING_HOTFIX_AUDIT.md`.
+
+
 ## v1.5.0 — Live signals, automated protection, complete surfaces
 
 **New & completed**

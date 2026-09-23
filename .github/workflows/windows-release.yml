@@ -17,7 +17,7 @@ jobs:
   windows-x64:
     name: Build Windows x64 application
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -62,6 +62,9 @@ jobs:
           & npm run dist:win 2>&1 | Tee-Object -FilePath release-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify packaged ASAR contains the complete runtime module closure
+        run: node scripts/verify-packaged-runtime.mjs
+
       - name: Verify Windows PE artifacts
         shell: pwsh
         run: |
@@ -77,19 +80,23 @@ jobs:
           if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) { throw "Installer is not a Windows PE executable: $($setup.Name)" }
           Write-Host "Verified Windows installer: $($setup.Name) ($($setupBytes.Length) bytes)"
 
-      - name: Run Windows portable launch and restart persistence smoke
+      - name: Run Windows portable AND installed app launch smoke (startup/DB/UI/restart/uninstall)
         shell: pwsh
         run: |
           $version = node -p "require('./package.json').version"
           $portable = "release\\Dentiva-Pro-$version-Windows-x64.exe"
           $installer = "release\\Dentiva-Pro-$version-Windows-x64-Setup.exe"
-          ./scripts/windows-smoke.ps1 -PortablePath $portable -InstallerPath $installer -PortableOnly
+          # Full gate: portable launch + NSIS silent install + installed-app
+          # launch from the installed directory + persistence + uninstall.
+          # -PortableOnly previously masked the v1.5.0 installed-app startup
+          # crash and must never be passed from release CI.
+          ./scripts/windows-smoke.ps1 -PortablePath $portable -InstallerPath $installer
 
-      - name: Upload Windows portable smoke evidence
+      - name: Upload Windows smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Dentiva-Pro-${{ github.run_number }}-windows-portable-smoke-evidence
+          name: Dentiva-Pro-${{ github.run_number }}-windows-smoke-evidence
           if-no-files-found: warn
           retention-days: 30
           path: windows-smoke-evidence/**

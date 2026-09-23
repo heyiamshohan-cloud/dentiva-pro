@@ -254,6 +254,19 @@ function smokeVerify() {
       const info = await globalThis.dentiva?.invoke('workspace:info');
       storageInfo = info?.storage ? { bytes: info.storage.bytes, recordCounts: info.storage.recordCounts } : null;
     } catch { /* snapshot best effort */ }
+    // Decisive boot-failure probe: report the bundle script tag, then try to
+    // fetch it exactly as the module loader would — separates "never fetched"
+    // from "fetched but never evaluated".
+    const scriptSrc = document.querySelector('script[type="module"]')?.src || '';
+    let bundleProbe = null;
+    if (scriptSrc) {
+      try {
+        const response = await fetch(scriptSrc);
+        bundleProbe = `${response.status}:${(await response.text()).length}`;
+      } catch (probeError) {
+        bundleProbe = `ERR:${String(probeError?.message || probeError).slice(0, 140)}`;
+      }
+    }
     return {
       body: (document.body.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 1200),
       forms: [...document.querySelectorAll('form[data-form]')].map((form) => form.dataset.form),
@@ -266,7 +279,11 @@ function smokeVerify() {
       bundleResources: performance.getEntriesByType('resource')
         .filter((entry) => /\/assets\/.+\.(js|css)(\?|$)/.test(entry.name))
         .map((entry) => `${entry.name.split('/').pop()}:${entry.responseEnd.toFixed(0)}`)
-        .slice(0, 4)
+        .slice(0, 4),
+      scriptSrc,
+      bundleProbe,
+      headHtml: (document.head?.innerHTML || '').slice(0, 240),
+      scriptTags: [...document.getElementsByTagName('script')].map((s) => s.src || 'inline').slice(0, 4)
     };
   };
   return (async () => {

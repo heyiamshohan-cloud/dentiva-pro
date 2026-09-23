@@ -52,7 +52,7 @@ v1.5.0 (tag `c4ddab8`) is PRESERVED and must never be edited/overwritten.
 - Packaging gate directionality: red on v1.5.0 config (2/4), green on fixed config (4/4).
 - `verify-packaged-runtime.mjs` fail-path exercised (clean message when asar absent).
 
-## Live status (2026-09-23)
+## Live status (2026-09-23, second session)
 **Core hotfix PROVEN on the installed artifact (CI run 35844145583):**
 - asar-closure step ✓ (all 21 runtime modules + 11 src files inside built app.asar)
 - portable create + restart-persistence ✓  (module graph boots from asar)
@@ -66,13 +66,21 @@ v1.5.0 (tag `c4ddab8`) is PRESERVED and must never be edited/overwritten.
   (userData/dbBytes/migration/main counts) + renderer console/load bridge in
   electron/main.mjs; pwsh-side profile-DB persistency probe before installed launch.
 
-**⚠ EXTERNAL BLOCKER (in effect now):** sandbox GitHub credentials expired mid-session
-(gh: "Bad credentials", git push: prompts disabled). **3 commits pending push**:
-`faa6cf3` (smoke main-side + renderer diagnostics), `a14d2c2` (pwsh profile persistency
-probe + pre/post launch snapshots), `ed13c39` (SOURCE-LEVEL fix: detectLayout busy-retry
-before 'corrupt' quarantine + loud preserved-path logging — the fresh-workspace symptom
-the installed gate caught is most plausibly this transient-lock false-positive). Remote
-tip is `f46a15b`. If 401 persists, **user must reconnect GitHub (Arena integration)**.
+**⚠ INTERMITTENT BLOCKER:** sandbox GitHub credentials expire every ~45 min
+(401 Bad credentials); all REMOTE state confirmed intact via ls-remote between windows.
+Remote tip `7605277` (SMOKE re-auth + SMOKE_MARK). Active CI run at last seen:
+35853147811 (in_progress).
+
+**Defect ledger so far (installed-app lane):**
+1. src/ excluded from asar → FIXED (build.files; regression test; CI asar gate).
+2. @electron/asar backslash members on Windows → FIXED (normalizePackedMember + test).
+3. detectLayout first-error→corrupt→fresh workspace → HARDENED (busy-retry + loud log).
+4. ABSOLUTE /assets bundle URL under file:// → FIXED (vite base './'; installed renderer
+   now boots fully: bootStatus=ready, sign-in UI renders, mainCounts show data).
+5. mid-verify session flip → login screen reappeared after nav click (run 35851946957
+   showed patients:1 users:1 in DB + auth screen body). Mitigation landed in 7605277:
+   smoke verify re-auths on demand with loud SMOKE_MARK timeline; next run identifies
+   WHERE/WHY the session flips (renderer reload, idle lock or session-manager churn).
 
 ## Remaining work (in order)
 1. Push faa6cf3 (+ any fix) → CI run; read DENTIVA_SMOKE_DIAG + renderer bridge lines;

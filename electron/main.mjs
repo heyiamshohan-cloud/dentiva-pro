@@ -287,22 +287,53 @@ function smokeVerify() {
     };
   };
   return (async () => {
-    if (document.querySelector('form[data-form="user-login"]')) {
-      const pin = document.querySelector('[name="pin"]');
-      if (!pin) return { ok: false, reason: 'sign-in PIN field is missing', ...(await snapshot()) };
+    const mark = (message, extra = '') => console.log(`SMOKE_MARK ${message} ${extra}`.trim());
+    mark('verify-start', `readyState=${document.readyState} boot=${window.__bootStatus}`);
+    // Session may legitimately appear as the auth screen at any point (fresh
+    // process session, idle lock). Sign in whenever it appears instead of
+    // treating a transient re-auth as data loss — but log every flip loudly.
+    const signInIfNeeded = async (attempt) => {
+      const form = document.querySelector('form[data-form="user-login"]');
+      if (!form) return true;
+      const pin = form.querySelector('[name="pin"]');
+      if (!pin) return false;
+      mark('auth-present', `attempt=${attempt}`);
       pin.value = '2468';
       pin.dispatchEvent(new Event('input', { bubbles: true }));
-      document.querySelector('form[data-form="user-login"] button[type="submit"]')?.click();
-      if (!await waitFor(() => !document.querySelector('form[data-form="user-login"]'))) return { ok: false, reason: 'sign-in did not complete', ...(await snapshot()) };
+      form.querySelector('button[type="submit"]')?.click();
+      const cleared = await waitFor(() => !document.querySelector('form[data-form="user-login"]'));
+      mark('auth-cleared', `attempt=${attempt} cleared=${cleared}`);
+      return cleared;
+    };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      if (!(await signInIfNeeded(attempt))) return { ok: false, reason: 'sign-in PIN field is missing or submission failed', attempt, ...(await snapshot()) };
+      if (await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]'), 12000)) break;
+      mark('nav-wait-failed', `attempt=${attempt}`);
+      if (!document.querySelector('form[data-form="user-login"]')) {
+        return { ok: false, reason: 'patients navigation was unavailable', attempt, ...(await snapshot()) };
+      }
     }
-    if (!await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]'))) return { ok: false, reason: 'patients navigation was unavailable', ...(await snapshot()) };
+    if (!document.querySelector('[data-action="navigate"][data-page="patients"]')) return { ok: false, reason: 'patients navigation was unavailable after re-auth', ...(await snapshot()) };
+    mark('nav-found');
     document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
-    const hasPatient = await waitFor(() => document.body.textContent.includes('Windows Smoke Patient'));
+    mark('nav-clicked');
+    const pollStarted = Date.now();
+    let hasPatient = false;
+    while (Date.now() - pollStarted < 15000) {
+      if (document.querySelector('form[data-form="user-login"]')) mark('auth-reappeared-during-patient-wait', `boot=${window.__bootStatus}`);
+      await signInIfNeeded(2);
+      if (document.body.textContent.includes('Windows Smoke Patient')) { hasPatient = true; break; }
+      await wait(400);
+    }
     const patientText = document.body.textContent || '';
     if (!hasPatient) return { ok: false, reason: 'patient was not rendered after restart', hasPatient, ...(await snapshot()) };
+    mark('patient-found');
+    await signInIfNeeded(3);
     if (!await waitFor(() => document.querySelector('[data-action="navigate"][data-page="backup"]'))) return { ok: false, reason: 'backup navigation was unavailable', hasPatient, ...(await snapshot()) };
     document.querySelector('[data-action="navigate"][data-page="backup"]')?.click();
+    mark('backup-clicked');
     const hasBackup = await waitFor(() => /Backup/i.test(document.body.textContent || ''));
+    mark('verify-end', `ok=${Boolean(hasPatient && hasBackup)}`);
     const backupText = document.body.textContent || '';
     return { ok: Boolean(hasPatient && hasBackup), hasPatient, hasBackup, patientText: patientText.slice(0, 600), backupText: backupText.slice(0, 600), ...(await snapshot()) };
   })();

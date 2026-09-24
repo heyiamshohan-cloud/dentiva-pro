@@ -128,6 +128,14 @@ try {
   $preLaunchProfile = Profile-Snapshot $userData
   Write-Host "user-data profile before installed launch: $preLaunchProfile"
   Start-AndCheck $installedExe.FullName $userData 'installed-verify' | Out-Null
+  # Production document workflows on THIS build (v1.6.1 gate): prescription /
+  # invoice / receipt / statement preview + PDF (A4/A5/Letter/80mm, Bengali,
+  # long names, many rows) via smoke-deterministic PDF paths under %TEMP%.
+  Start-AndCheck $installedExe.FullName $userData 'docs' | Out-Null
+  $smokePdfDir = Join-Path $env:TEMP 'dentiva-smoke-pdf'
+  if (Test-Path $smokePdfDir) {
+    Get-ChildItem $smokePdfDir -Filter '*.pdf' -File | ForEach-Object { Write-Host ("DOCS-PDF {0} {1} bytes" -f $_.Name, $_.Length) }
+  } else { Write-Warning 'docs phase produced no PDF directory' }
   $postLaunchProfile = Profile-Snapshot $userData
   Write-Host "user-data profile after installed launch: $postLaunchProfile"
   $uninstaller = Get-ChildItem -Path $installDir -Filter 'unins*.exe' -Recurse -File | Select-Object -First 1
@@ -147,6 +155,8 @@ finally {
   $evidenceDir = if ($env:GITHUB_WORKSPACE) { Join-Path $env:GITHUB_WORKSPACE 'windows-smoke-evidence' } else { Join-Path (Get-Location) 'windows-smoke-evidence' }
   New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
   if (Test-Path $root) { Get-ChildItem $root -Filter '*.log*' -File -ErrorAction SilentlyContinue | Copy-Item -Destination $evidenceDir -Force -ErrorAction SilentlyContinue }
+  $smokePdfResultDir = Join-Path $env:TEMP 'dentiva-smoke-pdf'
+  if (Test-Path $smokePdfResultDir) { New-Item -ItemType Directory -Path (Join-Path $evidenceDir 'document-pdfs') -Force | Out-Null; Get-ChildItem $smokePdfResultDir -Filter '*.pdf' -File | Copy-Item -Destination (Join-Path $evidenceDir 'document-pdfs') -Force -ErrorAction SilentlyContinue }
   if (Test-Path $root) { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
   if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue }
 }

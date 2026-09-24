@@ -78,9 +78,17 @@ test('prescription document: clinical sections render, financial terms NEVER ren
   // Prescription is a clinical document: money vocabulary, totals section and currency symbols are forbidden
   // (check CONTENT only — the shared stylesheet legitimately defines the doc-totals class for invoices).
   const content = html.slice(html.indexOf('</style>'));
-  for (const forbidden of ['৳', 'Subtotal', 'Grand total', 'Discount', 'Tax', 'Paid', 'Due', 'Payment method', 'Unit price', '<section class="doc-totals']) {
+  // The prescription is a clinical document ONLY. Any of these tokens means a
+  // financial leak: currency symbol, billing vocabulary, payment state, or the
+  // invoice totals machinery. Regressions here must fail the release gate.
+  for (const forbidden of ['৳', 'Subtotal', 'subtotal', 'Grand total', 'Discount', 'Tax', 'tax', 'Paid', 'Due', 'dueCents', 'Amount', 'amount', 'Payment', 'Invoice', 'invoice', 'Payment method', 'Unit price', 'Money receipt', '<section class="doc-totals']) {
     assert.ok(!content.includes(forbidden), `prescription must NOT contain '${forbidden}'`);
   }
+  // Positive identity proof: the header carries clinic + dentist + registration + contact
+  // straight from settings; patient identity carries the stable code, sex and age.
+  assert.ok(/Patient ID/.test(content) && content.includes('DP-000124'));
+  assert.ok(content.includes('43 yrs') && content.includes('Female'));
+  assert.ok(content.includes('992 Prolls') === false, 'no other patient identity may appear');
 });
 
 test('forensic document render: 40 meds, long Bengali name/notes, multipage-safe CSS', () => {

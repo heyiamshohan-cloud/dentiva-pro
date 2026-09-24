@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1 (2026-09-24) — Final flagship polish + document workflow verification
+
+- **Installed-app document verification (new CI gate):** the Windows smoke gains a `docs` phase that drives the REAL v1.6.1 UI through all four production documents — prescription (mandated C/C + O/E chips, R/E, Advice, med rows incl. Bengali, long names, quantity) → preview → PDF on **A4 + A5**; invoice (18 rows, Bengali items, discount) → preview → PDF on **A4 + Letter**; payment receipt (bKash reference, remaining due) → preview → PDF on **80 mm + A5**; patient statement (opening/closing balance, patient code) → preview → PDF on **A4**. PDF bytes are asserted and archived as run evidence (`windows-smoke-evidence/document-pdfs/`).
+- **Regression hardening:** the money-free prescription contract now rejects every forbidden token (currency symbol, payment/invoice/amount/subtotal/discount/tax/total/paid/due vocabulary, totals machinery) at build level; Playwright screen-audit suite covers patients list (code column, sort/filter/column panels, no horizontal overflow), command palette (actions + ArrowDown/Enter keyboard-run), Patient 360 (identity strip, lifetime cards, statement opening balance), prescription builder (exact C/C and O/E terminology chips, preview identity + money-free).
+- Deterministic smoke-only PDF path (temp dir, sanitized filename — no user-controlled paths, active only under DENTIVA_SMOKE=1).
+
 ## 1.6.0 (2026-09-24) — Flagship product-wide upgrade
 
 ### Clinical — the prescription is a clinical document (never a bill)

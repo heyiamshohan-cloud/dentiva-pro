@@ -143,7 +143,7 @@ async function runSmokePhase() {
   } catch (diagError) {
     console.error('DENTIVA_SMOKE_DIAG_FAILED', diagError.message);
   }
-  const script = phase === 'create' ? `(${smokeCreate.toString()})()` : `(${smokeVerify.toString()})()`;
+  const script = phase === 'create' ? `(${smokeCreate.toString()})()` : phase === 'docs' ? `(${smokeDocs.toString()})()` : `(${smokeVerify.toString()})()`;
   try {
     const result = await mainWindow.webContents.executeJavaScript(script, true);
     console.log(`DENTIVA_SMOKE_RESULT:${JSON.stringify({ phase, ...result })}`);
@@ -230,6 +230,181 @@ function smokeCreate() {
     const backupPage = document.body.textContent.includes('Backup') || document.body.textContent.includes('backup');
     if (!backupPage) throw new Error('backup page did not render');
     return { ok: true, patient, backupPage };
+  })();
+}
+
+
+// smokeDocs (phase=docs): real Windows-build verification of the four production
+// document workflows — prescription, invoice, receipt, statement — through the
+// REAL renderer UI paths (modals, preview modal, print:html) on THIS build.
+// The PDF save uses the smoke-only deterministic temp path; print goes through
+// the identical engine markup (native print dialogs cannot be automated).
+function smokeDocs() {
+  const wait = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms));
+  const waitFor = async (predicate, timeout = 15000) => {
+    const started = Date.now();
+    while (Date.now() - started < timeout) { if (predicate()) return true; await wait(120); }
+    return false;
+  };
+  const mark = (m, e = '') => console.log(`SMOKE_MARK ${m} ${e}`.trim());
+  const invoke = (channel, payload) => globalThis.dentiva.invoke(channel, payload);
+  const op = (name, payload) => invoke('ops:invoke', { name, payload: { ...payload, confirmConflict: true } });
+  const query = (name, params = {}) => invoke('query:run', { name, params });
+  const setField = (form, name, value) => {
+    const el = form.querySelector(`[name="${name}"]`);
+    if (!el) throw new Error(`docs-flow missing field ${name}`);
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const clickEl = async (el, label) => { if (!el) throw new Error(`docs-flow missing ${label}`); el.click(); await wait(); };
+  const previewHtml = () => document.querySelector('.print-preview-frame')?.getAttribute('srcdoc') || '';
+  const pdfFor = async (title, pageSize) => {
+    const html = previewHtml();
+    if (!html) throw new Error(`preview markup missing for ${title}`);
+    const result = await invoke('print:html', { html, options: { mode: 'pdf', pageSize, title } });
+    if (!(result && result.ok && result.saved && result.bytes > 1500)) throw new Error(`pdf save failed for ${title}: ${JSON.stringify(result && result.ok === false ? result : { ok: result && result.ok, bytes: result && result.bytes })}`);
+    return result;
+  };
+  const closePreview = async () => {
+    for (let i = 0; i < 3; i += 1) {
+      document.querySelector('[data-action="close-modal"]')?.click();
+      await wait(220);
+      if (!document.querySelector('.modal-overlay, .modal-backdrop, [data-action="close-modal"]')) return;
+    }
+  };
+  const signInIfNeeded = async () => {
+    const form = document.querySelector('form[data-form="user-login"]');
+    if (!form) return true;
+    form.querySelector('[name="pin"]').value = '2468';
+    form.querySelector('[name="pin"]').dispatchEvent(new Event('input', { bubbles: true }));
+    form.querySelector('button[type="submit"]')?.click();
+    return waitFor(() => !document.querySelector('form[data-form="user-login"]'));
+  };
+  return (async () => {
+    mark('docs-start');
+    await wait(500);
+    await signInIfNeeded();
+    if (!(await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]')))) throw new Error('docs-flow: app shell did not render');
+
+    // Seed a long-name Bengali patient + records through the service layer
+    // (same code path as the UI submits; the UI interaction is verified below
+    // via the modal-driven document previews).
+    const longName = 'ডেন্টিভা স্মোক রোগী আব্দুল্লাহ আল মামুন পাটোয়ারী স্পেশাল ডকুমেন্ট টেস্ট';
+    const created = await op('patient.create', { fullName: longName, gender: 'Male', phone: '01900000000', address: '৫/ক টেস্ট রোড, ধানমন্ডি, ঢাকা — a very long address line to stress the document header wrapping across lines' });
+    if (!created?.ok) throw new Error(`docs-flow patient.create: ${created?.error || 'failed'}`);
+    const patient = created.record;
+    mark('docs-patient', patient.patientCode);
+    const visit = await op('visit.create', { patientId: patient.id, date: '2026-09-24', reason: 'Doc flow', chiefComplaint: 'Pain On', diagnosis: 'Pulpitis 46' });
+    if (!visit?.ok) throw new Error('docs-flow visit.create failed');
+    const invoiceItems = Array.from({ length: 18 }, (_, i) => ({ name: `${i % 2 ? 'কনসালট' : 'RCT'} item ${i + 1}`, quantity: 1 + (i % 3), unitPrice: 500 + i * 25 }));
+    const invoice = await op('invoice.create', { patientId: patient.id, date: '2026-09-24', items: invoiceItems, discount: 100, notes: 'Doc-flow invoice — বাংলা নোট' });
+    if (!invoice?.ok) throw new Error(`docs-flow invoice.create: ${invoice?.error}`);
+    const paymentDue = await query('list', { collection: 'invoices', page: 1, pageSize: 3, filters: { patientId: patient.id } });
+    const invId = (paymentDue.rows || [])[0]?.id;
+    const payment = await op('payment.record', { patientId: patient.id, invoiceId: invId, date: '2026-09-24', amount: 1200, method: 'bKash', reference: 'TX9AB12XYZ34' });
+    if (!payment?.ok) throw new Error(`docs-flow payment.record: ${payment?.error}`);
+
+    // ── 1. PRESCRIPTION through the real modal + chips + preview ──────────
+    document.querySelector('[data-action="navigate"][data-page="prescriptions"]')?.click();
+    if (!(await waitFor(() => document.querySelector('[data-action="open-prescription"]')))) throw new Error('prescriptions page did not render');
+    await clickEl(document.querySelector('[data-action="open-prescription"]'), 'open-prescription');
+    const rxForm = document.querySelector('form[data-form="prescription"]');
+    if (!rxForm) throw new Error('prescription builder did not open');
+    setField(rxForm, 'patientId', patient.id);
+    setField(rxForm, 'requiredExamination', 'IOPA X-ray 46');
+    setField(rxForm, 'diagnosis', 'Irreversible pulpitis 46 — ডায়াগনোসিস');
+    setField(rxForm, 'advice', 'Warm saline rinse তিন বার দৈনিক. Follow instructions carefully.');
+    rxForm.querySelector('[data-action="rx-opt-toggle"][data-opt="Pain On"]')?.click();
+    rxForm.querySelector('[data-action="rx-opt-toggle"][data-opt="G. Carries"]')?.click();
+    rxForm.querySelector('[data-action="rx-opt-toggle"][data-opt="Perio Dontitis"]')?.click();
+    setField(rxForm, 'medications[0][medicine]', 'Amoxicillin ট্যাবলেট Very-Long-Brand-Name');
+    setField(rxForm, 'medications[0][form]', 'Tablet');
+    setField(rxForm, 'medications[0][strength]', '500mg');
+    setField(rxForm, 'medications[0][dosage]', '1');
+    setField(rxForm, 'medications[0][frequency]', '1-1-1');
+    setField(rxForm, 'medications[0][durationValue]', '5');
+    setField(rxForm, 'medications[0][durationUnit]', 'days');
+    setField(rxForm, 'medications[0][foodRelation]', 'After food');
+    setField(rxForm, 'medications[0][quantity]', '15');
+    setField(rxForm, 'medications[0][instructions]', 'প্রতিদিন খাবারের পরে — with plenty of water');
+    document.querySelector('[data-action="rx-row-add"]')?.click();
+    await wait(150);
+    setField(rxForm, 'medications[1][medicine]', 'Mefenamic Acid ক্যাপসুল');
+    setField(rxForm, 'medications[1][frequency]', 'SOS');
+    setField(rxForm, 'medications[1][foodRelation]', 'With food');
+    mark('docs-rx-filled');
+    await clickEl(document.querySelector('[data-action="rx-preview"]'), 'rx-preview');
+    if (!(await waitFor(() => previewHtml().length > 500))) throw new Error('prescription preview did not render');
+    const rxHtml = previewHtml();
+    const rxNeeds = ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'G. Carries', 'Perio Dontitis', 'Windows Smoke Dental', 'Dr. Smoke Test', patient.patientCode, 'Long-Brand-Name', 'ট্যাবলেট', 'ক্যাপসুল', 'প্রতিদিন'];
+    for (const token of rxNeeds) if (!rxHtml.includes(token)) throw new Error(`prescription missing '${token}'`);
+    const rxContent = rxHtml.slice(rxHtml.indexOf('</style>'));
+    for (const bad of ['৳', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment method', 'Grand total', 'Unit price', 'doc-totals']) {
+      if (rxContent.includes(bad)) throw new Error(`prescription leaked financial token '${bad}'`);
+    }
+    mark('docs-rx-content-ok');
+    await pdfFor('docs-rx-A4', 'A4');
+    mark('docs-rx-pdf-a4');
+    await pdfFor('docs-rx-A5', 'A5');
+    mark('docs-rx-pdf-a5');
+    await closePreview();
+
+    // ── 2. INVOICE preview + PDF (18 rows, Bengali, discount) ─────────────
+    const invRec = await query('record', { collection: 'invoices', id: invId });
+    const inv = invRec.record;
+    if (!inv) throw new Error('invoice not found for preview');
+    document.querySelector('[data-action="navigate"][data-page="billing"]')?.click();
+    if (!(await waitFor(() => document.querySelector(`[data-action="print-invoice"][data-id="${invId}"]`)))) throw new Error('billing list row for invoice missing');
+    await clickEl(document.querySelector(`[data-action="print-invoice"][data-id="${invId}"]`), 'print-invoice');
+    if (!(await waitFor(() => previewHtml().length > 500))) throw new Error('invoice preview did not render');
+    const invHtml = previewHtml();
+    for (const token of [inv.invoiceNumber, patient.patientCode, 'কনসালট', 'Subtotal', 'Discount', 'Total']) {
+      if (!invHtml.includes(token)) throw new Error(`invoice missing '${token}'`);
+    }
+    mark('docs-invoice-content-ok');
+    await pdfFor('docs-invoice-A4', 'A4');
+    await pdfFor('docs-invoice-Letter', 'Letter');
+    mark('docs-invoice-pdf-ok');
+    await closePreview();
+
+    // ── 3. RECEIPT preview + PDF (80mm) ────────────────────────────────────
+    document.querySelector('[data-action="navigate"][data-page="payments"]')?.click();
+    const receiptRowSel = `[data-action="print-payment"][data-id="${payment.record.id}"]`;
+    if (!(await waitFor(() => document.querySelector(receiptRowSel)))) throw new Error('payments list row missing');
+    await clickEl(document.querySelector(receiptRowSel), 'print-payment');
+    if (!(await waitFor(() => previewHtml().length > 400))) throw new Error('receipt preview did not render');
+    const rcHtml = previewHtml();
+    for (const token of [payment.record.receiptNumber, patient.patientCode, 'bKash', 'TX9AB12XYZ34', 'Remaining due']) {
+      if (!rcHtml.includes(token)) throw new Error(`receipt missing '${token}'`);
+    }
+    mark('docs-receipt-content-ok');
+    await pdfFor('docs-receipt-80mm', 'Receipt80');
+    await pdfFor('docs-receipt-A5', 'A5');
+    mark('docs-receipt-pdf-ok');
+    await closePreview();
+
+    // ── 4. STATEMENT via patient 360 + PDF ─────────────────────────────────
+    document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
+    if (!(await waitFor(() => document.body.textContent.includes(patient.patientCode)))) throw new Error('patient list does not show the new patient code');
+    const rowBtn = [...document.querySelectorAll('[data-action="open-patient-profile"]')].find((b) => b.closest('tr')?.textContent.includes(patient.patientCode));
+    await clickEl(rowBtn || document.querySelector(`[data-action="open-patient-profile"][data-id="${patient.id}"]`), 'open-patient-profile');
+    if (!(await waitFor(() => document.querySelector('[data-tab="statement"], [data-action="patient-tab"][data-tab="statement"]'), 8000))) throw new Error('patient 360 tabs missing');
+    (document.querySelector('[data-action="patient-tab"][data-tab="statement"]') || document.querySelector('[data-tab="statement"]'))?.click();
+    if (!(await waitFor(() => document.body.textContent.includes('Opening balance') || document.body.textContent.includes('Statement'), 8000))) throw new Error('statement tab did not render');
+    const stmtBtn = document.querySelector('[data-action="export-patient-statement-pdf"]');
+    await clickEl(stmtBtn, 'export-patient-statement-pdf');
+    if (!(await waitFor(() => previewHtml().length > 400))) throw new Error('statement preview did not render');
+    const stHtml = previewHtml();
+    for (const token of [patient.patientCode, longName, 'balance', 'bKash']) {
+      if (!stHtml.toLowerCase().includes(token.toLowerCase())) throw new Error(`statement missing '${token}'`);
+    }
+    mark('docs-statement-content-ok');
+    await pdfFor('docs-statement-A4', 'A4');
+    mark('docs-statement-pdf-ok');
+    await closePreview();
+
+    return { ok: true, patientCode: patient.patientCode, pdfs: 7 };
   })();
 }
 
@@ -417,6 +592,15 @@ app.whenReady().then(async () => {
       }
       // mode === 'pdf' — render PDF then let the user pick the save location.
       const pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: { marginType: 'default' }, pageSize: pageSizeForPdf(pageSize) });
+      if (isSmoke) {
+        // Smoke-only deterministic path: never a dialog, never user-controlled —
+        // filename is derived from the sanitized title inside the OS temp dir.
+        const smokeDir = path.join(os.tmpdir(), 'dentiva-smoke-pdf');
+        await fsp.mkdir(smokeDir, { recursive: true });
+        const target = path.join(smokeDir, safePdfFilename(title));
+        await fsp.writeFile(target, pdf);
+        return { ok: true, saved: true, path: target, bytes: pdf.length, pageSize };
+      }
       const picked = await dialog.showSaveDialog(mainWindow, {
         title: `Save ${title}`,
         defaultPath: safePdfFilename(title),

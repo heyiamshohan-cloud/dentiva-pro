@@ -127,3 +127,112 @@ test.describe('v1.4.0 workspace layout', () => {
     await expect(page.locator('#main-content .page-header')).toBeVisible();
   });
 });
+
+/**
+ * v1.6.1 FLAGSHIP SCREEN AUDIT — patients list, command palette, Patient 360,
+ * prescription builder + preview. Real Chromium rendering at every shipped
+ * viewport (projects matrix 1280x720 → 3840x2160).
+ */
+test.describe('flagship screen audit (v1.6.1)', () => {
+  async function createPatientViaUi(page, name) {
+    await page.locator('[data-action="open-patient"]').first().click();
+    const form = page.locator('form[data-form="patient"]');
+    await expect(form).toBeVisible();
+    await form.locator('input[name="fullName"]').fill(name);
+    await form.locator('input[name="phone"]').fill('01700000111');
+    await form.locator('button[type="submit"]').click();
+    await expect(form).toHaveCount(0);
+  }
+
+  test('patients list: code column, toolbar, advanced + columns panels, no overflow', async ({ page }) => {
+    await page.goto('/');
+    await completeFirstRun(page);
+    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
+    const list = page.locator('[data-action="navigate"][data-page="patients"]');
+    await list.click();
+    await expect(page.locator('text=DP-')).toBeVisible({ timeout: 10_000 });
+    // toolbar controls exist and are operable
+    await expect(page.locator('[data-change="patient-sort"]')).toBeVisible();
+    await page.locator('[data-action="patient-filters-toggle"]').click();
+    await expect(page.locator('[data-change="patient-tag-filter"], select.patient-filter, .filter-panel').first()).toBeVisible();
+    await page.locator('[data-action="patient-columns-toggle"]').click();
+    const panels = page.locator('.filter-panel');
+    const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const viewWidth = (await page.viewportSize()).width;
+    expect(docWidth, 'patients must not overflow horizontally').toBeLessThanOrEqual(viewWidth + 2);
+    await page.screenshot({ path: 'test-results/audit-patients.png', fullPage: true });
+  });
+
+  test('command palette: actions group, keyboard navigation runs', async ({ page }) => {
+    await page.goto('/');
+    await completeFirstRun(page);
+    await page.keyboard.press('Control+k');
+    const input = page.locator('[data-input="command-search"]');
+    await expect(input).toBeVisible();
+    await expect(page.locator('#command-results .command-section')).not.toHaveCount(0);
+    await input.fill('pat');
+    await expect(page.locator('#command-results .command-row').first()).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('#command-results .command-row.focused')).toHaveCount(1);
+    await input.fill('queue');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('h1,h2', { hasText: /queue/i }).first()).toBeVisible();
+  });
+
+  test('patient 360: identity strip, financial cards, tabs; statement shows opening balance', async ({ page }) => {
+    await page.goto('/');
+    await completeFirstRun(page);
+    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
+    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await page.locator('tbody tr').first().click();
+    await expect(page.locator('.patient-sub')).toContainText('DP-');
+    const tabs = page.locator('[data-action="patient-tab"]');
+    const tabCount = await tabs.count();
+    expect(tabCount, 'patient 360 needs at least 6 tabs').toBeGreaterThanOrEqual(6);
+    await expect(page.locator('text=Lifetime billed')).toBeVisible();
+    await page.locator('[data-action="patient-tab"][data-tab="statement"]').click();
+    await expect(page.locator('text=Opening balance')).toBeVisible();
+    await page.locator('[data-action="patient-tab"][data-tab="visits"]').click();
+    await page.screenshot({ path: 'test-results/audit-360.png', fullPage: true });
+  });
+
+  test('prescription builder: mandated C/C + O/E chips, R/E/Advice sections, money-free preview with patient code', async ({ page }) => {
+    await page.goto('/');
+    await completeFirstRun(page);
+    await page.locator('[data-action="navigate"][data-page="prescriptions"]').click();
+    await page.locator('[data-action="open-prescription"]').first().click();
+    const rxForm = page.locator('form[data-form="prescription"]');
+    await expect(rxForm).toBeVisible();
+    // create+select a patient inline first (builder requires an existing patient)
+    await rxForm.locator('button:has-text("Close"), [data-action="close-modal"]').first().click();
+    await createPatientViaUi(page, 'Rx Premium Patient রোগী');
+    await page.locator('[data-action="navigate"][data-page="prescriptions"]').click();
+    await page.locator('[data-action="open-prescription"]').first().click();
+    await expect(rxForm).toBeVisible();
+    const cc = ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity'];
+    for (const label of cc) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();
+    const oe = ['Carries / G Carries', 'BDR / BDC', 'Gingivitis', 'Parodental Pocket', 'Perio Dontitis', 'Pulpitis', 'Impected Teeth', 'Dry Socket', 'Attrition / Erosion'];
+    for (const label of oe) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();
+    await rxForm.locator('[data-opt="Pain On"]').click();
+    await rxForm.locator('[data-opt="Swelling"]').click();
+    await rxForm.locator('[data-opt="Carries / G Carries"]').click();
+    await rxForm.locator('textarea[name="requiredExamination"]').fill('IOPA 46');
+    await rxForm.locator('textarea[name="advice"]').fill('Warm saline rinse. দুই বেলা মুখ ধুবেন।');
+    await rxForm.locator('[name="medications[0][medicine]"]').fill('Amoxicillin ক্যাপসুল');
+    await rxForm.locator('[name="medications[0][quantity]"]').fill('15');
+    await page.locator('[data-action="rx-preview"]').click();
+    const frame = page.locator('.print-preview-frame');
+    await expect(frame).toBeVisible();
+    const srcdoc = await frame.getAttribute('srcdoc');
+    for (const token of ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'Swelling', 'Carries / G Carries', 'DP-', 'ক্যাপসুল', 'Playwright Clinic', 'Dr. Ayesha Rahman']) {
+      expect(srcdoc, `preview missing ${token}`).toContain(token);
+    }
+    const content = srcdoc.slice(srcdoc.indexOf('</style>'));
+    for (const bad of ['৳', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment', 'invoice', 'doc-totals']) {
+      expect(content, `preview leaked ${bad}`).not.toContain(bad);
+    }
+    await page.screenshot({ path: 'test-results/audit-rx-preview.png', fullPage: true });
+  });
+});

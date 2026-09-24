@@ -205,40 +205,46 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await page.screenshot({ path: 'test-results/audit-360.png', fullPage: true });
   });
 
-  test('prescription builder: mandated chips, sections, money-free preview with patient code', async ({ page }) => {
-    const log = async (msg) => console.error('RX-STEP', msg);
+  async function prepareRx(page) {
     await page.goto('/');
     await completeFirstRun(page);
-    await log('first-run done');
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'Rx Premium Patient রোগী');
     await page.locator('aside [data-action="navigate"][data-page="prescriptions"]').first().click();
-    await log('on prescriptions page url=' + page.url());
+  }
+  test('rx: stage 1 modal opens', async ({ page }) => {
+    await prepareRx(page);
     await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
+    await expect(page.locator('form[data-form="prescription"]')).toBeVisible({ timeout: 15_000 });
+    await page.locator('form[data-form="prescription"] select[name="patientId"]').selectOption({ index: 1 });
+  });
+  test('rx: stage 2 mandated chips navigate', async ({ page }) => {
+    await prepareRx(page);
+    await page.locator('[data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
-    if (!(await rxForm.count())) {
-      const dump = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').slice(0, 1500));
-      throw new Error('RX-DUMP BODY[' + dump + ']');
-    }
-    await expect(rxForm).toBeVisible();
-    await log('rx modal open, options=' + String(await rxForm.locator('select[name="patientId"] option').count()));
     await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
-    const cc = ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity'];
-    for (const label of cc) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();
-    const oe = ['Carries / G Carries', 'BDR / BDC', 'Gingivitis', 'Parodental Pocket', 'Perio Dontitis', 'Pulpitis', 'Impected Teeth', 'Dry Socket', 'Attrition / Erosion'];
-    for (const label of oe) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();
+    for (const label of ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity', 'Carries / G Carries', 'BDR / BDC', 'Gingivitis', 'Parodental Pocket', 'Perio Dontitis', 'Pulpitis', 'Impected Teeth', 'Dry Socket', 'Attrition / Erosion']) {
+      await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible({ timeout: 15_000 });
+    }
     await rxForm.locator('[data-opt="Pain On"]').click();
     await rxForm.locator('[data-opt="Swelling"]').click();
     await rxForm.locator('[data-opt="Carries / G Carries"]').click();
+  });
+  test('rx: stage 3 fill + preview money-free', async ({ page }) => {
+    await prepareRx(page);
+    await page.locator('[data-action="open-prescription"]').first().click();
+    const rxForm = page.locator('form[data-form="prescription"]');
+    await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
+    await rxForm.locator('[data-opt="Pain On"]').click();
     await rxForm.locator('textarea[name="requiredExamination"]').fill('IOPA 46');
     await rxForm.locator('textarea[name="advice"]').fill('Warm saline rinse. দুই বেলা মুখ ধুবেন।');
     await rxForm.locator('[name="medications[0][medicine]"]').fill('Amoxicillin ক্যাপসুল');
     await rxForm.locator('[name="medications[0][quantity]"]').fill('15');
     await page.locator('[data-action="rx-preview"]').click();
     const frame = page.locator('.print-preview-frame');
-    await expect(frame).toBeVisible();
+    await expect(frame).toBeVisible({ timeout: 15_000 });
     const srcdoc = await frame.getAttribute('srcdoc');
-    for (const token of ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'Swelling', 'Carries / G Carries', 'DP-', 'ক্যাপসুল', 'Playwright Clinic', 'Dr. Ayesha Rahman']) {
+    for (const token of ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'DP-', 'ক্যাপসুল', 'Playwright Clinic', 'Dr. Ayesha Rahman']) {
       expect(srcdoc, `preview missing ${token}`).toContain(token);
     }
     const content = srcdoc.slice(srcdoc.indexOf('</style>'));

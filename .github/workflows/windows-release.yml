@@ -11,7 +11,9 @@ permissions:
 
 env:
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-  ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'true'
+  # NOTE: ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES is deliberately not
+  # set — the product ships zero runtime dependencies, so any unresolved
+  # dependency is a packaging defect that must fail the build, not be waived.
 
 jobs:
   windows-x64:

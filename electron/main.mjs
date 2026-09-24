@@ -384,7 +384,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('print:html', async (_event, payload = {}) => {
     const html = typeof payload.html === 'string' ? payload.html : '';
     const check = validatePrintHtml(html);
-    if (!check.ok) throw new Error(check.error);
+    if (!check.ok) return { ok: false, error: check.error };
     const mode = payload.options?.mode === 'pdf' ? 'pdf' : 'print';
     const title = typeof payload.options?.title === 'string' && payload.options.title.trim() ? payload.options.title.trim() : 'Dentiva Pro document';
     const pageSize = normalizePageSize(payload.options?.pageSize);

@@ -53,7 +53,7 @@ Aggregates = single LEFT-JOIN query (visits / billed / paid / last-payment) — 
 ## I. Windows installed-app validation & release
 | # | Sev | Finding |
 |---|---|---|
-| I1 | 🔴 | **Cannot run in this sandbox:** `GH_TOKEN is no longer valid` — push/`gh`/CI proof/release publish all return 403; sandbox has no Windows. **Impact:** the Windows CI gate re-run proof, NSIS build, installed-app validation (clean install→login→workflows→PDF→print→restart→persistence→upgrade→uninstall) and v1.6.0 release publication are BLOCKED on the user reconnecting GitHub in Arena. — DOCUMENTED LIMITATION (external; queue resolved commands in FLAGSHIP_UPGRADE_STATE.md §NEXT EXACT ACTIONS) |
+| I1 | 🔴 | *(§14: release deliberately NOT published during expanded audit; see checkpoint)* | **Cannot run in this sandbox:** `GH_TOKEN is no longer valid` — push/`gh`/CI proof/release publish all return 403; sandbox has no Windows. **Impact:** the Windows CI gate re-run proof, NSIS build, installed-app validation (clean install→login→workflows→PDF→print→restart→persistence→upgrade→uninstall) and v1.6.0 release publication are BLOCKED on the user reconnecting GitHub in Arena. — DOCUMENTED LIMITATION (external; queue resolved commands in FLAGSHIP_UPGRADE_STATE.md §NEXT EXACT ACTIONS) |
 | I2 | 🟢 | Release pipeline scripts unchanged since v1.5.2's green CI; packaging/release-gate tests green locally (128/128). — VERIFIED locally |
 
 ## J. Defects fixed en route (root causes)
@@ -67,5 +67,5 @@ Aggregates = single LEFT-JOIN query (visits / billed / paid / last-payment) — 
 - Version-drift test hardcodes replaced by derived expectations (`APP_VERSION ↔ package.json`). FIXED.
 
 ## K. Test evidence
-- Local suite: **130 tests, 128 pass, 0 fail, 2 skipped (benchmarks, manual)** — `npm test` on Node 22.22.
+- Local suite: **133 tests, 131 pass, 0 fail, 2 skipped (benchmarks, manual)** — `npm test` on Node 22.22.
 - Batteries exercised: ledger-sql aggregate guards (10), doc-engine (7), journeys (incl. treatmentPlan regression caught+fixed at 2b8d47b), security, packaging, release-gate.

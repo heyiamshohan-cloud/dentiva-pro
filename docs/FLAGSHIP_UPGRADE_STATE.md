@@ -1,39 +1,38 @@
-# 🦷 Dentiva Pro Flagship Upgrade — Live State (v1.6.0)
+# 🦷 Dentiva Pro Flagship Upgrade — Live State (v1.6.0, NOT RELEASED)
 
-## CURRENT STATE
-- **Branch:** `arena/01a0c9e2-dentiva-pro` · **Version:** 1.5.2 → **1.6.0** · Tests: **128 pass / 0 fail / 2 skipped (benchmarks)**
-- Phases completed: baseline audit + foundation (Cluster 1–9), online-payments-first stack (A–F), saved patient views, street-suggestion community sync, **document engine** (Cluster A v2), **high-density patient list + command palette + patient profile/statement + prescription builder + payment guard** (Clusters B–I).
+## CURRENT PHASE
+Phase: **SCOPE-EXPANDED PRODUCT-WIDE AUDIT (§6–§16 correction applied)**. Prescription clinical mandate + Patient Code contract DONE at `5b2635a`. Release is ON HOLD per §14 until product-wide audit + Windows CI validation complete. GitHub token expired (external blocker, §14 acknowledged).
 
-## LAST COMPLETED ACTION
-v1.6.0 version bump + version-contract tests made drift-proof; payment modal method-reference hints (bKash/Nagad/Rocket/Upay/Bank/Card); command palette upgraded (backend globalSearch × 7 collections + action commands + arrow-key nav); settings UI fields (BMDC registration, clinic website); full suite 128/0.
+## COMPLETED WORK (cumulative)
+- Clusters A–I (patient list aggregates/columns/density, command palette ×7, Patient 360 statement/visits/audit, structured rx builder + templates, double-submit guard, payment hints, settings BMDC/web fields, dental chart FDI+quadrants+primary fix+multi-apply, receipt on doc engine, +52 Bangla strings, aggregate benchmarks 1k→100k).
+- §1 Prescription = clinical document: NO financial vocabulary/totals/currency in content — enforced by contract test.
+- §2 C/C (Pain On, G. Carries, Swelling, Gum Bleeding, Bad Breath, Sensitivity) & O/E (Carries / G Carries, BDR / BDC, Gingivitis, Parodental Pocket, Perio Dontitis, Pulpitis, Impected Teeth, Dry Socket, Attrition / Erosion) multi-select pickers + Custom/Other; C/C·O/E·R/E·Advice render on preview/print/PDF.
+- §3 Prescription header from settings (logo/name/credentials/BMDC/contact) — doc-engine clinicHeader (no hardcoding).
+- §4 Patient Code: prefix default DP (DP-000001…), stable across visit/rx/invoice, unique; on list/360/visit-linked rows/rx/invoice/receipt/statement/search; contract test asserts.
+- §5 Receipt: Received/Refunded/Net + Remaining Due (when invoice-linked) + Received-by; document semantic separation kept in UI/data/rendering.
+- Forensic doc render test: 40 med rows, long Bengali names, mixed scripts, multipage-safe CSS.
+- Benchmarks: 1k/10k/25k/100k green; aggregate list p1 2.3–39.8ms; statement 0.6ms; backup 323ms @25k.
 
-## Clusters → Status
-- **A (aggregates, listQuery sort pipeline):** DONE — `listQuery` now forwards `sort` from overrides; ui prefs (columns/density) loaded at boot.
-- **B (command palette):** DONE — Actions section + patients/appointments/invoices/payments/prescriptions/visits via `globalSearch` SQL query for paginated datasets to support sqlite performance; search-backed dynamic actions; keyboard nav.
-- **C (patient list):** DONE — 10 sort keys incl. balance/billed/paid/visits aggregates, 11 configurable columns (patient+status locked), advanced filters (tag/registered dates/tooth status/has-phone), density toggle, persisted prefs.
-- **D (patient profile):** DONE — clickable timeline (visit detail/invoice/rx links), visits tab rewritten with filters (dentist/date-range/chip), expandable per-visit clinical+billing cards, print view per visit; professional statement (opening/closing/balance/pager/period); patient-scoped audit via `entity:'Patient'`; financial summary cards; profile quick actions.
-- **E (prescription builder):** DONE — clinical sections, structured medication rows (medicine/catalog datalist, form, strength, dosage, frequency pattern chips w/ datalist, food relation, duration+unit, quantity, instructions), reorder/duplicate/remove rows, visit linking, clinician templates (apply/save/delete with caps + perms), preview with full state round-trip; old `Additional medicines` template replaced.
-- **G (double-submit guard):** DONE — `handleSubmit` wrapper disables all submit buttons + `ui.submitting` re-entry guard (try/finally).
-- **H (payment):** DONE-surface — amount prefilled to invoice due, method→reference hints (Cash/Bank/Card/bKash/Nagad/Rocket/Upay), overpayment still enforced server-side, audit + guard noted in UI. Remaining: refund row UX is done (Cluster A v2).
-- **I (settings):** DONE — `dentistRegistration` + `clinicWebsite` fields on Clinic identity card; whitelist already had keys; renderer picks registration for prescription signature footer.
+## REMAINING WORK
+1. **Product-wide audit sweep (§7) module by module**: Dashboard/Appointments-Day-Week-Month/conflicts/Queue-waitlist/Treatment plans+conversion/Inventory-purchases-negative stock guards/Accounting/Reports(richer patient-code surfaces)/Attachments/Import-export/Notifications/Saved views — verify workflows, errors, perms, persistence, polish; FIX defects on sight (not merely record).
+2. **§10 printed-forensic pass** on Invoice/Receipt/Statement parity with the new contract tests (long names, many rows, Bengali, multipage) + visual print smoke when CI available.
+3. Bengali audit re-run over newest strings (picker labels, receipt additions).
+4. Windows CI validation of the NEW v1.6.0 build (§13): install→launch→login→patient workflow→360→rx→invoice→receipt→PDF→persistence→restart→upgrade→uninstall→reinstall.
+5. Release sequence after user reconnection+«Continue»: push, PR #2, CI green proof, artifacts (NSIS+portable+ZIP+SHA-256), tag v1.6.0, publish (v1.5.x intact), final audit close.
 
-## Version drift contract
-- `tests/smoke.test.mjs` + `tests/upgrade-v140.test.mjs` now compute expected version from `migrate-state.js APP_VERSION` ↔ `package.json` (no hardcoded patch version). Bumping requires editing exactly 2 files.
-- README pinned to v1.6.0.
+## OPEN FINDINGS
+- F-AUTH-1 (external): GH_TOKEN invalid — push/CI/release blocked until Arena GitHub reconnection. NOT a product defect.
+- F-BENCH-1: none open.
 
-## PROGRESS SINCE
-- **b535005** flagship milestone (B–I clusters).
-- **c9e3724** dental chart: FDI labels, anatomical quadrant rows, primary-dentition 20-teeth fix, multi-tooth bulk apply.
-- **38bef59** payment receipt onto doc engine (+refund precedence bug fix), Bangla dictionary +52 strings, aggregate benchmarks.
-- Benchmarks fresh (Node 22, sandbox): 1k 2.3ms / 10k 18.9ms / 25k 39.8ms / 100k aggregate list page1 — full table in bench.log output of last run (100k last page 138.5ms, statement 0.6ms flat).
-- repo-local dev parity for includeAggregates.
+## TEST STATUS
+`npm test`: **133 tests · 131 pass · 0 fail · 2 skipped (manual benchmarks)** — Node 22.22.3.
+New: tests/patient-code-contract.test.mjs (3 contract + forensic render tests).
 
-## EXTERNAL BLOCKER (rule: record + continue)
-**GitHub auth in this sandbox is broken**: `GH_TOKEN is no longer valid` (gh auth status fails; git push → 403 terminal prompts disabled). Push, PR #2 update, CI run proof, tag + release publish are ALL impossible until the user reconnects GitHub in Arena. NOT a code issue — work queued at local HEAD 38bef59. User action required: reconnect GitHub in Arena, then say Continue.
+## WINDOWS VALIDATION STATUS
+NOT YET for v1.6.0 (requires CI runner; §13 explicitly required — no substitution claims from v1.5.2).
 
-## NEXT EXACT ACTIONS (pick up here)
-1. On GitHub reconnection: `git push origin arena/01a0c9e2-dentiva-pro`, update PR #2 body w/ flagship changelog, verify windows-release CI green, tag v1.6.0, build NSIS+portable+ZIP+SHA-256, publish release (draft→release), archive artifacts locally.
-2. FLAGSHIP_UPGRADE_AUDIT.md refresh draft is next local action pre-push.
+## GITHUB / RELEASE STATUS
+v1.6.0 NOT tagged, NOT published (per §14). Local HEAD `5b2635a` on `arena/01a0c9e2-dentiva-pro`. PR #2 stale (will update on reconnect).
 
-## CURRENT ISSUE
-GitHub connection expired (sandbox credential) — waiting on user reconnect; code side fully green (128/128).
+## NEXT EXACT ACTION
+Continue product-wide audit sweep modules 1→4 (Dashboard/Appointments/Queue/Treatments) fixing defects in place; commit; then sweep 5→8 (Clinical/Financial/Inventory/Reports). Do NOT release.

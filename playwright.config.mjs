@@ -13,10 +13,10 @@ export default defineConfig({
     trace: 'retain-on-failure'
   },
   webServer: {
-    command: 'npm run dev -- --host 0.0.0.0 --port 4175',
+    command: 'npm run build && npm run preview -- --host 0.0.0.0 --port 4175',
     url: 'http://127.0.0.1:4175',
     reuseExistingServer: false,
-    timeout: 30_000
+    timeout: 120_000
   },
   projects: [
     { name: '1280x720', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } } },

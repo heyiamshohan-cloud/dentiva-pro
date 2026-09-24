@@ -188,8 +188,10 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
     if (!(await page.locator('.patient-sub').count())) {
-      const dump = await page.evaluate(() => document.body.textContent.slice(0, 2000));
-      console.error('360-DUMP', JSON.stringify(dump));
+      const dump = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').slice(0, 1500));
+      const modal = await page.evaluate(() => (document.querySelector('.modal-overlay') || { textContent: '' }).textContent.replace(/\s+/g, ' ').slice(0, 600));
+      const url = page.url();
+      throw new Error(`360-DUMP url=${url} | MODAL[${modal}] | BODY[${dump}]`);
     }
     await expect(page.locator('.patient-sub')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.patient-sub')).toContainText('DP-');
@@ -214,6 +216,10 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await log('on prescriptions page url=' + page.url());
     await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
+    if (!(await rxForm.count())) {
+      const dump = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').slice(0, 1500));
+      throw new Error('RX-DUMP BODY[' + dump + ']');
+    }
     await expect(rxForm).toBeVisible();
     await log('rx modal open, options=' + String(await rxForm.locator('select[name="patientId"] option').count()));
     await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });

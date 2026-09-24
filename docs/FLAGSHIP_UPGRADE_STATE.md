@@ -41,3 +41,23 @@ v1.6.0 NOT tagged, NOT published (per §14). Local HEAD (pending this sweep batc
 
 ## NEXT EXACT ACTION
 Continue product-wide audit sweep modules 1→4 (Dashboard/Appointments/Queue/Treatments) fixing defects in place; commit; then sweep 5→8 (Clinical/Financial/Inventory/Reports). Do NOT release.
+
+## 15. v1.6.1 polish checkpoint (2026-09-24)
+
+**Scope**: user mandate sections A–H landed on top of published v1.6.0 (never overwritten).
+
+**Delivered locally (all pushed until token expiry):**
+1. Installed-app DOCUMENT WORKFLOW verification: `smokeDocs()` phase in electron/main.mjs (DENTIVA_SMOKE_PHASE=docs) drives the REAL UI (PIN sign-in → ops seed patient/visit/18-line invoice/bKash payment → rx builder → preview → `print:html` PDF) and produces 7 PDFs (rx A4+A5, invoice A4+Letter, receipt 80mm+A5, statement A4) with smoke-only tmpdir bypass at main.mjs:384. windows-smoke.ps1 wires it after installed-verify, prints `DOCS-PDF <name> <bytes>` and uploads PDFs to the `windows-smoke-evidence` artifact.
+2. Prescription money-leak regression test strengthened (content-scoped forbidden tokens incl. ৳ / doc-totals / Payment method / Money receipt) + positive identity asserts.
+3. Playwright screen-audit suite (4 tests × 6 viewports): patients list, command palette, Patient 360, prescription builder.
+4. Version 1.6.1 (package.json, migrate-state, README) + CHANGELOG entry.
+
+**Real product defects found by the audit and fixed (root cause, product-side):**
+- D1: Ctrl+K palette opened EMPTY until first keystroke → instant Actions pre-render (src/main.js handleKeydown).
+- D2 (critical): Patient 360 unreachable — the v1.6.0 list rewrite dropped the `ui.patientId → renderPatientProfile()` branch in renderPatients (row/View clicks did nothing).
+- D3: Sidebar "Patients" never cleared profile context (profile stuck forever); added explicit "All patients" back button on the profile.
+- D4: premium glass backdrop for Sign-In / Lock screens (auth screens were the only unfollowed design-system surface).
+
+**CI history**: run 36036246065 — 4 of 6 audit tests green; 36037591332 — all but tag-filter→profile-routing (then fixed). Latest run 36039103674 (auth-polish commit) — outcome unknown: **GitHub token expired mid-run (HTTP 401) while it was in progress.**
+
+**BLOCKER (external)**: GitHub authentication expired in the sandbox (gh 401 Bad credentials; git push fails). Until the user reconnects GitHub in Arena: cannot watch CI, cannot publish v1.6.1. Local commit "polish: premium glass auth backdrop" (1.6.1+1 commit) awaits push as soon as auth returns. Pending after reconnect: (1) push, (2) watch CI green (visual stage → build → docs marks → publish via existing [publish-release] markers), (3) verify DOCS-PDF lines + 7 PDFs in artifact, (4) confirm v1.6.1 release (tag + 4 assets), (5) finalize audit ledger entries D5-F closure → final verdict.

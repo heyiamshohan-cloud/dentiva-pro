@@ -3029,6 +3029,10 @@ async function handleClick(event) {
       }
       return openModal('attachment', { patient: appState.directory.patients.find((p) => p.id === ui.patientId) || {} });
     }
+    case 'open-attachment-add': {
+      const patient = appState.directory.patients.find((p) => p.id === id) || { id };
+      return openModal('attachment', { patient });
+    }
     case 'pick-attachment': { const input = target.querySelector('input[type="file"]'); if (input) input.click(); return; }
     case 'download-attachment': {
       const content = await api.readAttachment(id);

@@ -14,7 +14,7 @@ Phase: **SCOPE-EXPANDED PRODUCT-WIDE AUDIT (§6–§16 correction applied)**. Pr
 - Benchmarks: 1k/10k/25k/100k green; aggregate list p1 2.3–39.8ms; statement 0.6ms; backup 323ms @25k.
 
 ## REMAINING WORK
-1. **Product-wide audit sweep (§7) module by module**: Dashboard/Appointments-Day-Week-Month/conflicts/Queue-waitlist/Treatment plans+conversion/Inventory-purchases-negative stock guards/Accounting/Reports(richer patient-code surfaces)/Attachments/Import-export/Notifications/Saved views — verify workflows, errors, perms, persistence, polish; FIX defects on sight (not merely record).
+1. **Product-wide audit sweep (§7) module by module** — IN PROGRESS. DONE: dead-action registry diff (62 UI actions × handler cases → 1 dead fixed: `open-attachment-add`); UI op()/q() references × server registries = all defined; appointment double-booking guard (warn→confirm) VERIFIED server-side; negative-stock movement guard VERIFIED. NEXT: dashboard widgets→queries wiring sweep, attachments import/export, treatment-plan conversion flow, then Financial/Inventory/Reports/Settings/Security re-verification.
 2. **§10 printed-forensic pass** on Invoice/Receipt/Statement parity with the new contract tests (long names, many rows, Bengali, multipage) + visual print smoke when CI available.
 3. Bengali audit re-run over newest strings (picker labels, receipt additions).
 4. Windows CI validation of the NEW v1.6.0 build (§13): install→launch→login→patient workflow→360→rx→invoice→receipt→PDF→persistence→restart→upgrade→uninstall→reinstall.
@@ -32,7 +32,7 @@ New: tests/patient-code-contract.test.mjs (3 contract + forensic render tests).
 NOT YET for v1.6.0 (requires CI runner; §13 explicitly required — no substitution claims from v1.5.2).
 
 ## GITHUB / RELEASE STATUS
-v1.6.0 NOT tagged, NOT published (per §14). Local HEAD `5b2635a` on `arena/01a0c9e2-dentiva-pro`. PR #2 stale (will update on reconnect).
+v1.6.0 NOT tagged, NOT published (per §14). Local HEAD (pending this sweep batch) on `arena/01a0c9e2-dentiva-pro`. PR #2 stale (will update on reconnect).
 
 ## NEXT EXACT ACTION
 Continue product-wide audit sweep modules 1→4 (Dashboard/Appointments/Queue/Treatments) fixing defects in place; commit; then sweep 5→8 (Clinical/Financial/Inventory/Reports). Do NOT release.

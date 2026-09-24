@@ -2691,6 +2691,11 @@ async function handleClick(event) {
 
   switch (action) {
     case 'navigate': return navigate(target.dataset.page);
+    // v1.6.1 D5: these toolbar buttons were stranded in handleChange (dead in v1.6.0)
+    case 'patient-density': ui.patientDensity = target.dataset.density; persistUiPreference(); return render();
+    case 'patient-filters-toggle': ui.patientFiltersOpen = !ui.patientFiltersOpen; return render();
+    case 'patient-columns-toggle': ui.patientColumnsOpen = !ui.patientColumnsOpen; return render();
+    case 'patient-filters-clear': ui.patientTagFilter = ''; ui.patientFrom = ''; ui.patientTo = ''; ui.patientToothFilter = ''; ui.patientHasPhone = false; listState.patients.page = 1; return render();
     case 'retry-page': return render();
     case 'close-modal': return closeModal();
     case 'close-toast': ui.toast = null; return render();
@@ -3420,10 +3425,6 @@ async function handleChange(event) {
     case 'patient-tooth-filter': ui.patientToothFilter = target.value; listState.patients.page = 1; return render();
     case 'patient-has-phone': ui.patientHasPhone = target.checked; listState.patients.page = 1; return render();
     case 'patient-column-toggle': { ui.patientColumns = { ...(ui.patientColumns || patientColumnState()), [target.dataset.col]: target.checked }; persistUiPreference(); return render(); }
-    case 'patient-density': ui.patientDensity = target.dataset.density; persistUiPreference(); return render();
-    case 'patient-filters-toggle': ui.patientFiltersOpen = !ui.patientFiltersOpen; return render();
-    case 'patient-columns-toggle': ui.patientColumnsOpen = !ui.patientColumnsOpen; return render();
-    case 'patient-filters-clear': ui.patientTagFilter = ''; ui.patientFrom = ''; ui.patientTo = ''; ui.patientToothFilter = ''; ui.patientHasPhone = false; listState.patients.page = 1; return render();
     case 'statement-period': { ui.statementPeriod = { ...(ui.statementPeriod || {}), [target.dataset.key]: target.value }; ui.statementPage = 1; return render(); }
     case 'visit-filter': { ui.visitFilters = { ...(ui.visitFilters || {}), [target.dataset.key]: target.value }; return render(); }
     case 'dashboard-range': ui.range = target.value; if (ui.range !== 'custom') { ui.rangeFrom = ''; ui.rangeTo = ''; } return render();

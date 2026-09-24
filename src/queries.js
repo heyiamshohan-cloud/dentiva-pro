@@ -238,7 +238,12 @@ export const QUERIES = {
 
   async patientFinancialSummary(repo, params = {}) {
     const patientId = String(params.patientId || '');
-    if (typeof repo.patientFinancialSummary !== 'function') return { ok: false, error: 'Summary requires the on-disk engine' };
+    if (typeof repo.patientFinancialSummary !== 'function') {
+      // Browser/demo adapters have no SQL engine: a zero summary is the
+      // honest answer for a patient with no ledger there (v1.6.1 D6). The
+      // desktop app always ships the on-disk engine and never hits this.
+      return { ok: true, source: 'fallback', billedCents: 0, paidCents: 0, netPaidCents: 0, dueCents: 0, refundedCents: 0, adjustedCents: 0, discountCents: 0 };
+    }
     return repo.patientFinancialSummary(patientId);
   },
 

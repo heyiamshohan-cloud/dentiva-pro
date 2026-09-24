@@ -296,6 +296,10 @@ function ageFromDate(value) {
   return years >= 0 && years < 130 ? years : null;
 }
 function initials(value = '') { return String(value).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'DP'; }
+function patientNameWithCode(id) {
+  const p = appState.directory.patients.find((patient) => patient.id === id);
+  return p ? `${p.fullName} (${p.patientCode || '—'})` : patientName(id);
+}
 function patientName(id) { return appState.directory.patients.find((p) => p.id === id)?.fullName || 'Unassigned patient'; }
 function staffName(id) { return appState.directory.staff.find((p) => p.id === id)?.name || appState.settings.dentistName || 'Primary dentist'; }
 function formatBytes(bytes) { if (!bytes) return '0 B'; const units = ['B', 'KB', 'MB', 'GB', 'TB']; const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`; }
@@ -644,7 +648,7 @@ async function renderDashboard() {
   </div>`;
 }
 function appointmentRow(a) {
-  return `<div class="appointment-row ${a.status === 'Cancelled' ? 'is-cancelled' : ''}" data-action="open-appointment-detail" data-id="${attr(a.id)}"><span class="appt-time">${time(a.time)}</span><span class="avatar avatar-xs">${initials(patientName(a.patientId))}</span><div class="appt-body"><strong>${esc(patientName(a.patientId))}</strong><small>${esc(a.reason || '—')}${a.chair ? ` · ${esc(a.chair)}` : ''}</small></div>${statusBadge(a.status)}</div>`;
+  return `<div class="appointment-row ${a.status === 'Cancelled' ? 'is-cancelled' : ''}" data-action="open-appointment-detail" data-id="${attr(a.id)}"><span class="appt-time">${time(a.time)}</span><span class="avatar avatar-xs">${initials(patientNameWithCode(a.patientId))}</span><div class="appt-body"><strong>${esc(patientNameWithCode(a.patientId))}</strong><small>${esc(a.reason || '—')}${a.chair ? ` · ${esc(a.chair)}` : ''}</small></div>${statusBadge(a.status)}</div>`;
 }
 
 /* ------------------------------- patients ------------------------------ */
@@ -1056,7 +1060,7 @@ function appointmentViewWeek(value) {
   return `<div class="week-grid">${Object.keys(byDay).sort().map((day) => `<div class="week-day"><h3>${dateFull(day)}</h3>${byDay[day].sort((a, b) => a.time.localeCompare(b.time)).map(appointmentRow).join('')}</div>`).join('') || emptyState('calendar', 'No appointments this week', 'Pick a day or book a new appointment.', button('Book appointment', 'open-appointment', 'plus', 'secondary'))}</div>`;
 }
 function appointmentViewAgenda(value) {
-  return `<div class="agenda-list">${value.map((a) => `<div class="agenda-row" data-action="open-appointment-detail" data-id="${attr(a.id)}"><span class="agenda-date">${dateFull(a.date)}</span><span class="appt-time">${time(a.time)}</span><strong>${esc(patientName(a.patientId))}</strong><small>${esc(a.reason || '—')}</small>${statusBadge(a.status)}</div>`).join('') || emptyState('calendar', 'Upcoming agenda is empty', 'Book appointments to build the agenda.')}</div>`;
+  return `<div class="agenda-list">${value.map((a) => `<div class="agenda-row" data-action="open-appointment-detail" data-id="${attr(a.id)}"><span class="agenda-date">${dateFull(a.date)}</span><span class="appt-time">${time(a.time)}</span><strong>${esc(patientNameWithCode(a.patientId))}</strong><small>${esc(a.reason || '—')}</small>${statusBadge(a.status)}</div>`).join('') || emptyState('calendar', 'Upcoming agenda is empty', 'Book appointments to build the agenda.')}</div>`;
 }
 async function renderAppointments() {
   let data;
@@ -1094,7 +1098,7 @@ async function renderQueue() {
     <div class="queue-metrics"><div class="queue-ring big"><strong>${waiting.length}</strong><span>waiting now</span></div><div class="queue-copy"><strong>${queue.length} scheduled today</strong><p>Click a card to check in, start or complete. Serials are assigned automatically at check-in.</p></div></div>
     <div class="queue-list">${queue.map((a) => `<div class="queue-card ${a.status === 'Completed' ? 'is-done' : ''}" data-id="${attr(a.id)}">
       <div class="queue-card-top"><span class="queue-serial">${esc(a.serial || `Q-${String(queue.indexOf(a) + 1).padStart(3, '0')}`)}</span>${statusBadge(a.status)}</div>
-      <strong>${esc(patientName(a.patientId))}</strong><small>${time(a.time)} · ${esc(a.reason || '—')}${a.chair ? ` · ${esc(a.chair)}` : ''}</small>
+      <strong>${esc(patientNameWithCode(a.patientId))}</strong><small>${time(a.time)} · ${esc(a.reason || '—')}${a.chair ? ` · ${esc(a.chair)}` : ''}</small>
       <div class="queue-card-actions">
         ${['Checked In', 'Waiting', 'In Treatment', 'Completed'].map((status) => `<button class="chip-button ${a.status === status ? 'selected' : ''}" data-action="queue-status" data-id="${attr(a.id)}" data-status="${attr(status)}" ${can('appointments.queue') ? '' : 'disabled'}>${esc(status)}</button>`).join('')}
         ${can('appointments.cancel') ? `<button class="chip-button danger" data-action="cancel-appointment" data-id="${attr(a.id)}">Cancel</button>` : ''}
@@ -1107,7 +1111,7 @@ async function renderQueue() {
 async function renderClinical() {
   const result = await listQuery('visits', { patientId: ui.patientId || undefined });
   const rows = (result.rows || []).map((v) => `<tr class="clickable-row" data-action="open-visit" data-id="${attr(v.id)}">
-    <td>${esc(v.visitCode || '—')}</td><td><strong>${esc(patientName(v.patientId))}</strong></td><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${v.followUpDate ? relativeDate(v.followUpDate) : '<span class="muted">—</span>'}</td><td>${statusBadge(v.status || 'Completed')}</td>
+    <td>${esc(v.visitCode || '—')}</td><td><strong>${esc(patientNameWithCode(v.patientId))}</strong></td><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td><td>${v.followUpDate ? relativeDate(v.followUpDate) : '<span class="muted">—</span>'}</td><td>${statusBadge(v.status || 'Completed')}</td>
   </tr>`).join('');
   return `<div class="page">
     ${pageHeader('Clinical Records', 'Every visit, diagnosis and treatment note, patient by patient.', `${button('Record visit', 'open-visit', 'plus', 'primary')}`)}
@@ -1267,19 +1271,19 @@ async function renderReports() {
   let rowMarkup = '';
   if (type === 'revenue') {
     kpiMarkup = kpiCard('Collected', currency(kpis.collectedCents), `${kpis.paymentCount ?? 0} payments`) + kpiCard('Billed', currency(kpis.billedCents), `${kpis.invoiceCount ?? 0} invoices`) + kpiCard('Expenses', currency(kpis.expensesCents), `${kpis.expenseCount ?? 0} entries`);
-    rowMarkup = dataTable(['Receipt', 'Patient', 'Date', 'Method', 'Amount'], (rows.rows || []).map((p) => `<tr><td>${esc(p.receiptNumber || '—')}</td><td>${esc(patientName(p.patientId))}</td><td>${date(p.date)}</td><td>${esc(p.method || '—')}</td><td>${money(p)}</td></tr>`).join(''));
+    rowMarkup = dataTable(['Receipt', 'Patient', 'Date', 'Method', 'Amount'], (rows.rows || []).map((p) => `<tr><td>${esc(p.receiptNumber || '—')}</td><td>${esc(patientNameWithCode(p.patientId))}</td><td>${date(p.date)}</td><td>${esc(p.method || '—')}</td><td>${money(p)}</td></tr>`).join(''));
   } else if (type === 'patients') {
     kpiMarkup = kpiCard('Registered', number(kpis.registered ?? 0)) + kpiCard('With phone', number(kpis.withPhone ?? 0)) + kpiCard('Upcoming visits', number(kpis.upcoming ?? 0));
-    rowMarkup = dataTable(['Patient', 'Phone', 'Registered', 'Balance'], (rows.rows || []).map((p) => `<tr><td>${esc(p.fullName)}</td><td>${esc(p.phone || '—')}</td><td>${date(p.registrationDate)}</td><td>${currency(centsToMoney(p.balanceCents || 0))}</td></tr>`).join(''));
+    rowMarkup = dataTable(['Patient', 'Code', 'Phone', 'Registered', 'Balance'], (rows.rows || []).map((p) => `<tr><td>${esc(p.fullName)}</td><td>${esc(p.patientCode || '—')}</td><td>${esc(p.phone || '—')}</td><td>${date(p.registrationDate)}</td><td>${currency(centsToMoney(p.balanceCents || 0))}</td></tr>`).join(''));
   } else if (type === 'visits') {
     kpiMarkup = kpiCard('Visits', number(kpis.visits ?? 0)) + kpiCard('Unique patients', number(kpis.uniquePatients ?? 0)) + kpiCard('With follow-up', number(kpis.withFollowUp ?? 0));
-    rowMarkup = dataTable(['Visit', 'Patient', 'Date', 'Reason', 'Diagnosis'], (rows.rows || []).map((v) => `<tr><td>${esc(v.visitCode || '—')}</td><td>${esc(patientName(v.patientId))}</td><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td></tr>`).join(''));
+    rowMarkup = dataTable(['Visit', 'Patient', 'Date', 'Reason', 'Diagnosis'], (rows.rows || []).map((v) => `<tr><td>${esc(v.visitCode || '—')}</td><td>${esc(patientNameWithCode(v.patientId))}</td><td>${date(v.date)}</td><td>${esc(v.reason || '—')}</td><td>${esc(v.diagnosis || '—')}</td></tr>`).join(''));
   } else if (type === 'appointments') {
     kpiMarkup = kpiCard('Appointments', number(kpis.appointments ?? 0)) + kpiCard('Completed', number(kpis.completed ?? 0), `${kpis.completionPct ?? 0}% completion`) + kpiCard('No shows', number(kpis.noShows ?? 0));
-    rowMarkup = dataTable(['Code', 'Patient', 'Date', 'Time', 'Reason', 'Status'], (rows.rows || []).map((a) => `<tr><td>${esc(a.appointmentCode || '—')}</td><td>${esc(patientName(a.patientId))}</td><td>${date(a.date)}</td><td>${time(a.time)}</td><td>${esc(a.reason || '—')}</td><td>${statusBadge(a.status)}</td></tr>`).join(''));
+    rowMarkup = dataTable(['Code', 'Patient', 'Date', 'Time', 'Reason', 'Status'], (rows.rows || []).map((a) => `<tr><td>${esc(a.appointmentCode || '—')}</td><td>${esc(patientNameWithCode(a.patientId))}</td><td>${date(a.date)}</td><td>${time(a.time)}</td><td>${esc(a.reason || '—')}</td><td>${statusBadge(a.status)}</td></tr>`).join(''));
   } else if (type === 'outstanding') {
     kpiMarkup = kpiCard('Outstanding', currency(kpis.dueCents ?? 0)) + kpiCard('Open invoices', number(kpis.openInvoices ?? 0)) + kpiCard('Partially paid', number(kpis.partiallyPaid ?? 0));
-    rowMarkup = dataTable(['Invoice', 'Patient', 'Date', 'Total', 'Due'], (rows.rows || []).map((i) => `<tr><td>${esc(i.invoiceNumber || '—')}</td><td>${esc(patientName(i.patientId))}</td><td>${date(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td class="text-warning"><strong>${currency(centsToMoney(i.dueCents ?? i.due))}</strong></td></tr>`).join(''));
+    rowMarkup = dataTable(['Invoice', 'Patient', 'Date', 'Total', 'Due'], (rows.rows || []).map((i) => `<tr><td>${esc(i.invoiceNumber || '—')}</td><td>${esc(patientNameWithCode(i.patientId))}</td><td>${date(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td class="text-warning"><strong>${currency(centsToMoney(i.dueCents ?? i.due))}</strong></td></tr>`).join(''));
   } else if (type === 'inventory') {
     kpiMarkup = kpiCard('Items tracked', number(kpis.itemsTracked ?? 0)) + kpiCard('Low stock', number(kpis.lowStock ?? 0)) + kpiCard('Expired', number(kpis.expired ?? 0)) + kpiCard('Stock value', currency(kpis.stockValueCents ?? 0));
     rowMarkup = dataTable(['Item', 'Category', 'On hand', 'Value'], (rows.rows || []).map((i) => `<tr><td>${esc(i.name)}</td><td>${esc(i.category || 'Other')}</td><td>${number(i.currentStock)} ${esc(i.unit || '')}</td><td>${currency(centsToMoney(i.purchasePriceCents ?? 0) * Number(i.currentStock || 0))}</td></tr>`).join(''));
@@ -1790,7 +1794,7 @@ function modalAppointmentDetail(data = {}) {
   const a = data.appointment || {};
   return `${modalHead('APPOINTMENT', `${a.appointmentCode || 'Appointment'}`, `${dateFull(a.date)} · ${time(a.time)}`)}
     <div class="detail-list">
-      <div><dt>Patient</dt><dd>${button(patientName(a.patientId), 'open-patient-profile', 'arrow', 'link', `data-id="${attr(a.patientId)}"`)}</dd></div>
+      <div><dt>Patient</dt><dd>${button(patientNameWithCode(a.patientId), 'open-patient-profile', 'arrow', 'link', `data-id="${attr(a.patientId)}"`)}</dd></div>
       <div><dt>Reason</dt><dd>${esc(a.reason || '—')}</dd></div>
       <div><dt>Treatment</dt><dd>${esc(a.treatment || '—')}</dd></div>
       <div><dt>Dentist</dt><dd>${esc(staffName(a.dentistId))}</dd></div>
@@ -2381,11 +2385,11 @@ async function globalSearch(qText) {
   return {
     actions,
     patients: (results.patients?.rows || []).map((p) => ({ id: p.id, label: `${p.patientCode || ''} · ${p.fullName}`, sub: p.phone || '' })),
-    appointments: (results.appointments?.rows || []).map((a) => ({ id: a.id, label: `${a.date} ${a.time} · ${patientName(a.patientId)}`, sub: a.reason || '' })),
-    invoices: (results.invoices?.rows || []).map((i) => ({ id: i.id, label: `${i.invoiceNumber} · ${patientName(i.patientId)}`, sub: currency(centsToMoney(i.totalCents ?? i.total)) })),
-    payments: (results.payments?.rows || []).map((p) => ({ id: p.id, label: `${p.receiptNumber} · ${patientName(p.patientId)}`, sub: currency(centsToMoney(p.amountCents || 0)) })),
+    appointments: (results.appointments?.rows || []).map((a) => ({ id: a.id, label: `${a.date} ${a.time} · ${patientNameWithCode(a.patientId)}`, sub: a.reason || '' })),
+    invoices: (results.invoices?.rows || []).map((i) => ({ id: i.id, label: `${i.invoiceNumber} · ${patientNameWithCode(i.patientId)}`, sub: currency(centsToMoney(i.totalCents ?? i.total)) })),
+    payments: (results.payments?.rows || []).map((p) => ({ id: p.id, label: `${p.receiptNumber} · ${patientNameWithCode(p.patientId)}`, sub: currency(centsToMoney(p.amountCents || 0)) })),
     prescriptions: (results.prescriptions?.rows || []).map((rx) => ({ id: rx.id, label: `${rx.prescriptionCode} · ${patientName(rx.patientId)}`, sub: date(rx.date) })),
-    visits: (results.visits?.rows || []).map((v) => ({ id: v.patientId, label: `${date(v.date)} · ${patientName(v.patientId)}`, sub: v.reason || v.diagnosis || '' })),
+    visits: (results.visits?.rows || []).map((v) => ({ id: v.patientId, label: `${date(v.date)} · ${patientNameWithCode(v.patientId)}`, sub: v.reason || v.diagnosis || '' })),
   };
 }
 
@@ -3761,7 +3765,7 @@ async function printQueue() {
   const day = await q('appointmentDay', { date: today() });
   const queue = (day.appointments || []).filter((a) => a.status !== 'Cancelled').sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   return openPrintPreview('Today’s Queue', documentSummary([['Date', dateFull(today())], ['Appointments', queue.length]]) +
-    (queue.length ? `<table class="print-table"><thead><tr><th>Serial</th><th>Time</th><th>Patient</th><th>Reason</th><th>Chair</th><th>Status</th></tr></thead><tbody>${queue.map((a, i) => `<tr><td>${esc(a.serial || `Q-${String(i + 1).padStart(3, '0')}`)}</td><td>${time(a.time)}</td><td>${esc(patientName(a.patientId))}</td><td>${esc(a.reason || '—')}</td><td>${esc(a.chair || 'Chair 1')}</td><td>${esc(a.status || 'Scheduled')}</td></tr>`).join('')}</tbody></table>` : '<p>No appointments scheduled today.</p>'));
+    (queue.length ? `<table class="print-table"><thead><tr><th>Serial</th><th>Time</th><th>Patient</th><th>Reason</th><th>Chair</th><th>Status</th></tr></thead><tbody>${queue.map((a, i) => `<tr><td>${esc(a.serial || `Q-${String(i + 1).padStart(3, '0')}`)}</td><td>${time(a.time)}</td><td>${esc(patientNameWithCode(a.patientId))}</td><td>${esc(a.reason || '—')}</td><td>${esc(a.chair || 'Chair 1')}</td><td>${esc(a.status || 'Scheduled')}</td></tr>`).join('')}</tbody></table>` : '<p>No appointments scheduled today.</p>'));
 }
 async function printBilling() {
   const invoices = (await q('list', { collection: 'invoices', page: 1, pageSize: 2000 })).rows || [];
@@ -3770,7 +3774,7 @@ async function printBilling() {
   const collected = payments.reduce((sum, p) => sum + Math.max(0, (p.amountCents ?? 0) - (p.refundedCents ?? 0)), 0);
   const outstanding = invoices.reduce((sum, i) => sum + (i.dueCents ?? 0), 0);
   return openPrintPreview('Billing statement', documentSummary([['Total billed', currency(centsToMoney(billed))], ['Collected', currency(centsToMoney(collected))], ['Outstanding', currency(centsToMoney(outstanding))]]) +
-    (invoices.length ? `<table class="print-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${invoices.map((i) => `<tr><td>${esc(i.invoiceNumber)}</td><td>${esc(patientName(i.patientId))}</td><td>${dateFull(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td>${currency(centsToMoney(i.paidCents ?? i.paid))}</td><td>${currency(centsToMoney(i.dueCents ?? i.due))}</td></tr>`).join('')}</tbody></table>` : '<p>No invoices created.</p>'));
+    (invoices.length ? `<table class="print-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${invoices.map((i) => `<tr><td>${esc(i.invoiceNumber)}</td><td>${esc(patientNameWithCode(i.patientId))}</td><td>${dateFull(i.date)}</td><td>${currency(centsToMoney(i.totalCents ?? i.total))}</td><td>${currency(centsToMoney(i.paidCents ?? i.paid))}</td><td>${currency(centsToMoney(i.dueCents ?? i.due))}</td></tr>`).join('')}</tbody></table>` : '<p>No invoices created.</p>'));
 }
 async function printVisit(visit) {
   return openPrintPreview(`Visit ${visit.visitCode || ''} — ${patientName(visit.patientId)}`, documentSummary([['Patient', esc(patientName(visit.patientId))], ['Date', dateFull(visit.date)], ['Dentist', esc(staffName(visit.dentistId))]]) +
@@ -3792,7 +3796,7 @@ async function printExpense(expense) {
 }
 async function printAppointmentSlip(a) {
   return openPrintPreview(`Appointment slip ${a.appointmentCode || ''}`, documentSummary([
-    ['Patient', esc(patientName(a.patientId))], ['Date', dateFull(a.date)], ['Time', time(a.time)], ['Serial', esc(a.serial || '—')]
+    ['Patient', esc(patientNameWithCode(a.patientId))], ['Date', dateFull(a.date)], ['Time', time(a.time)], ['Serial', esc(a.serial || '—')]
   ]) + `<table class="print-table"><tbody><tr><th>Appointment</th><td>${esc(a.appointmentCode || '—')}</td></tr><tr><th>Dentist</th><td>${esc(staffName(a.dentistId))}</td></tr><tr><th>Chair / Room</th><td>${esc(a.chair || '—')} · ${esc(a.room || '—')}</td></tr><tr><th>Reason</th><td>${esc(a.reason || '—')}</td></tr><tr><th>Status</th><td>${esc(a.status || 'Scheduled')}</td></tr></tbody></table><p>Please arrive 10 minutes early and bring this slip.</p>`, 'Receipt80');
 }
 async function printEstimate(plan) {

@@ -237,6 +237,8 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
     await rxForm.locator('[data-opt="Pain On"]').click();
     await rxForm.locator('textarea[name="requiredExamination"]').fill('IOPA 46');
+    // Advice lives inside a collapsed <details> — expand it first (locale-proof)
+    await page.evaluate(() => { const ta = document.querySelector('textarea[name="advice"]'); if (ta?.closest('details')) ta.closest('details').open = true; });
     await rxForm.locator('textarea[name="advice"]').fill('Warm saline rinse. দুই বেলা মুখ ধুবেন।');
     await rxForm.locator('[name="medications[0][medicine]"]').fill('Amoxicillin ক্যাপসুল');
     await rxForm.locator('[name="medications[0][quantity]"]').fill('15');

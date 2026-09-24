@@ -138,6 +138,10 @@ const BENGALI_DICT = {
   'Actions': 'অ্যাকশন', 'Prescription updated': 'প্রেসক্রিপশন হালনাগাদ', 'Rx': 'আরএক্স',
   'Apply template': 'টেমপ্লেট প্রয়োগ', 'Save as template': 'টেমপ্লেট সংরক্ষণ', 'Duplicate': 'কপি করুন', 'Instructions': 'নির্দেশনা',
   'Duration': 'মেয়াদ', 'Before food': 'খাবারের আগে', 'After food': 'খাবারের পরে', 'With food': 'খাবারের সাথে',
+  'Custom / other complaints — added after the selected ones': 'নির্বাচিতগুলির পরে কাস্টম / অন্যান্য অভিযোগ যোগ হবে',
+  'Custom / other findings — e.g. tenderness, tooth number details': 'কাস্টম / অন্যান্য পর্যবেক্ষণ — যেমন টেন্ডারনেস, দাঁতের নম্বর',
+  'multi-select': 'মাল্টি-সিলেক্ট', 'Received by': 'গ্রহণকারী', 'Remaining due': 'বাকি টাকা',
+
   'Clinical records': 'ক্লিনিক্যাল রেকর্ড', 'Record a visit': 'ভিজিট রেকর্ড করুন', 'Record a visit after recording a patient visit.': 'রোগীর ভিজিটের তথ্য সংরক্ষণ করুন।', 'Symptoms': 'উপসর্গ', 'Clinical findings': 'ক্লিনিক্যাল পর্যবেক্ষণ', 'Diagnosis': 'রোগ নির্ণয়', 'Treatment plan': 'চিকিৎসা পরিকল্পনা', 'Treatment performed': 'সম্পাদিত চিকিৎসা', 'Follow-up date': 'ফলো-আপের তারিখ', 'Doctor / additional notes': 'ডাক্তারের অতিরিক্ত নোট',
   'Treatment catalog': 'চিকিৎসা তালিকা', 'Add a treatment': 'চিকিৎসা যোগ করুন', 'Treatment catalog is empty': 'চিকিৎসা তালিকা খালি', 'Treatment name': 'চিকিৎসার নাম', 'Default price': 'ডিফল্ট মূল্য', 'Tooth required': 'দাঁত প্রয়োজন', 'Active': 'সক্রিয়', 'Inactive': 'নিষ্ক্রিয়',
   'Dental chart': 'ডেন্টাল চার্ট', 'Choose a patient to open the chart': 'চার্ট খুলতে একজন রোগী নির্বাচন করুন', 'Select a tooth': 'একটি দাঁত নির্বাচন করুন', 'Tooth record': 'দাঁতের রেকর্ড', 'Clinical note': 'ক্লিনিক্যাল নোট', 'Save tooth record': 'দাঁতের রেকর্ড সংরক্ষণ', 'Remove record': 'রেকর্ড মুছুন', 'Adult dentition': 'স্থায়ী দাঁত', 'Primary dentition': 'দুধ দাঁত',

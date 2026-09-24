@@ -61,3 +61,13 @@ Continue product-wide audit sweep modules 1→4 (Dashboard/Appointments/Queue/Tr
 **CI history**: run 36036246065 — 4 of 6 audit tests green; 36037591332 — all but tag-filter→profile-routing (then fixed). Latest run 36039103674 (auth-polish commit) — outcome unknown: **GitHub token expired mid-run (HTTP 401) while it was in progress.**
 
 **BLOCKER (external)**: GitHub authentication expired in the sandbox (gh 401 Bad credentials; git push fails). Until the user reconnects GitHub in Arena: cannot watch CI, cannot publish v1.6.1. Local commit "polish: premium glass auth backdrop" (1.6.1+1 commit) awaits push as soon as auth returns. Pending after reconnect: (1) push, (2) watch CI green (visual stage → build → docs marks → publish via existing [publish-release] markers), (3) verify DOCS-PDF lines + 7 PDFs in artifact, (4) confirm v1.6.1 release (tag + 4 assets), (5) finalize audit ledger entries D5-F closure → final verdict.
+
+## 16. v1.6.1 screen-audit loop status (2026-09-24, second pass)
+
+**Audit-caught defects fixed since §15:** D5 — four patients-toolbar buttons (Advanced/Columns/density/Clear) were stranded in `handleChange` instead of `handleClick` → 100% dead clicks in v1.6.0 (confirmed by the tag-filter failure across 3 CI runs). D6 — `patientFinancialSummary` now returns honest zeros in the web-preview adapter so the Patient 360 finance strip always renders. Additional selector fix: statement print action is `print-patient-statement` (the phantom `export-patient-statement-pdf` had no rendered button — smokeDocs + visual test corrected).
+
+**Gate progression (head commits):** patients list ✅ → command palette ✅ → patients-list held ✅ across last 3 runs. Remaining red: Patient 360 (.patient-sub never in DOM after create — code path reads correct; dump-in-error diagnostics pushed to surface CI DOM) and rx builder (90s timeout on runner; step diagnostics added).
+
+**Environment ceilings hit (recorded, not retried):** Azure blob + results-receiver hosts are firewall-reset (artifact screenshots/traces + raw job logs unreachable); Playwright Chromium CDN blocked (no local visual repro); console.* output absent from `gh run view --verbose` folded output.
+
+**GitHub auth blocker #2:** token expired again ~40 min after reconnect (401 on all gh/git at this point) with the diagnostics commit already pushed. Outcome of run 36045953943 diagnostics unread. On reconnect: read 360-DUMP/RX-DUMP errors → surgical fix → green CI → Windows build → docs-phase marks → v1.6.1 tag+assets → final ledger.

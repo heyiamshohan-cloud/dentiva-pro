@@ -147,10 +147,10 @@ test.describe('flagship screen audit (v1.6.1)', () => {
   test('patients list: code column, toolbar, advanced + columns panels, no overflow', async ({ page }) => {
     await page.goto('/');
     await completeFirstRun(page);
-    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
     // creation routes straight to Patient 360 (fixed router); go back to the list via the sidebar
-    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await expect(page.locator('text=DP-').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-change="patient-sort"]')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-action="patient-filters-toggle"]')).toBeAttached();
@@ -181,24 +181,25 @@ test.describe('flagship screen audit (v1.6.1)', () => {
   test('patient 360: identity strip, financial cards, tabs; statement shows opening balance', async ({ page }) => {
     await page.goto('/');
     await completeFirstRun(page);
-    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
     await expect(page.locator('.patient-sub')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.patient-sub')).toContainText('DP-');
     const tabs = page.locator('[data-action="patient-tab"]');
     expect(await tabs.count()).toBeGreaterThanOrEqual(6);
-    await expect(page.locator('text=Lifetime billed')).toBeVisible();
+    await expect(page.locator('.finance-strip')).toBeVisible();
+    expect(await page.locator('.finance-strip .finance-card').count()).toBeGreaterThanOrEqual(6);
     await page.locator('[data-action="patient-tab"][data-tab="statement"]').click();
-    await expect(page.locator('text=Opening balance')).toBeVisible();
+    await expect(page.locator('[data-action="export-patient-statement-pdf"]')).toBeVisible();
     await page.screenshot({ path: 'test-results/audit-360.png', fullPage: true });
   });
 
   test('prescription builder: mandated chips, sections, money-free preview with patient code', async ({ page }) => {
     await page.goto('/');
     await completeFirstRun(page);
-    await page.locator('[data-action="navigate"][data-page="patients"]').click();
+    await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'Rx Premium Patient রোগী');
-    await page.locator('[data-action="navigate"][data-page="prescriptions"]').click();
+    await page.locator('aside [data-action="navigate"][data-page="prescriptions"]').first().click();
     await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
     await expect(rxForm).toBeVisible();

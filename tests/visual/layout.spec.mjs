@@ -246,9 +246,9 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     const frame = page.locator('.print-preview-frame');
     await expect(frame).toBeVisible({ timeout: 15_000 });
     const srcdoc = await frame.getAttribute('srcdoc');
-    for (const token of ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'DP-', 'ক্যাপসুল', 'Playwright Clinic', 'Dr. Ayesha Rahman']) {
-      expect(srcdoc, `preview missing ${token}`).toContain(token);
-    }
+    const probe = { len: (srcdoc || '').length, cc: srcdoc?.includes('C/C'), oe: srcdoc?.includes('O/E'), re: srcdoc?.includes('R/E'), advice: srcdoc?.includes('Advice'), pain: srcdoc?.includes('Pain On'), dp: srcdoc?.includes('DP-'), med: srcdoc?.includes('ক্যাপসুল'), clinic: srcdoc?.includes('Playwright Clinic'), rxSym: srcdoc?.includes('℞'), medTable: srcdoc?.includes('med-table'), secLabel: srcdoc?.includes('doc-section-label'), bodyIdx: srcdoc?.indexOf('<body') };
+    const missing = ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'DP-', 'ক্যাপসুল', 'Playwright Clinic', 'Dr. Ayesha Rahman'].filter((token) => !srcdoc?.includes(token));
+    expect(missing.join(','), 'PROBE ' + JSON.stringify(probe) + ' TAIL[' + ((srcdoc || '').slice(-400)).replace(/[\n\r]+/g, ' ') + ']').toBe('');
     const content = srcdoc.slice(srcdoc.indexOf('</style>'));
     for (const bad of ['৳', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment', 'invoice', 'doc-totals']) {
       expect(content, `preview leaked ${bad}`).not.toContain(bad);

@@ -392,8 +392,8 @@ function smokeDocs() {
     if (!(await waitFor(() => document.querySelector('[data-tab="statement"], [data-action="patient-tab"][data-tab="statement"]'), 8000))) throw new Error('patient 360 tabs missing');
     (document.querySelector('[data-action="patient-tab"][data-tab="statement"]') || document.querySelector('[data-tab="statement"]'))?.click();
     if (!(await waitFor(() => document.body.textContent.includes('Opening balance') || document.body.textContent.includes('Statement'), 8000))) throw new Error('statement tab did not render');
-    const stmtBtn = document.querySelector('[data-action="export-patient-statement-pdf"]');
-    await clickEl(stmtBtn, 'export-patient-statement-pdf');
+    const stmtBtn = document.querySelector('[data-action="print-patient-statement"]');
+    await clickEl(stmtBtn, 'print-patient-statement');
     if (!(await waitFor(() => previewHtml().length > 400))) throw new Error('statement preview did not render');
     const stHtml = previewHtml();
     for (const token of [patient.patientCode, longName, 'balance', 'bKash']) {

@@ -797,6 +797,7 @@ async function renderPatientProfile() {
   const tab = ui.patientTab || 'overview';
   const tabs = PATIENT_TABS.filter(([id]) => !PATIENT_TAB_PERMISSIONS[id] || can(PATIENT_TAB_PERMISSIONS[id]));
   return `<div class="page patient-page">
+    <div class="patient-back-row">${button('All patients', 'navigate', 'chevron', 'ghost btn-small', 'data-page="patients" aria-label="Back to patient list"')}</div>
     <div class="patient-head-card">
       <div class="patient-head-main"><span class="avatar avatar-lg">${initials(p.fullName)}</span>
         <div><h1>${esc(p.fullName)}</h1><p class="patient-sub">${esc(p.patientCode || '—')}${p.phone ? ` · ${esc(p.phone)}` : ''}${p.email ? ` · ${esc(p.email)}` : ''}</p>
@@ -2686,7 +2687,7 @@ async function handleClick(event) {
   if (target.tagName === 'BUTTON' && target.closest('form') && !target.hasAttribute('data-submit-action')) event.preventDefault();
   const action = target.dataset.action;
   const id = target.dataset.id || '';
-  const navigate = (page) => { ui.page = page; ui.modal = null; op('navigation.pushRecent', { page }).catch(() => {}); render(); };
+  const navigate = (page) => { ui.page = page; ui.modal = null; if (ui.patientId && page === 'patients') ui.patientId = null; op('navigation.pushRecent', { page }).catch(() => {}); render(); };
 
   switch (action) {
     case 'navigate': return navigate(target.dataset.page);

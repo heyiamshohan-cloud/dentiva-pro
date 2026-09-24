@@ -149,8 +149,10 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await completeFirstRun(page);
     await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
+    // creation routes straight to Patient 360 (fixed router); go back to the list via the sidebar
+    await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await expect(page.locator('text=DP-').first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('[data-change="patient-sort"]')).toBeVisible();
+    await expect(page.locator('[data-change="patient-sort"]')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-action="patient-filters-toggle"]')).toBeAttached();
     await page.evaluate(() => document.querySelector('[data-action="patient-filters-toggle"]').click());
     await expect(page.locator('input[data-change="patient-tag-filter"]')).toBeVisible({ timeout: 12_000 });
@@ -181,7 +183,6 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await completeFirstRun(page);
     await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
-    await page.locator('tbody tr').first().locator('[data-action="open-patient-profile"]').first().click();
     await expect(page.locator('.patient-sub')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.patient-sub')).toContainText('DP-');
     const tabs = page.locator('[data-action="patient-tab"]');

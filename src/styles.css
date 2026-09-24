@@ -703,3 +703,6 @@ tr.density-compact small { display:none; }
 .rx-picker-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
 .rx-picker-chips .chip-button.selected { background:var(--primary-50,#e6f4f4); border-color:var(--primary-500,#17a5a5); color:var(--primary-700,#0c6b70); font-weight:700; }
 .rx-picker-custom { width:100%; }
+
+/* Patient 360 back-to-list row */
+.patient-back-row { margin-bottom:8px; }

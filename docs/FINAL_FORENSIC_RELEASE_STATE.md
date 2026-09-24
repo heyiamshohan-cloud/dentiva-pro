@@ -27,3 +27,11 @@ _(populated during P1/P2; each entry lands in FINAL_FORENSIC_AUDIT.md with root 
 
 ## Next exact action
 P1: full inventory scan (files/LOC/markers/dead-code candidates/IPC surface) → append baseline to audit doc → commit checkpoint.
+
+
+## Final outcome (2026-09-24)
+- Release: **v1.5.2** published at https://github.com/heyiamshohan-cloud/dentiva-pro/releases/tag/v1.5.2; tag → commit `8c3dfbc`.
+- CI: dry-run full gate 35975694430 SUCCESS → publish run 35976484928 SUCCESS (all gate steps green incl. portable AND installed smoke with install/launch/persistence/restart/uninstall).
+- Artifacts: NSIS 100,685,098 B · portable EXE 100,448,597 B · ZIP 201,163,087 B · checksums 309 B. Prior releases untouched.
+- Fixes: F1 dateFormat implemented; F2 bootstrap session guard; F3 APP_VERSION drift fixed + anti-drift contract; F4 sw.js removed; F5 print:html predictable errors; F6 strict dependency gate. Final audit: docs/FINAL_FORENSIC_AUDIT.md (A–Z, all sections statused, no TODOs).
+- Checklist complete — no remaining work in this task.

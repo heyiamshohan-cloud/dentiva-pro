@@ -199,7 +199,7 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     expect(await tabs.count()).toBeGreaterThanOrEqual(6);
     await expect(page.locator('.finance-strip')).toBeVisible();
     expect(await page.locator('.finance-strip .finance-card').count()).toBeGreaterThanOrEqual(6);
-    await page.locator('[data-action="patient-tab"][data-tab="statement"]').click();
+    await page.locator('.tab-strip [data-action="patient-tab"][data-tab="statement"]').click();
     await expect(page.locator('[data-action="print-patient-statement"]')).toBeVisible();
     await expect(page.locator('.statement-period input[type="date"]').first()).toBeVisible();
     await page.screenshot({ path: 'test-results/audit-360.png', fullPage: true });

@@ -187,6 +187,10 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await completeFirstRun(page);
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
+    if (!(await page.locator('.patient-sub').count())) {
+      const dump = await page.evaluate(() => document.body.textContent.slice(0, 2000));
+      console.error('360-DUMP', JSON.stringify(dump));
+    }
     await expect(page.locator('.patient-sub')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.patient-sub')).toContainText('DP-');
     const tabs = page.locator('[data-action="patient-tab"]');
@@ -200,14 +204,18 @@ test.describe('flagship screen audit (v1.6.1)', () => {
   });
 
   test('prescription builder: mandated chips, sections, money-free preview with patient code', async ({ page }) => {
+    const log = async (msg) => console.error('RX-STEP', msg);
     await page.goto('/');
     await completeFirstRun(page);
+    await log('first-run done');
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await createPatientViaUi(page, 'Rx Premium Patient রোগী');
     await page.locator('aside [data-action="navigate"][data-page="prescriptions"]').first().click();
+    await log('on prescriptions page url=' + page.url());
     await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
     await expect(rxForm).toBeVisible();
+    await log('rx modal open, options=' + String(await rxForm.locator('select[name="patientId"] option').count()));
     await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
     const cc = ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity'];
     for (const label of cc) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();

@@ -29,7 +29,10 @@ Phase: **SCOPE-EXPANDED PRODUCT-WIDE AUDIT (§6–§16 correction applied)**. Pr
 New: tests/patient-code-contract.test.mjs (3 contract + forensic render tests).
 
 ## WINDOWS VALIDATION STATUS
-NOT YET for v1.6.0 (requires CI runner; §13 explicitly required — no substitution claims from v1.5.2).
+✅ CI run 36027991625 (commit 2be9e9f) — Windows runner completed: tests+build, Chromium viewport checks, portable+NSIS build, ASAR module-closure verification, PE artifact verification, **installed-app smoke 12/12** (launch→login→patient render→backup→restart→persistence ok, DB 576KB migration=current), release package assembly with SHA-256 verification loop. Evidence artifact Dentiva-Pro-82-windows-smoke-evidence uploaded (local re-download blocked by sandbox Azure EOF — documented infra limitation, not a product defect).
+
+## GITHUB / RELEASE STATUS (supersedes earlier)
+GitHub RECONNECTED (token valid). Branch pushed through merge 75576f1 + batch 2. Parallel v1.5.1/v1.5.2 published line merged; tags v1.5.0/v1.5.1/v1.5.2 untouched. v1.6.0 release = publish-release commit next.
 
 ## GITHUB / RELEASE STATUS
 v1.6.0 NOT tagged, NOT published (per §14). Local HEAD (pending this sweep batch) on `arena/01a0c9e2-dentiva-pro`. PR #2 stale (will update on reconnect).

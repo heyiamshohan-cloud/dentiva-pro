@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.6.0 (2026-09-24) — Flagship product-wide upgrade
+
+### Clinical — the prescription is a clinical document (never a bill)
+- Prescription builder: C/C multi-select (Pain On, G. Carries, Swelling, Gum Bleeding, Bad Breath, Sensitivity) and O/E multi-select (Carries / G Carries, BDR / BDC, Gingivitis, Parodental Pocket, Perio Dontitis, Pulpitis, Impected Teeth, Dry Socket, Attrition / Erosion) with Custom/Other, plus dedicated R/E, Diagnosis and Advice sections.
+- Structured medication rows: medicine with catalog bind, form, strength, dose, frequency patterns (1-0-1…1-1-1-1, SOS), before/after/with-food, duration value+unit, quantity, instructions; add/remove/duplicate/reorder; clinician-authored templates; lossless preview round-trip.
+- Contract test enforces a money-free prescription (no totals, discount, tax, paid/due, currency symbols).
+
+### Patients
+- Patient Code is first-class: DP-prefixed, stable for the patient's lifetime, unique; shown with the name on lists, Patient 360, documents, reports and search; contract-tested.
+- Flagship patient list: 10 sort keys (incl. balance/billed/paid/visits via single-JOIN aggregates), 11 configurable columns, advanced filters (tag, registration dates, tooth status, phone), density toggle, persisted preferences, saved views.
+- Patient 360: lifetime billed/paid/due, professional statement (opening/closing balance, period filter, pager, print/PDF), per-visit clinical+billing cards, timeline, patient-scoped audit.
+- Command palette: action commands + global search across 7 collections; full keyboard navigation.
+
+### Documents
+- One shared document engine renders Prescription, Invoice, Payment Receipt and Patient Statement: preview ≡ print ≡ PDF on A4/A5/Letter/80mm.
+- Receipt: received/refunded/net, remaining due for the linked invoice, method reference guidance (bKash/Nagad/Rocket/Upay/Bank/Card/Cash), received-by attribution.
+- Forensic render coverage: 40-row medication tables, long Bengali/English mixed content, multipage-safe layout.
+
+### Quality & integrity
+- Dental chart: true FDI labels (primary renders its actual 20 teeth), anatomical quadrant layout, multi-tooth bulk apply.
+- Double-submit guard on all forms; overpayment blocked server-side; refunds never mutate the original payment.
+- Settings: clinic website + dentist BMDC registration feed every document header.
+- +52 Bangla strings; dead-action registry diff (1 dead UI action fixed); op/query registry parity verified; negative-stock and double-booking guards verified.
+- Tests: 133 tests — 131 pass, 0 fail, 2 skipped (manual benchmarks); scale benchmarks 1k/10k/25k/100k (aggregate list page 2.3–39.8 ms; statement 0.6 ms).
+- Windows CI installed-app smoke of THIS build: install→launch→login→patient→backup→restart persistence, 12/12 passed on the Windows runner.
+
 ## 1.5.2 (2026-09-24)
 
 **Final forensic-audit hardening release** — the entire product (runtime, IPC, frontend, scale, packaging, docs-truth) was re-audited and every valid finding fixed at root cause.

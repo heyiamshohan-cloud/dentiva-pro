@@ -701,6 +701,10 @@ function patientListWantsAggregates(sortKey, cols) {
 }
 
 async function renderPatients() {
+  // Patient 360 ↔ list routing: a row click sets ui.patientId and the page
+  // becomes the profile; the back action clears it (regression guard: the
+  // v1.6.0 list rewrite dropped this branch — the visual audit caught it).
+  if (ui.patientId) return renderPatientProfile();
   const sortKey = ui.patientSort || 'name';
   const cols = patientColumnsEnabled();
   const filters = { status: ui.patientStatusFilter, balance: ui.patientBalanceFilter };

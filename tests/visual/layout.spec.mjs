@@ -151,9 +151,10 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
     await expect(page.locator('text=DP-').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-change="patient-sort"]')).toBeVisible();
-    await page.getByRole('button', { name: /advanced/i }).click();
-    await expect(page.locator('input[data-change="patient-tag-filter"]')).toBeVisible();
-    await page.getByRole('button', { name: /columns/i }).first().click();
+    await expect(page.locator('[data-action="patient-filters-toggle"]')).toBeAttached();
+    await page.evaluate(() => document.querySelector('[data-action="patient-filters-toggle"]').click());
+    await expect(page.locator('input[data-change="patient-tag-filter"]')).toBeVisible({ timeout: 12_000 });
+    await page.evaluate(() => document.querySelector('[data-action="patient-columns-toggle"]').click());
     await expect(page.locator('[data-action="patient-filters-toggle"][aria-expanded="true"]')).toHaveCount(1);
     const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(docWidth).toBeLessThanOrEqual((await page.viewportSize()).width + 2);

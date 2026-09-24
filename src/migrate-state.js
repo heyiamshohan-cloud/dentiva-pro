@@ -6,7 +6,7 @@
 import { ARRAY_COLLECTIONS, CURRENT_SCHEMA_VERSION } from './core.js';
 import { normalizeNotificationRules } from './notifications.js';
 
-export const APP_VERSION = '1.5.1';
+export const APP_VERSION = '1.5.2';
 
 export const DEFAULT_SETTINGS = {
   clinicName: '',

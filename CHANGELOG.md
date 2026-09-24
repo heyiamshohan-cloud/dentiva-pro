@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.5.2 (2026-09-24)
+
+**Final forensic-audit hardening release** — the entire product (runtime, IPC, frontend, scale, packaging, docs-truth) was re-audited and every valid finding fixed at root cause.
+
+### Fixed
+- **Dead "Date format" setting is now real.** Settings offered a free-text date-format field that never changed anything; it is now a select ("23 Sep 2026" / "23/09/2026") wired into the single date renderer used across every list and table, with legacy free-text values safely mapped.
+- **Bootstrap session race.** A sign-in completed while the startup bootstrap was still in flight can no longer be overturned by the older bootstrap reply (the renderer never stomps a freshly established session).
+- **`print:html` errors are predictable** — invalid print payloads get a structured `{ok:false,error}` result instead of an IPC exception.
+- **In-app version drift.** The version shown in the app and used by the upgrade path (`APP_VERSION` in `src/migrate-state.js`) had drifted from `package.json`; they are now synchronized and a contract test blocks future drift.
+
+### Changed / Hardened
+- **Dead code removed**: `public/sw.js` (a never-registered service-worker stub shipped with every build) is deleted.
+- **Build gate tightened**: `ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES` removed — with zero runtime dependencies, any unresolved dependency is a packaging defect that must fail the build.
+
+### Verified for this release
+- npm audit (production + dev): 0 vulnerabilities.
+- 100k-patient dataset benchmark (945,086 rows): list pages ≤172 ms, backups 2.3 s, integrity OK (see `docs/PERFORMANCE_BASELINE.md`).
+- Every UI action rendered to the desktop client has a handler (63/63).
+
 ## v1.5.1 — Post-release packaging hotfix: installed-app startup restored, professional icon, packaging gates enforced
 
 **Fixes (release-blocking)**

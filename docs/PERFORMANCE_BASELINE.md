@@ -13,6 +13,7 @@ Node 22 (node:sqlite 3.51.3).
 | 100,000 | 945,086 | 18.0 ms | 159.5 ms | 220.6 ms | 137.9 ms | 274.8 ms | 312.7 ms | 0.6 ms | 2.4 s | 1.6 s (412 MB) |
 
 Notes:
+- The 100k row was re-run on 2026-09-24 for the v1.5.2 forensic audit — results within ±10% of the table (list p1 26 ms, last page 172 ms, global search ~1 s, backup 2.3 s, integrity OK); the behaviors of interest (pagination, search, backup, integrity) remain flat.
 - Cold open + migration no-op on an existing store: < 3 ms at every size.
 - Global search (3 collections, patient-join, capped at 8 per collection) is the
   slowest interactive operation: ~1.0 s at 100k — acceptable for a

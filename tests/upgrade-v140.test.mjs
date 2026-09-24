@@ -34,7 +34,7 @@ test('upgrade safety: v1.4.0 settings/workspace forward-migrated without data lo
   assert.ok(migrated.settings.notificationRules && typeof migrated.settings.notificationRules === 'object' && !Array.isArray(migrated.settings.notificationRules), 'legacy notificationRules normalised to object');
   assert.equal((migrated.patients || []).length, 1, 'patients preserved');
   assert.equal(migrated.patients[0].fullName, 'Legacy Patient');
-  assert.equal(APP_VERSION, '1.5.1');
+  assert.equal(APP_VERSION, '1.5.2');
 });
 
 test('upgrade safety: unknown legacy keys survive round-trip (no silent schema wipe)', () => {

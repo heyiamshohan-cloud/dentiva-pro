@@ -43,6 +43,13 @@ test('dateFormat setting is wired into the renderer date helper (no dead setting
   assert.doesNotMatch(renderer, /field\('Date format', 'dateFormat'/);
 });
 
+test('in-app APP_VERSION cannot drift from the package version', () => {
+  const migrate = fs.readFileSync(path.join(root, 'src', 'migrate-state.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.match(migrate, new RegExp(`APP_VERSION = ['\"]${pkg.version}['\"]`),
+    'src/migrate-state.js APP_VERSION must equal package.json version (in-app version + upgrade target drift otherwise)');
+});
+
 test('Bengali locale covers the release-critical document and workflow surfaces', () => {
   for (const label of [
     'Dashboard', 'Patients', 'Patient timeline', 'Appointments', 'Today’s Queue', 'Clinical records',

@@ -813,11 +813,11 @@ async function renderPatientProfile() {
     <div class="patient-quick-actions" role="toolbar" aria-label="Patient quick actions">${patientQuickActions(p)}</div>
     </div>
     <div class="tab-strip" role="tablist">${tabs.map(([id, label, iconName]) => `<button class="tab-button ${tab === id ? 'active' : ''}" data-action="patient-tab" data-tab="${id}" role="tab" aria-selected="${tab === id}">${icon(iconName, 15)}<span>${esc(localized(label))}</span></button>`).join('')}</div>
-    ${await renderPatientTab(p, tab, patient)}
+    ${await renderPatientTab(p, tab, patient, counts)}
   </div>`;
 }
 
-async function renderPatientTab(p, tab, patient) {
+async function renderPatientTab(p, tab, patient, counts = {}) {
   const id = p.id;
   switch (tab) {
     case 'overview': {

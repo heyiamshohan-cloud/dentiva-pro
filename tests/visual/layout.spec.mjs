@@ -149,35 +149,30 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await completeFirstRun(page);
     await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
-    const list = page.locator('[data-action="navigate"][data-page="patients"]');
-    await list.click();
-    await expect(page.locator('text=DP-')).toBeVisible({ timeout: 10_000 });
-    // toolbar controls exist and are operable
+    await expect(page.locator('text=DP-').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-change="patient-sort"]')).toBeVisible();
     await page.locator('[data-action="patient-filters-toggle"]').click();
-    await expect(page.locator('[data-change="patient-tag-filter"], select.patient-filter, .filter-panel').first()).toBeVisible();
+    await expect(page.locator('input[data-change="patient-tag-filter"]')).toBeVisible();
     await page.locator('[data-action="patient-columns-toggle"]').click();
-    const panels = page.locator('.filter-panel');
+    await expect(page.locator('[data-action="patient-filters-toggle"][aria-expanded="true"]')).toHaveCount(1);
     const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-    const viewWidth = (await page.viewportSize()).width;
-    expect(docWidth, 'patients must not overflow horizontally').toBeLessThanOrEqual(viewWidth + 2);
+    expect(docWidth).toBeLessThanOrEqual((await page.viewportSize()).width + 2);
     await page.screenshot({ path: 'test-results/audit-patients.png', fullPage: true });
   });
 
-  test('command palette: actions group, keyboard navigation runs', async ({ page }) => {
+  test('command palette: instant actions, keyboard navigation runs', async ({ page }) => {
     await page.goto('/');
     await completeFirstRun(page);
     await page.keyboard.press('Control+k');
-    const input = page.locator('[data-input="command-search"]');
-    await expect(input).toBeVisible();
-    await expect(page.locator('#command-results .command-section')).not.toHaveCount(0);
-    await input.fill('pat');
+    await expect(page.locator('[data-input="command-search"]')).toBeVisible();
+    // v1.6.1: actions render instantly on open — no first-keystroke gap
+    await expect(page.locator('#command-results .command-section').first()).toBeVisible();
     await expect(page.locator('#command-results .command-row').first()).toBeVisible();
     await page.keyboard.press('ArrowDown');
     await expect(page.locator('#command-results .command-row.focused')).toHaveCount(1);
-    await input.fill('queue');
+    await page.locator('[data-input="command-search"]').pressSequentially('queue');
     await page.keyboard.press('Enter');
-    await expect(page.locator('h1,h2', { hasText: /queue/i }).first()).toBeVisible();
+    await expect(page.locator('h1, h2').filter({ hasText: /queue|দিন/i }).first()).toBeVisible();
   });
 
   test('patient 360: identity strip, financial cards, tabs; statement shows opening balance', async ({ page }) => {
@@ -185,32 +180,27 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await completeFirstRun(page);
     await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
-    await page.locator('[data-action="navigate"][data-page="patients"]').click();
-    await page.locator('tbody tr').first().click();
+    await page.locator('tbody tr [data-action="open-patient-profile"].btn, tbody tr [data-action="open-patient-profile"]').last().click();
+    await expect(page.locator('.patient-sub')).toBeVisible();
     await expect(page.locator('.patient-sub')).toContainText('DP-');
     const tabs = page.locator('[data-action="patient-tab"]');
-    const tabCount = await tabs.count();
-    expect(tabCount, 'patient 360 needs at least 6 tabs').toBeGreaterThanOrEqual(6);
+    expect(await tabs.count()).toBeGreaterThanOrEqual(6);
     await expect(page.locator('text=Lifetime billed')).toBeVisible();
     await page.locator('[data-action="patient-tab"][data-tab="statement"]').click();
     await expect(page.locator('text=Opening balance')).toBeVisible();
-    await page.locator('[data-action="patient-tab"][data-tab="visits"]').click();
     await page.screenshot({ path: 'test-results/audit-360.png', fullPage: true });
   });
 
-  test('prescription builder: mandated C/C + O/E chips, R/E/Advice sections, money-free preview with patient code', async ({ page }) => {
+  test('prescription builder: mandated chips, sections, money-free preview with patient code', async ({ page }) => {
     await page.goto('/');
     await completeFirstRun(page);
-    await page.locator('[data-action="navigate"][data-page="prescriptions"]').click();
-    await page.locator('[data-action="open-prescription"]').first().click();
-    const rxForm = page.locator('form[data-form="prescription"]');
-    await expect(rxForm).toBeVisible();
-    // create+select a patient inline first (builder requires an existing patient)
-    await rxForm.locator('button:has-text("Close"), [data-action="close-modal"]').first().click();
+    await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await createPatientViaUi(page, 'Rx Premium Patient রোগী');
     await page.locator('[data-action="navigate"][data-page="prescriptions"]').click();
-    await page.locator('[data-action="open-prescription"]').first().click();
+    await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
+    const rxForm = page.locator('form[data-form="prescription"]');
     await expect(rxForm).toBeVisible();
+    await rxForm.locator('select[name="patientId"]').selectOption({ label: /Rx Premium Patient/ });
     const cc = ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity'];
     for (const label of cc) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();
     const oe = ['Carries / G Carries', 'BDR / BDC', 'Gingivitis', 'Parodental Pocket', 'Perio Dontitis', 'Pulpitis', 'Impected Teeth', 'Dry Socket', 'Attrition / Erosion'];

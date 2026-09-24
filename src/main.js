@@ -3490,8 +3490,12 @@ async function handleChange(event) {
 function handleKeydown(event) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
-    ui.modal = { type: 'search', data: { query: '', results: '' } };
+    ui.modal = { type: 'search', data: { query: '', results: commandResultsHtml({ actions: commandActionsFor('') }) } };
     render();
+    (async () => {
+      const container = document.getElementById('command-results');
+      if (container && ui.modal?.type === 'search') container.innerHTML = commandResultsHtml(await globalSearch(''));
+    })();
     return;
   }
   if (event.key === 'Escape' && ui.modal) { event.preventDefault(); closeModal(); return; }

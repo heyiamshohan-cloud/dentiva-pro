@@ -134,6 +134,10 @@ test.describe('v1.4.0 workspace layout', () => {
  * viewport (projects matrix 1280x720 → 3840x2160).
  */
 test.describe('flagship screen audit (v1.6.1)', () => {
+  // GitHub runners run 6 viewport projects against one vite dev server;
+  // heavy flows (first-run wizard + modal + profile + preview) can exceed
+  // the 30s default under load — give the audit flows a 90s budget.
+  test.setTimeout(90_000);
   async function createPatientViaUi(page, name) {
     await page.locator('[data-action="open-patient"]').first().click();
     const form = page.locator('form[data-form="patient"]');

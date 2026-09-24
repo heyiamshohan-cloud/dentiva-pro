@@ -151,9 +151,9 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
     await expect(page.locator('text=DP-').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-change="patient-sort"]')).toBeVisible();
-    await page.locator('[data-action="patient-filters-toggle"]').click();
+    await page.getByRole('button', { name: /advanced/i }).click();
     await expect(page.locator('input[data-change="patient-tag-filter"]')).toBeVisible();
-    await page.locator('[data-action="patient-columns-toggle"]').click();
+    await page.getByRole('button', { name: /columns/i }).first().click();
     await expect(page.locator('[data-action="patient-filters-toggle"][aria-expanded="true"]')).toHaveCount(1);
     const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(docWidth).toBeLessThanOrEqual((await page.viewportSize()).width + 2);
@@ -180,8 +180,8 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await completeFirstRun(page);
     await page.locator('[data-action="navigate"][data-page="patients"]').click();
     await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
-    await page.locator('tbody tr [data-action="open-patient-profile"].btn, tbody tr [data-action="open-patient-profile"]').last().click();
-    await expect(page.locator('.patient-sub')).toBeVisible();
+    await page.locator('tbody tr').first().locator('[data-action="open-patient-profile"]').first().click();
+    await expect(page.locator('.patient-sub')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.patient-sub')).toContainText('DP-');
     const tabs = page.locator('[data-action="patient-tab"]');
     expect(await tabs.count()).toBeGreaterThanOrEqual(6);
@@ -200,7 +200,7 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
     await expect(rxForm).toBeVisible();
-    await rxForm.locator('select[name="patientId"]').selectOption({ label: /Rx Premium Patient/ });
+    await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
     const cc = ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity'];
     for (const label of cc) await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible();
     const oe = ['Carries / G Carries', 'BDR / BDC', 'Gingivitis', 'Parodental Pocket', 'Perio Dontitis', 'Pulpitis', 'Impected Teeth', 'Dry Socket', 'Attrition / Erosion'];

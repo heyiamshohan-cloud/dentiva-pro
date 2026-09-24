@@ -262,6 +262,7 @@ export const OPS = {
         next[key] = payload[key];
         changed.push(key);
       }
+      if (next.dateFormat !== undefined) next.dateFormat = /dmy|DD\/MM\/YYYY/i.test(String(next.dateFormat)) ? 'dmy' : 'short';
       if (next.documentFooter !== undefined) next.documentTemplate = { ...(next.documentTemplate && typeof next.documentTemplate === 'object' ? next.documentTemplate : {}), footer: str(next.documentFooter) };
       if (next.notificationRules !== undefined) next.notificationRules = normalizeNotificationRules(next.notificationRules);
       if (next.customPatientFields !== undefined) next.customPatientFields = normalizeCustomFields(next.customPatientFields);

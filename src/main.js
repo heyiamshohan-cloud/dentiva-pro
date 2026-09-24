@@ -228,7 +228,13 @@ function currency(value = 0) {
 function number(value = 0) { return new Intl.NumberFormat(appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD').format(Number(value) || 0); }
 function date(value, opts = {}) {
   if (!value) return '—';
-  const locale = appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-GB';
+  const bengali = appState.settings.language === 'Bengali';
+  const numericDmy = appState.settings.dateFormat === 'dmy' || /dmy|DD\/MM\/YYYY/i.test(String(appState.settings.dateFormat || ''));
+  if (numericDmy) {
+    const parts = String(value).slice(0, 10).split('-');
+    if (parts.length === 3 && parts[2]) return bengali ? `${parts[2]}/${parts[1]}/${parts[0]}` : new Intl.DateTimeFormat('en-GB').format(new Date(`${String(value).slice(0, 10)}T00:00:00`));
+  }
+  const locale = bengali ? 'bn-BD' : 'en-GB';
   try { return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', ...opts }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`)); } catch { return String(value); }
 }
 function dateFull(value) {
@@ -1310,7 +1316,7 @@ async function renderSettings() {
         <div class="form-grid two">
           ${selectField('Default language', 'language', [['English', 'English'], ['Bengali', 'Bengali']], s.language || 'English')}
           ${selectField('Currency', 'currency', [['BDT', 'BDT (৳)'], ['USD', 'USD ($)'], ['EUR', 'EUR (€)'], ['INR', 'INR (₹)']], s.currency || 'BDT')}
-          ${field('Date format', 'dateFormat', s.dateFormat || 'DD/MM/YYYY')}
+          ${selectField('Date format', 'dateFormat', [['short', '23 Sep 2026'], ['dmy', '23/09/2026']], /dmy|DD\/MM\/YYYY/i.test(String(s.dateFormat || '')) ? 'dmy' : 'short')}
           ${selectField('Time format', 'timeFormat', [['12', '12-hour'], ['24', '24-hour']], s.timeFormat || '12')}
           ${selectField('Print page size', 'printPageSize', [['A4', 'A4'], ['Letter', 'Letter'], ['Legal', 'Legal'], ['A5', 'A5']], s.printPageSize || 'A4')}
           ${selectField('Timezone', 'timezone', [['Asia/Dhaka', 'Asia/Dhaka (GMT+6)']], s.timezone || 'Asia/Dhaka')}
@@ -3240,7 +3246,10 @@ async function boot() {
     return;
   }
   appState.boot = result;
-  appState.session = result.session;
+  // A login that completed while bootstrap was in flight is newer than this
+  // payload — never stomp a freshly established session with the older reply.
+  appState.session = appState.systemSessionReady ? result.session : (appState.session || result.session);
+  appState.systemSessionReady = true;
   appState.firstRun = Boolean(result.firstRun);
   appState.setupComplete = Boolean(result.setupComplete);
   appState.settings = result.settings || {};

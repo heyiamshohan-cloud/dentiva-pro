@@ -33,6 +33,16 @@ test('release workflow blocks on the full installed-app packaging gate (v1.5.1 h
   assert.match(smoke, /NOT sufficient for release verification/);
 });
 
+test('dateFormat setting is wired into the renderer date helper (no dead settings)', () => {
+  // A settings control that claims UI behavior must change it. dateFormat was
+  // a free-text dead control; it is now a select with two real formats mapped
+  // into the single date() helper that renders every list/table date.
+  assert.match(renderer, /selectField\('Date format', 'dateFormat', \[\['short', '23 Sep 2026'\], \['dmy', '23\/09\/2026'\]\]/);
+  assert.match(renderer, /appState\.settings\.dateFormat === 'dmy'/);
+  assert.match(renderer, /Intl\.DateTimeFormat\('en-GB'\)/);
+  assert.doesNotMatch(renderer, /field\('Date format', 'dateFormat'/);
+});
+
 test('Bengali locale covers the release-critical document and workflow surfaces', () => {
   for (const label of [
     'Dashboard', 'Patients', 'Patient timeline', 'Appointments', 'Today’s Queue', 'Clinical records',

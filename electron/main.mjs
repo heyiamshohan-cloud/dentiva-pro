@@ -15,6 +15,7 @@
 import { app, BrowserWindow, ipcMain, Menu, session, dialog } from 'electron';
 import path from 'node:path';
 import { promises as fsp, existsSync, statSync } from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { migrateWorkspace } from './lib/migrate.mjs';
 import { Workspace } from './lib/db.mjs';

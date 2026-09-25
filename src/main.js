@@ -2932,7 +2932,14 @@ async function handleClick(event) {
       const data = Object.fromEntries(new FormData(form).entries());
       const meds = rxRowFromContainer();
       if (!meds.length) return notify('Add at least one medicine to preview.', 'error');
-      const patient = ui.patientDetail?.patient || appState.directory.patients.find((pt) => pt.id === data.patientId) || {};
+      let patient = ui.patientDetail?.patient || appState.directory.patients.find((pt) => pt.id === data.patientId);
+      if (!patient && data.patientId) {
+        // Directory cache may not include a patient created moments ago via a
+        // script/seed or another tab: fall back to the store so the printed
+        // prescription never loses its identity block (D9).
+        patient = (await q('record', { collection: 'patients', id: data.patientId }).catch(() => null))?.record || null;
+      }
+      patient = patient || {};
       const sections = [
         { label: localized('C/C'), text: data.chiefComplaint }, { label: localized('O/E'), text: data.onExamination },
         { label: localized('R/E'), text: data.requiredExamination }, { label: localized('Diagnosis'), text: data.diagnosis },

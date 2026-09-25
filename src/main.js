@@ -3644,7 +3644,10 @@ async function executePrint(mode) {
   notify('The print service returned an unexpected result.', 'error');
 }
 function modalPrintPreview(data = {}) {
-  const markup = data.fullHtml || buildPrintDocument(data.title || 'Document', data.content || '', data.pageSize || 'A4');
+  // Spec-first: openDocumentPreview stores a docSpec so preview re-renders the
+  // same definition as print/PDF (regression: spec was ignored → blank
+  // header+footer previews — CI probe caught it, D8).
+  const markup = data.fullHtml || renderDocumentSpec(data) || buildPrintDocument(data.title || 'Document', data.content || '', data.pageSize || 'A4');
   return `${modalHead('PRINT DOCUMENT', data.title || 'Document', 'Preview the document, choose the paper size, then print or save as PDF. Nothing prints silently.')}
     <div class="print-preview-toolbar">
       <label class="field-label inline">Paper size

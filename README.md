@@ -1,8 +1,8 @@
 # Dentiva Pro
 
-**Premium offline-first dental practice management for Windows · v1.6.0**
+**Premium offline-first dental practice management for Windows · v1.6.1**
 
-Dentiva Pro is a local, relational dental-practice workspace for clinics in Bangladesh. v1.6.0 is the **flagship upgrade**: a paginated, sortable, filterable patient list; a federated global search across seven collections; a patient profile with visits, clickable timeline and professional statement; a structured prescription builder with medication rows and clinician-authored templates; live protocol/street-address discovery; online-payments-first checkout with refund lifecycle; saved patient views; and community street suggestions — built on top of v1.5.2, which builds on the v1.4.0 **relational SQLite engine** (Node's built-in `node:sqlite`, zero native dependencies), a **shared service layer** with server-side validation, RBAC and audit, and a rebuilt **async, paginated renderer** on a light-only Design System 2.0.
+Dentiva Pro is a local, relational dental-practice workspace for clinics in Bangladesh. v1.6.1 (polish + document-verification pass on the v1.6.0 flagship line) ships the screen-audit defect fixes D1–D8 and the installed-app document-workflow verification.: a paginated, sortable, filterable patient list; a federated global search across seven collections; a patient profile with visits, clickable timeline and professional statement; a structured prescription builder with medication rows and clinician-authored templates; live protocol/street-address discovery; online-payments-first checkout with refund lifecycle; saved patient views; and community street suggestions — built on top of v1.5.2, which builds on the v1.4.0 **relational SQLite engine** (Node's built-in `node:sqlite`, zero native dependencies), a **shared service layer** with server-side validation, RBAC and audit, and a rebuilt **async, paginated renderer** on a light-only Design System 2.0.
 
 The repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records — every record visible in the UI is created by the clinic.
 

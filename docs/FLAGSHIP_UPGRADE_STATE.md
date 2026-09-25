@@ -79,3 +79,14 @@ Lines of verified progress on the installed Windows app (head = probe+D8-fix cha
 - docs-patient (patient created via REAL UI, code on profile ✅), docs-rx-filled, docs-rx-content-ok ✅ (identity + C/C/O/E/R/E + meds + Бангla, money-free), docs-rx-pdf-a4/a5 ✅, docs-invoice-content-ok ✅, docs-invoice-pdf-ok (A4+Letter) ✅.
 - Fixed en route: D9 (rx-preview identity store-fallback), node:os import for smoke-PDF bypass, smoke rollback recovery (local .git rolled back to 50b86e7 — remote chain verified intact at 93d166c and restored), version bump 1.6.1 re-applied, invId anchored to create response (PUSH PENDING — auth expired #4).
 - Remaining known step: receipt 'Remaining due' (fix committed locally, awaiting push), then statement + DOCS-PDF bytes + tag v1.6.1.
+
+## 18. v1.6.1 RELEASED (2026-09-25, run 36093866550 — conclusion: success)
+
+**Release**: tag `v1.6.1`, Latest, 4 assets — Setup.exe (100,723,326 B), portable .exe (100,486,725 B), .zip (201,240,906 B), checksums.txt (309 B). v1.6.0 preserved as previous line.
+
+**Full verification matrix on the NEW build (installed Windows app, CI windows-latest):**
+- Visual screen-audit suite: 6 viewports × (patients list / palette / Patient 360 / rx stages 1-3) — all green.
+- smokeDocs marks: docs-patient → docs-rx-filled → docs-rx-content-ok (identity DP-code, C/C+O/E mandated chips, R/E, Advice, 2 med rows, Bengali, money-free) → docs-rx-pdf-a4/a5 → docs-invoice-content-ok (18 rows + discount + Bengali) → docs-invoice-pdf-ok (A4+Letter) → docs-receipt-content-ok (bKash ref, remaining-due row) → docs-receipt-pdf-ok (80mm via @page retry + A5) → docs-statement-content-ok (opening balance, patient code) → docs-statement-pdf-ok (A4). 7 PDFs in `windows-smoke-evidence/document-pdfs/`.
+
+**Defect ledger closed (10 product defects found by the audit, all root-fixed):**
+D1 palette-empty-on-open · D2 Patient 360 unreachable · D3 profile-sticky nav · D4 auth polish · D5 four dead patients-toolbar buttons · D6 360 finance-strip fallback · D7 renderPatientTab ReferenceError · D8 print-preview ignored docSpec (blank-document previews) · D9 rx-preview identity fallback · D10 buildDocument totals object-to-[object Object] (receipts dropped totals rows). Infrastructure fixes: node:os smoke-PDF import, Receipt80 custom-page printToPDF retry, Playwright prebuilt_preview webServer, .git snapshot-rollback recovery (remote history restored intact), v1.6.1 version-bump re-application.

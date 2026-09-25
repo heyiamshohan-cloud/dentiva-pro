@@ -69,3 +69,20 @@ Aggregates = single LEFT-JOIN query (visits / billed / paid / last-payment) — 
 ## K. Test evidence
 - Local suite: **133 tests, 131 pass, 0 fail, 2 skipped (benchmarks, manual)** — `npm test` on Node 22.22.
 - Batteries exercised: ledger-sql aggregate guards (10), doc-engine (7), journeys (incl. treatmentPlan regression caught+fixed at 2b8d47b), security, packaging, release-gate.
+
+### v1.6.1 screen-audit ledger — ALL RESOLVED (released tag v1.6.1)
+
+| ID | Severity | Defect | Root fix | Evidence |
+|----|----------|--------|----------|----------|
+| D1 | med | Ctrl+K palette opened empty | Instant Actions pre-render on open | CI visual: command-palette test green ×6 |
+| D2 | **critical** | Patient 360 unreachable from list | Profile-router branch restored in renderPatients | CI visual: 360 tests green ×6 |
+| D3 | med | Sidebar Patients never cleared profile context | navigate() clears patientId + explicit Back button | CI visual green |
+| D4 | polish | Sign-In/Lock not premium | Glass auth backdrop | build + visual |
+| D5 | **high** | Advanced/Columns/density/Clear-filters buttons dead (cases in handleChange) | Moved to handleClick dispatcher | CI visual: patients test green ×6 |
+| D6 | med | 360 finance strip vanished in web-preview | Zero-summary fallback in patientFinancialSummary | CI visual green |
+| D7 | **critical** | `counts is not defined` ReferenceError on every 360 render | counts threaded into renderPatientTab | DOM-dump diagnosis → CI green |
+| D8 | **critical** | Print-preview modal ignored docSpec → blank header+footer previews | renderDocumentSpec first in modalPrintPreview | CI probe: probe booleans all true |
+| D9 | med | rx-preview identity lost on directory-cache miss | record-query fallback | smokeDocs rx-content-ok |
+| D10 | **critical** | Receipts printed `[object Object]` for totals, dropping Received/Remaining-due rows | buildDocument normalizes totals spec-object via totalsSection | smokeDocs receipt-content-ok |
+
+Plus infrastructure/shipping fixes (os import, Receipt80 printToPDF @page retry, version-bump re-application, git rollback recovery). Release run `36093866550` = success; tag v1.6.1 Latest; v1.6.0 untouched.

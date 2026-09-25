@@ -71,3 +71,11 @@ Continue product-wide audit sweep modules 1→4 (Dashboard/Appointments/Queue/Tr
 **Environment ceilings hit (recorded, not retried):** Azure blob + results-receiver hosts are firewall-reset (artifact screenshots/traces + raw job logs unreachable); Playwright Chromium CDN blocked (no local visual repro); console.* output absent from `gh run view --verbose` folded output.
 
 **GitHub auth blocker #2:** token expired again ~40 min after reconnect (401 on all gh/git at this point) with the diagnostics commit already pushed. Outcome of run 36045953943 diagnostics unread. On reconnect: read 360-DUMP/RX-DUMP errors → surgical fix → green CI → Windows build → docs-phase marks → v1.6.1 tag+assets → final ledger.
+
+## 17. Docs-phase walkthrough (2026-09-24; auth blocker #4 pending)
+
+Lines of verified progress on the installed Windows app (head = probe+D8-fix chain):
+- Visual suite ALL GREEN ×6 viewports (patients/palette/360/rx stages 1-3).
+- docs-patient (patient created via REAL UI, code on profile ✅), docs-rx-filled, docs-rx-content-ok ✅ (identity + C/C/O/E/R/E + meds + Бангla, money-free), docs-rx-pdf-a4/a5 ✅, docs-invoice-content-ok ✅, docs-invoice-pdf-ok (A4+Letter) ✅.
+- Fixed en route: D9 (rx-preview identity store-fallback), node:os import for smoke-PDF bypass, smoke rollback recovery (local .git rolled back to 50b86e7 — remote chain verified intact at 93d166c and restored), version bump 1.6.1 re-applied, invId anchored to create response (PUSH PENDING — auth expired #4).
+- Remaining known step: receipt 'Remaining due' (fix committed locally, awaiting push), then statement + DOCS-PDF bytes + tag v1.6.1.

@@ -287,13 +287,26 @@ function smokeDocs() {
     await signInIfNeeded();
     if (!(await waitFor(() => document.querySelector('[data-action="navigate"][data-page="patients"]')))) throw new Error('docs-flow: app shell did not render');
 
-    // Seed a long-name Bengali patient + records through the service layer
-    // (same code path as the UI submits; the UI interaction is verified below
-    // via the modal-driven document previews).
+    // Patient created through the REAL Add-patient UI (also refreshes the
+    // renderer directory cache — a raw-ops seed would leave the Rx modal's
+    // patient select unable to bind; CI smoke error "prescription missing
+    // 'DP-…'" surfaced exactly that).
     const longName = 'ডেন্টিভা স্মোক রোগী আব্দুল্লাহ আল মামুন পাটোয়ারী স্পেশাল ডকুমেন্ট টেস্ট';
-    const created = await op('patient.create', { fullName: longName, gender: 'Male', phone: '01900000000', address: '৫/ক টেস্ট রোড, ধানমন্ডি, ঢাকা — a very long address line to stress the document header wrapping across lines' });
-    if (!created?.ok) throw new Error(`docs-flow patient.create: ${created?.error || 'failed'}`);
-    const patient = created.record;
+    document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
+    if (!(await waitFor(() => document.querySelector('[data-action="open-patient"]')))) throw new Error('docs-flow: patients page did not render');
+    await clickEl(document.querySelector('[data-action="open-patient"]'), 'open-patient');
+    if (!(await waitFor(() => document.querySelector('form[data-form="patient"]')))) throw new Error('docs-flow: patient form did not open');
+    const pForm = document.querySelector('form[data-form="patient"]');
+    setField(pForm, 'fullName', longName);
+    setField(pForm, 'phone', '01900000000');
+    setField(pForm, 'address', '৫/ক টেস্ট রোড, ধানমন্ডি, ঢাকা — a very long address line to stress the document header wrapping across lines');
+    await clickEl(pForm.querySelector('button[type="submit"]'), 'patient-submit');
+    if (!(await waitFor(() => document.querySelector('.patient-sub'), 15000))) throw new Error('docs-flow: patient 360 did not open after create');
+    const codeMatch = (document.querySelector('.patient-sub')?.textContent || '').match(/DP-\d+/);
+    if (!codeMatch) throw new Error('docs-flow: patient code not visible on profile');
+    const found = await query('list', { collection: 'patients', page: 1, pageSize: 5 });
+    const patient = (found.rows || []).find((r) => r.fullName === longName);
+    if (!patient || patient.patientCode !== codeMatch[0]) throw new Error('docs-flow: created patient lookup mismatch');
     mark('docs-patient', patient.patientCode);
     const visit = await op('visit.create', { patientId: patient.id, date: '2026-09-24', reason: 'Doc flow', chiefComplaint: 'Pain On', diagnosis: 'Pulpitis 46' });
     if (!visit?.ok) throw new Error('docs-flow visit.create failed');

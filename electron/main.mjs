@@ -314,8 +314,11 @@ function smokeDocs() {
     const invoiceItems = Array.from({ length: 18 }, (_, i) => ({ name: `${i % 2 ? 'কনসালট' : 'RCT'} item ${i + 1}`, quantity: 1 + (i % 3), unitPrice: 500 + i * 25 }));
     const invoice = await op('invoice.create', { patientId: patient.id, date: '2026-09-24', items: invoiceItems, discount: 100, notes: 'Doc-flow invoice — বাংলা নোট' });
     if (!invoice?.ok) throw new Error(`docs-flow invoice.create: ${invoice?.error}`);
-    const paymentDue = await query('list', { collection: 'invoices', page: 1, pageSize: 3, filters: { patientId: patient.id } });
-    const invId = (paymentDue.rows || [])[0]?.id;
+    // Anchor the invoice by its CREATE response id directly — re-querying the
+    // list here is fragile (sort/filter drift) and cost us "receipt missing
+    // 'Remaining due'".
+    const invId = invoice.record.id;
+    if (!invId) throw new Error('docs-flow invoice.create returned no record id');
     const payment = await op('payment.record', { patientId: patient.id, invoiceId: invId, date: '2026-09-24', amount: 1200, method: 'bKash', reference: 'TX9AB12XYZ34' });
     if (!payment?.ok) throw new Error(`docs-flow payment.record: ${payment?.error}`);
 

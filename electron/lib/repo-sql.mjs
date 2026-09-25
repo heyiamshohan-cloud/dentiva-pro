@@ -304,14 +304,23 @@ export class SqlRepo {
     return this.ws.listRecords('dentalRecords', { where: 'patient_id = ? AND superseded = 0', params: [patientId], order: 'tooth ASC', limit: 100 });
   }
 
+  /** Full chart history for a patient (optionally one tooth), newest first. Never truncated. */
   dentalHistory(patientId, tooth = null) {
-    const where = tooth === null ? 'patient_id = ?' : 'patient_id = ? AND tooth = ?';
-    const params = tooth === null ? [patientId] : [patientId, Number(tooth)];
-    return this.ws.listRecords('dentalRecords', { where, params, order: 'updated_at DESC, created_at DESC', limit: 500 });
+    const filtered = tooth !== null && tooth !== undefined && String(tooth).trim() !== '' && Number.isInteger(Number(tooth));
+    const where = filtered ? 'patient_id = ? AND tooth = ?' : 'patient_id = ?';
+    const params = filtered ? [patientId, Number(tooth)] : [patientId];
+    return this.ws.query(`SELECT * FROM dental_records WHERE ${where} ORDER BY created_at DESC, id DESC`, params).map(rowToRecord).filter(Boolean);
   }
 
+  /** Mark the current record for a tooth as history. Returns the number of rows superseded. */
   supersedeDental(patientId, tooth, dentition) {
-    this.ws.run('UPDATE dental_records SET superseded = 1 WHERE patient_id = ? AND tooth = ? AND dentition = ? AND superseded = 0', [patientId, Number(tooth), dentition]);
+    const rows = this.ws.query('SELECT id, payload FROM dental_records WHERE patient_id = ? AND tooth = ? AND dentition = ? AND superseded = 0', [patientId, Number(tooth), dentition]);
+    for (const row of rows) {
+      let payload = {};
+      try { payload = JSON.parse(row.payload) || {}; } catch { payload = {}; }
+      this.ws.run('UPDATE dental_records SET superseded = 1, payload = ?, updated_at = ? WHERE id = ?', [JSON.stringify({ ...payload, superseded: true }), new Date().toISOString(), row.id]);
+    }
+    return rows.length;
   }
 
   prescriptionsByPatient(patientId, limit = 300) {

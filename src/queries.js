@@ -283,10 +283,8 @@ export const QUERIES = {
   },
 
   async dentalHistory(repo, params = {}) {
-    const rows = await repo.dentalHistory
-      ? repo.dentalHistory(String(params.patientId || ''), params.toothNumber || '')
-      : (await repo.listCollection('dentalRecords', { page: 1, pageSize: 100, filters: { patientId: String(params.patientId || ''), toothNumber: params.toothNumber || '' } })).rows;
-    return { rows };
+    const rows = await repo.dentalHistory(String(params.patientId || ''), params.toothNumber ?? params.tooth ?? null);
+    return { rows, current: rows.filter((row) => !row.superseded) };
   },
 
   async invoiceDetail(repo, params = {}) {

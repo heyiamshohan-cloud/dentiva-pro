@@ -1,13 +1,14 @@
 // Workspace database manager built on Node's built-in SQLite (node:sqlite).
 // Zero native dependencies: identical engine in local Node tests, Electron main on
-// Windows and CI. All writes are transactional; reads are paginated; no artificial
-// database-size or record-count limit exists anywhere in this module (§6, §7, §8).
+// Windows and CI. Writes run in (re-entrant) transactions; reads are paginated by
+// their callers; no database-size or record-count limit exists in this module.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { SCHEMA_SQL, COLLECTION_TABLES, DB_LAYOUT_VERSION } from './schema.mjs';
+import { SCHEMA_SQL, COLLECTION_TABLES } from './schema.mjs';
+import { applyMigrations, BASELINE_LAYOUT_VERSION } from './schema-migrations.mjs';
 import { mapRecord, rowToRecord, tableFor } from './records.mjs';
 import { META_KEYS } from '../../src/migrate-state.js';
 
@@ -41,18 +42,36 @@ export class Workspace {
     this.db = null;
     this.source = 'none';
     this.readOnly = false;
+    this.txDepth = 0;
+    this.appliedMigrations = [];
   }
 
-  open({ readOnly = false } = {}) {
+  open({ readOnly = false, migrate = true } = {}) {
     fs.mkdirSync(this.directory, { recursive: true });
     fs.mkdirSync(this.attachmentDirectory, { recursive: true });
     fs.mkdirSync(this.backupDirectory, { recursive: true });
     fs.mkdirSync(this.logDirectory, { recursive: true });
     this.readOnly = readOnly;
     this.db = readOnly ? new DatabaseSync(this.dbPath, { readOnly: true }) : new DatabaseSync(this.dbPath);
+    this.txDepth = 0;
     if (!readOnly) {
+      // Never stamp the v5 schema onto a file that holds a different layout
+      // (legacy v4 blob store, foreign SQLite file): that would make the old
+      // data invisible to every later migration attempt.
+      const tables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+      const foreign = tables.size > 0 && !(tables.has('patients') && tables.has('meta'));
+      if (foreign) {
+        this.db.close();
+        this.db = null;
+        const error = new Error('The workspace database has an unrecognised or legacy layout and was not modified.');
+        error.code = 'foreign-layout';
+        throw error;
+      }
       this.db.exec(SCHEMA_SQL);
-      this.#setMetaOnce('dbLayoutVersion', String(DB_LAYOUT_VERSION));
+      this.#setMetaOnce('dbLayoutVersion', String(BASELINE_LAYOUT_VERSION));
+      this.appliedMigrations = migrate ? applyMigrations(this) : [];
+    } else {
+      this.db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     }
     this.source = 'sqlite';
     return this;
@@ -183,9 +202,30 @@ export class Workspace {
 
   // ---- writes -------------------------------------------------------------
 
+  /**
+   * Run `fn` atomically. Re-entrant: a nested call becomes a SAVEPOINT, so an
+   * inner failure rolls back only the inner unit while the outer transaction
+   * decides the final outcome.
+   */
   transaction(fn) {
     if (this.readOnly) throw new Error('Workspace database is read-only.');
+    if (this.txDepth > 0) {
+      const name = `sp_${this.txDepth}`;
+      this.db.exec(`SAVEPOINT ${name}`);
+      this.txDepth += 1;
+      try {
+        const result = fn(this);
+        this.db.exec(`RELEASE ${name}`);
+        return result;
+      } catch (error) {
+        try { this.db.exec(`ROLLBACK TO ${name}`); this.db.exec(`RELEASE ${name}`); } catch { /* best effort */ }
+        throw error;
+      } finally {
+        this.txDepth -= 1;
+      }
+    }
     this.db.exec('BEGIN IMMEDIATE');
+    this.txDepth = 1;
     try {
       const result = fn(this);
       this.db.exec('COMMIT');
@@ -193,6 +233,8 @@ export class Workspace {
     } catch (error) {
       try { this.db.exec('ROLLBACK'); } catch { /* best effort */ }
       throw error;
+    } finally {
+      this.txDepth = 0;
     }
   }
 
@@ -200,8 +242,12 @@ export class Workspace {
     const row = mapRecord(collection, record, extra);
     const columns = Object.keys(row);
     const table = tableFor(collection);
+    // Authentication secrets/state are owned exclusively by setUserSecrets():
+    // a generic upsert of a (sanitized) user record must never touch them.
+    const protectedColumns = collection === 'users' ? AUTH_COLUMNS : null;
+    const updatable = columns.filter((c) => c !== 'id' && c !== 'seq' && !(protectedColumns && protectedColumns.has(c)));
     const sql = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})
-      ON CONFLICT(id) DO UPDATE SET ${columns.filter((c) => c !== 'id' && c !== 'seq').map((c) => `${c} = excluded.${c}`).join(', ')}`;
+      ON CONFLICT(id) DO UPDATE SET ${updatable.map((c) => `${c} = excluded.${c}`).join(', ')}`;
     this.db.prepare(sql).run(...columns.map((c) => bind(row[c])));
     return record;
   }
@@ -224,7 +270,7 @@ export class Workspace {
     const whereSql = where ? `WHERE ${where}` : '';
     const orderSql = order ? `ORDER BY ${order}` : '';
     const rows = this.db.prepare(`SELECT * FROM ${table} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`)
-      .all(...params.map(bind), Math.max(1, Math.min(int(limit, 50), 5000)), Math.max(0, int(offset, 0)));
+      .all(...params.map(bind), Math.max(1, int(limit, 50)), Math.max(0, int(offset, 0)));
     return rows.map(rowToRecord).filter(Boolean);
   }
 
@@ -259,6 +305,13 @@ export class Workspace {
 
   // ---- health & diagnostics ------------------------------------------------
 
+  /** Fast structural check (O(pages), no index cross-checks) for routine health probes. */
+  quickCheck() {
+    const quick = this.db.prepare('PRAGMA quick_check').get();
+    return { ok: quick?.quick_check === 'ok', integrity: quick?.quick_check ?? 'unknown', mode: 'quick' };
+  }
+
+  /** Full integrity + foreign-key audit. Expensive on large stores — explicit diagnostics only. */
   integrityCheck() {
     const integrity = this.db.prepare('PRAGMA integrity_check').get();
     const fkViolations = this.db.prepare('PRAGMA foreign_key_check').all();
@@ -266,7 +319,8 @@ export class Workspace {
       ok: integrity?.integrity_check === 'ok' && fkViolations.length === 0,
       integrity: integrity?.integrity_check ?? 'unknown',
       foreignKeyViolations: fkViolations.slice(0, 50).map((row) => ({ table: row.table, rowid: Number(row.rowid), references: row.parent, fkid: Number(row.fkid) })),
-      foreignKeyViolationCount: fkViolations.length
+      foreignKeyViolationCount: fkViolations.length,
+      mode: 'full'
     };
   }
 
@@ -278,7 +332,7 @@ export class Workspace {
     return counts;
   }
 
-  storageInfo() {
+  storageInfo({ includeCounts = true } = {}) {
     const sizeOf = (file) => { try { return fs.statSync(file).size; } catch { return 0; } };
     const pageSize = Number(this.db.prepare('PRAGMA page_size').get()?.page_size ?? 4096);
     const pageCount = Number(this.db.prepare('PRAGMA page_count').get()?.page_count ?? 0);
@@ -302,10 +356,10 @@ export class Workspace {
       attachmentDirectory: this.attachmentDirectory,
       attachmentBytes,
       attachmentFiles,
-      storage: 'SQLite (relational v5)',
+      storage: `SQLite (layout v${Number(this.getMeta('dbLayoutVersion', BASELINE_LAYOUT_VERSION))})`,
       source: this.source,
       readOnly: this.readOnly,
-      recordCounts: this.recordCounts()
+      recordCounts: includeCounts ? this.recordCounts() : null
     };
   }
 
@@ -393,6 +447,8 @@ export class Workspace {
     return removed;
   }
 }
+
+const AUTH_COLUMNS = new Set(['pin_hash', 'pin_salt', 'kdf', 'failed_attempts', 'locked_until', 'last_login', 'lockout_count']);
 
 function int(value, fallback) {
   const number = Number(value);

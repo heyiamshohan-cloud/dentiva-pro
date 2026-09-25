@@ -1,15 +1,13 @@
 /**
- * Dentiva Pro v1.4.0 — shared query registry (read side of the API).
- * Runtime-agnostic: works against SqlRepo (Electron) and LocalRepo (browser).
- * Every query is paginated or bounded — no query ever hydrates a full
- * collection. Money leaves this layer in integer cents; the renderer formats.
- *
- * Query results are plain data. Presentation (tables, charts, i18n labels)
- * belongs to the renderer.
+ * Dentiva Pro v2.0.0 — query registry (the read side of the domain).
+ * Executes in the Electron main process against SqlRepo. Every query requires
+ * an authenticated context and enforces its own permission; list queries are
+ * paginated, and "complete" reads (statements, exports) page through all rows.
+ * Money leaves this layer in integer cents; the renderer formats.
  */
 
 import { APP_VERSION } from './migrate-state.js';
-import { CURRENT_SCHEMA_VERSION } from './core.js';
+import { CURRENT_SCHEMA_VERSION, localDateInTimeZone, addDaysIso } from './core.js';
 import { statementEntries, periodBounds } from './domain.js';
 import { normalizeNotificationRules } from './notifications.js';
 
@@ -20,9 +18,9 @@ const clampPage = (value, fallback = 1) => Math.max(1, Number(value) || fallback
 const clampPageSize = (value, fallback = 25) => Math.min(500, Math.max(1, Number(value) || fallback));
 const num = (value) => Number(value || 0);
 
-/* ── range resolution (ports v1.3.0 dateRange) ── */
-export function resolveRange(rangeKey, from, to, now = new Date()) {
-  const todayStr = isoDate(now);
+/* ── range resolution (clinic-local calendar) ── */
+export function resolveRange(rangeKey, from, to, now = new Date(), timeZone = '') {
+  const todayStr = now instanceof Date ? localDateInTimeZone(timeZone, now) : String(now).slice(0, 10);
   const endStr = rangeKey === 'custom' && to ? String(to).slice(0, 10) : todayStr;
   const end = new Date(`${endStr}T00:00:00Z`);
   let start = null;
@@ -38,28 +36,34 @@ export function resolveRange(rangeKey, from, to, now = new Date()) {
 }
 
 export const COLLECTION_PERMISSION = {
-  patients: 'patients.view', visits: 'patients.view', dentalRecords: 'patients.view', prescriptions: 'patients.view',
+  patients: 'patients.view', visits: 'patients.view', dentalRecords: 'patients.view', prescriptions: 'prescriptions.view',
   treatmentPlans: 'patients.view', attachments: 'patients.view', followUpTasks: 'patients.view',
   appointments: 'appointments.view', invoices: 'billing.view', payments: 'billing.view', paymentAdjustments: 'billing.view',
   expenses: 'accounting.view', inventory: 'inventory.view', stockMovements: 'inventory.view', suppliers: 'inventory.view',
-  staff: 'settings.view', referrals: 'patients.view', users: 'settings.view', notifications: null,
+  staff: ['staff.view', 'settings.view'], referrals: 'patients.view', users: 'settings.view', notifications: null,
   savedFilters: null, medicationCatalog: 'patients.view', rooms: 'appointments.view', notificationRules: 'settings.view',
   savedReports: 'reports.view', audit: 'audit.view', treatments: 'settings.view',
 };
 
+// null = any authenticated user (the query itself scopes what it returns).
 export const QUERY_PERMISSION = {
-  bootstrap: null, list: null, settings: null, users: 'settings.view', workspace: null, directory: null, record: null,
-  patientAggregate: 'patients.view', patientStatement: 'patients.view', patientDuplicates: 'patients.view',
-  patientLedgerQuery: 'billing.view', patientFinancialSummary: 'billing.view', patientLedgerRollups: 'billing.view', visitBilling: 'patients.view',
-  dentalHistory: 'patients.view', invoiceDetail: 'billing.view', appointmentDay: 'appointments.view',
+  bootstrap: null, list: null, settings: null, users: 'settings.view', workspace: 'diagnostics.view', directory: null, record: null,
+  patientSearch: 'patients.view', patientBrief: 'patients.view',
+  patientAggregate: 'patients.view', patientStatement: 'billing.view', patientDuplicates: 'patients.view',
+  patientLedgerQuery: 'billing.view', patientFinancialSummary: 'billing.view', patientLedgerRollups: 'billing.view', visitBilling: 'billing.view',
+  dentalHistory: 'patients.view', invoiceDetail: 'billing.view', receiptDetail: ['payments.view', 'billing.view'], appointmentDay: 'appointments.view',
   appointmentsBetween: 'appointments.view', dashboard: null, analytics: 'reports.view',
   report: 'reports.view', accountingSummary: 'accounting.view', inventoryAnalytics: 'inventory.view',
   globalSearch: null, notifications: null, auditList: 'audit.view',
 };
 
-export function authorizeQuery(name, permissions) {
+/** Queries that are background polling — they never count as user activity. */
+export const BACKGROUND_QUERIES = new Set(['notifications']);
+
+export function authorizeQuery(name, permissions, authenticated = true) {
   const required = QUERY_PERMISSION[name];
   if (required === undefined) return { ok: false, error: 'Unknown query', code: 'query-unknown' };
+  if (!authenticated) return { ok: false, error: 'Sign in to continue.', code: 'auth-required' };
   if (required === null) return { ok: true };
   const list = Array.isArray(required) ? required : [required];
   if (!list.some((permission) => (permissions || []).includes(permission))) {
@@ -108,7 +112,8 @@ export const QUERIES = {
       return { rows: [], total: 0, page: 1, pageSize: clampPageSize(params.pageSize), collection, ok: false, error: 'Unknown collection', code: 'collection-unknown' };
     }
     const required = COLLECTION_PERMISSION[collection];
-    if (required && !((ctx && ctx.permissions) || []).includes(required)) {
+    const held = (ctx && ctx.permissions) || [];
+    if (required && !(Array.isArray(required) ? required : [required]).some((entry) => held.includes(entry))) {
       return { rows: [], total: 0, page: 1, pageSize: clampPageSize(params.pageSize), collection, ok: false, error: 'You do not have permission to view this data.', code: 'permission-denied' };
     }
     return repo.listCollection(collection, {
@@ -128,26 +133,29 @@ export const QUERIES = {
   },
 
   /* Patient 360 — bounded per section, timeline paginated. */
-  async patientAggregate(repo, params = {}) {
+  async patientAggregate(repo, params = {}, ctx = null) {
     const patientId = String(params.patientId || '');
     const patient = await repo.get('patients', patientId);
     if (!patient) return { ok: false, error: 'Patient not found' };
+    const permissions = (ctx && ctx.permissions) || [];
+    const canBilling = permissions.includes('billing.view');
     const timelinePage = clampPage(params.timelinePage);
     const timelineSize = clampPageSize(params.timelineSize, 20);
     const [timeline, statement, counts, plans, dental, duplicates] = await Promise.all([
-      QUERIES.patientTimeline(repo, { patientId, page: timelinePage, pageSize: timelineSize }),
-      QUERIES.patientStatement(repo, { patientId, page: 1, pageSize: 50 }),
+      QUERIES.patientTimeline(repo, { patientId, page: timelinePage, pageSize: timelineSize, includeFinancial: canBilling }),
+      canBilling ? QUERIES.patientStatement(repo, { patientId, page: 1, pageSize: 50 }) : Promise.resolve(null),
       repo.patientRecordCounts ? repo.patientRecordCounts(patientId) : Promise.resolve({}),
       repo.listCollection('treatmentPlans', { page: 1, pageSize: 5, filters: { patientId, status: 'Active' } }),
       repo.listCollection('dentalRecords', { page: 1, pageSize: 100, filters: { patientId, currentOnly: true } }),
       repo.findPatientDuplicates ? repo.findPatientDuplicates(patient) : Promise.resolve([]),
     ]);
     return {
-      ok: true, patient, timeline, statement, counts,
+      ok: true, patient: canBilling ? patient : { ...patient, balanceCents: undefined }, timeline, statement, counts,
       activePlans: plans.rows,
       chart: dental.rows,
       duplicates: (duplicates || []).filter((candidate) => candidate.id !== patientId).slice(0, 10),
-      balanceCents: Number(patient.balanceCents || 0),
+      balanceCents: canBilling ? Number(patient.balanceCents || 0) : null,
+      canViewFinancials: canBilling,
     };
   },
 
@@ -159,11 +167,13 @@ export const QUERIES = {
     const page = clampPage(params.page);
     const size = clampPageSize(params.pageSize, 20);
     const perType = page * size + 10; // bounded fetch window per collection
+    const financial = params.includeFinancial !== false;
+    const none = Promise.resolve({ rows: [] });
     const sources = await Promise.all([
       repo.visitsByPatient(patientId, perType),
       repo.appointmentsByPatient(patientId, perType),
-      repo.listCollection('invoices', { page: 1, pageSize: perType, filters: { patientId } }),
-      repo.listCollection('payments', { page: 1, pageSize: perType, filters: { patientId } }),
+      financial ? repo.listCollection('invoices', { page: 1, pageSize: perType, filters: { patientId } }) : none,
+      financial ? repo.listCollection('payments', { page: 1, pageSize: perType, filters: { patientId } }) : none,
       repo.listCollection('prescriptions', { page: 1, pageSize: perType, filters: { patientId } }),
       repo.listCollection('treatmentPlans', { page: 1, pageSize: perType, filters: { patientId } }),
       repo.listCollection('referrals', { page: 1, pageSize: perType, filters: { patientId } }),
@@ -174,14 +184,16 @@ export const QUERIES = {
     const push = (type, date, record, summary) => { if (date) events.push({ type, date, id: record.id, summary, record }); };
     for (const visit of sources[0]) push('visit', visit.date, visit, `${visit.reason || 'Visit'}${visit.diagnosis ? ` · ${visit.diagnosis}` : ''}`);
     for (const appointment of sources[1]) push('appointment', appointment.date, appointment, `${appointment.reason || 'Appointment'} · ${appointment.time || ''} · ${appointment.status}`);
-    for (const invoice of sources[2].rows) push('invoice', invoice.date, invoice, `${invoice.invoiceNumber} · ${invoice.paymentStatus}`);
+    for (const invoice of sources[2].rows) push('invoice', invoice.date, invoice, `${invoice.invoiceNumber} · ${invoice.status}`);
     for (const payment of sources[3].rows) push('payment', payment.date, payment, `${payment.method} payment`);
     for (const prescription of sources[4].rows) push('prescription', prescription.date, prescription, prescription.doctor ? `Prescribed by ${prescription.doctor}` : 'Prescription');
-    for (const plan of sources[5].rows) push('plan', plan.date, plan, `${plan.title || 'Treatment plan'} · ${plan.status}`);
+    for (const plan of sources[5].rows) push('plan', plan.startDate || (plan.createdAt || '').slice(0, 10), plan, `${plan.title || 'Treatment plan'} · ${plan.status}`);
     for (const referral of sources[6].rows) push('referral', referral.date, referral, `Referral to ${referral.referralTo || 'specialist'} · ${referral.status}`);
-    for (const attachment of sources[7].rows) push('attachment', (attachment.uploadedAt || '').slice(0, 10) || attachment.date, attachment, attachment.name || 'Attachment');
+    for (const attachment of sources[7].rows) push('attachment', (attachment.createdAt || attachment.uploadedAt || '').slice(0, 10) || attachment.date, attachment, attachment.name || 'Attachment');
     for (const task of sources[8].rows) push('followup', task.dueDate || task.date, task, `${task.title || 'Follow-up'} · ${task.status}`);
-    events.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    // Newest first; ties broken by creation time, type and id so paging is stable.
+    const stamp = (event) => `${event.date}|${event.record?.createdAt || ''}|${event.type}|${event.id}`;
+    events.sort((a, b) => (stamp(a) < stamp(b) ? 1 : stamp(a) > stamp(b) ? -1 : 0));
     const total = events.length;
     const rows = events.slice((page - 1) * size, page * size);
     return { rows, total, page, pageSize: size, complete: total <= perType };
@@ -230,7 +242,11 @@ export const QUERIES = {
       ok: true, source: 'sql',
       rows: ledger.rows, total: ledger.total, page: ledger.page, pageSize: ledger.pageSize,
       openingBalanceCents: ledger.openingBalanceCents,
-      balanceCents: ledger.rows.length ? ledger.rows[ledger.rows.length - 1].balanceCents : (summary.dueCents || 0),
+      closingBalanceCents: ledger.closingBalanceCents,
+      periodDebitCents: ledger.periodDebitCents, periodCreditCents: ledger.periodCreditCents,
+      periodInvoicedCents: ledger.periodInvoicedCents, periodPaidCents: ledger.periodPaidCents,
+      periodRefundedCents: ledger.periodRefundedCents, periodAdjustedCents: ledger.periodAdjustedCents,
+      balanceCents: summary.balanceCents ?? ledger.closingBalanceCents,
       billedCents: summary.billedCents, paidCents: summary.paidCents,
       refundedCents: summary.refundedCents, adjustedCents: summary.adjustedCents,
     };
@@ -291,7 +307,7 @@ export const QUERIES = {
   },
 
   async appointmentDay(repo, params = {}) {
-    const date = String(params.date || isoDate(new Date()));
+    const date = String(params.date || localDateInTimeZone((await repo.getSettings()).timezone));
     const appointments = await repo.appointmentsOnDate(date);
     return { date, appointments };
   },
@@ -303,13 +319,13 @@ export const QUERIES = {
 
   async dashboard(repo, params = {}, ctx) {
     const settings = await repo.getSettings();
-    const today = isoDate(new Date());
-    const range = resolveRange(params.range || 'month');
+    const today = localDateInTimeZone(settings.timezone);
+    const range = resolveRange(params.range || 'month', params.from, params.to, new Date(), settings.timezone);
     const permissions = (ctx && ctx.permissions) || [];
     const can = (permission) => permissions.includes(permission);
     const [appointments, tasks, aggregates, counts] = await Promise.all([
-      repo.appointmentsOnDate(today),
-      repo.listCollection('followUpTasks', { page: 1, pageSize: 10, filters: { status: 'Pending', dueBefore: today } }),
+      can('appointments.view') ? repo.appointmentsOnDate(today) : Promise.resolve([]),
+      can('patients.view') ? repo.listCollection('followUpTasks', { page: 1, pageSize: 10, filters: { open: true, dueBefore: today } }) : Promise.resolve({ rows: [], total: 0 }),
       can('reports.view') ? repo.sqlAggregates(range.from, range.to) : Promise.resolve(null),
       repo.counts(),
     ]);
@@ -320,6 +336,7 @@ export const QUERIES = {
       today, range, counts,
       appointmentsToday: appointments,
       dueTasks: tasks.rows,
+      dueTasksTotal: tasks.total || 0,
       lowStock: lowStock.rows,
       lowStockTotal: lowStock.total,
       aggregates,
@@ -330,19 +347,19 @@ export const QUERIES = {
   /* Analytics — SQL-side aggregates when available (desktop), JS otherwise. */
   async analytics(repo, params = {}, ctx) {
     const settings = await repo.getSettings();
-    const range = resolveRange(params.rangeKey || 'month', params.from, params.to);
+    const range = resolveRange(params.rangeKey || 'month', params.from, params.to, new Date(), settings.timezone);
     if (range.invalid) return { ok: false, error: 'Invalid custom range' };
     const stats = await repo.reportStats('analytics', range.from, range.to);
     const topServices = await repo.reportStats('services', range.from, range.to);
     const topDentists = await repo.reportStats('dentists', range.from, range.to);
-    return { ok: true, range, settings, ...stats, topServices: topServices.rows, topDentists: topDentists.rows };
+    return { ok: true, range, ...stats, topServices: topServices.rows, topDentists: topDentists.rows };
   },
 
   /* Reports: KPI stats + paginated row data. Rows come from listCollection so
    * even 'all records' stays paginated. */
   async report(repo, params = {}) {
     const type = ['revenue', 'patients', 'visits', 'appointments', 'outstanding', 'inventory', 'expenses'].includes(params.type) ? params.type : 'revenue';
-    const range = resolveRange(params.rangeKey || 'month', params.from, params.to);
+    const range = resolveRange(params.rangeKey || 'month', params.from, params.to, new Date(), (await repo.getSettings()).timezone);
     if (range.invalid) return { ok: false, error: 'Invalid custom range' };
     const page = clampPage(params.page);
     const size = clampPageSize(params.pageSize, 25);
@@ -360,7 +377,7 @@ export const QUERIES = {
   },
 
   async accountingSummary(repo, params = {}) {
-    const range = resolveRange(params.rangeKey || 'month', params.from, params.to);
+    const range = resolveRange(params.rangeKey || 'month', params.from, params.to, new Date(), (await repo.getSettings()).timezone);
     if (range.invalid) return { ok: false, error: 'Invalid custom range' };
     const [summary, aging, expenseCategories] = await Promise.all([
       repo.reportStats('accounting', range.from, range.to),
@@ -374,7 +391,7 @@ export const QUERIES = {
     const settings = await repo.getSettings();
     const [lowStock, expiring, movements, value] = await Promise.all([
       repo.listCollection('inventory', { page: 1, pageSize: 25, filters: { lowStock: true, lowStockThreshold: settings.lowStockThreshold } }),
-      repo.listCollection('inventory', { page: 1, pageSize: 25, filters: { expiringBefore: isoDate(new Date(Date.now() + 60 * DAY)) } }),
+      repo.listCollection('inventory', { page: 1, pageSize: 25, filters: { expiringBefore: addDaysIso(localDateInTimeZone(settings.timezone), 60) } }),
       repo.reportStats('movements', '', ''),
       repo.reportStats('inventoryValue', '', ''),
     ]);
@@ -402,42 +419,89 @@ export const QUERIES = {
     return { ok: true, record: found, collection };
   },
 
-  /* Lightweight lookup directory for the renderer: display names and form
-   * options without hydrating full records. Capped, indexed, permission-neutral
-   * (names are already visible in every list the user may open). */
-  async directory(repo) {
-    const [patients, staff, treatments, medications] = await Promise.all([
-      repo.listCollection('patients', { page: 1, pageSize: 2000, sort: 'name' }),
-      repo.listCollection('staff', { page: 1, pageSize: 2000, sort: 'name' }),
-      repo.listCollection('treatments', { page: 1, pageSize: 2000, sort: 'name' }),
-      repo.listCollection('medicationCatalog', { page: 1, pageSize: 500, sort: 'name' })
-    ]);
+  /* Lookup directory for form options: staff, treatment catalogue and the
+   * medication catalogue (bounded clinic configuration lists). Patients are
+   * NEVER preloaded — pickers search the server (patientSearch), so a clinic
+   * with 100k patients selects any of them. Each list pages to completion. */
+  async directory(repo, params = {}, ctx = null) {
+    const all = async (collection, sort) => {
+      const rows = [];
+      for (let page = 1; ; page += 1) {
+        const batch = await repo.listCollection(collection, { page, pageSize: 500, sort });
+        rows.push(...(batch.rows || []));
+        if (!batch.rows || batch.rows.length < 500 || rows.length >= (batch.total || 0)) break;
+      }
+      return rows;
+    };
+    const [staff, treatments, medications] = await Promise.all([all('staff', 'name'), all('treatments', 'name'), all('medicationCatalog', 'name')]);
     return {
-      patients: (patients.rows || []).map((patient) => ({ id: patient.id, fullName: patient.fullName, patientCode: patient.patientCode, phone: patient.phone })),
-      staff: (staff.rows || []).map((member) => ({ id: member.id, name: member.name, role: member.role })),
-      treatments: (treatments.rows || []).map((item) => ({ id: item.id, name: item.name, code: item.code, defaultPrice: item.defaultPrice, duration: item.duration, toothRequired: Boolean(item.toothRequired) })),
-      medicationCatalog: (medications.rows || []).map((item) => ({ id: item.id, name: item.name, strength: item.strength, dosage: item.dosage, frequency: item.frequency, duration: item.duration, active: item.active }))
+      staff: staff.map((member) => ({ id: member.id, name: member.name, role: member.role, active: member.active !== false })),
+      treatments: treatments.map((item) => ({ id: item.id, name: item.name, code: item.code, category: item.category, defaultPrice: item.defaultPrice, defaultPriceCents: item.defaultPriceCents, duration: item.duration, toothRequired: Boolean(item.toothRequired), active: item.active !== false })),
+      medicationCatalog: medications.map((item) => ({ id: item.id, name: item.name, strength: item.strength, dosage: item.dosage, frequency: item.frequency, duration: item.duration, route: item.route, active: item.active !== false }))
     };
   },
 
-  async globalSearch(repo, params = {}) {
+  /* Server-side patient picker search (name, code, phone, email, address). */
+  async patientSearch(repo, params = {}) {
+    const query = String(params.query || '').trim();
+    const limit = Math.min(50, Math.max(1, Number(params.limit) || 20));
+    const result = await repo.listCollection('patients', {
+      page: 1, pageSize: limit, query, sort: query ? 'name' : 'recent',
+      filters: { status: params.includeArchived ? 'all' : 'active' }
+    });
+    return {
+      query,
+      total: result.total || 0,
+      rows: (result.rows || []).map(patientBrief)
+    };
+  },
+
+  async patientBrief(repo, params = {}) {
+    const patient = await repo.get('patients', String(params.id || ''));
+    if (!patient) return { ok: false, error: 'That patient no longer exists.', code: 'not-found' };
+    return { ok: true, patient: patientBrief(patient) };
+  },
+
+  /* Point-in-time receipt data: who received it and the balance right after it. */
+  async receiptDetail(repo, params = {}) {
+    const payment = await repo.get('payments', String(params.id || ''));
+    if (!payment) return { ok: false, error: 'That payment no longer exists.', code: 'not-found' };
+    const patient = payment.patientId ? await repo.get('patients', payment.patientId) : null;
+    const invoice = payment.invoiceId ? await repo.get('invoices', payment.invoiceId) : null;
+    let receivedBy = payment.receivedBy || '';
+    if (!receivedBy && repo.ws) {
+      const audit = repo.ws.queryOne("SELECT user_name FROM audit WHERE entity_id = ? AND action = 'Payment recorded' ORDER BY seq ASC LIMIT 1", [payment.id]);
+      receivedBy = audit?.user_name || '';
+    }
+    let dueAfterCents = Number.isFinite(Number(payment.invoiceDueAfterCents)) && payment.invoiceDueAfterCents !== null ? Number(payment.invoiceDueAfterCents) : null;
+    if (invoice && dueAfterCents === null) {
+      // Historical payments: reconstruct the invoice due immediately after this
+      // payment (earlier payments and adjustments in ledger order).
+      const payments = (await repo.paymentsByInvoice(invoice.id)).filter((row) => !['Voided', 'Cancelled'].includes(row.status))
+        .sort((a, b) => `${a.date}|${a.createdAt || ''}|${a.id}`.localeCompare(`${b.date}|${b.createdAt || ''}|${b.id}`));
+      const adjustments = (await repo.adjustmentsByInvoice(invoice.id)).filter((row) => row.type === 'Adjustment');
+      const key = `${payment.date}|${payment.createdAt || ''}|${payment.id}`;
+      const paidBefore = payments.filter((row) => `${row.date}|${row.createdAt || ''}|${row.id}` <= key).reduce((sum, row) => sum + Number(row.amountCents || 0), 0);
+      const adjustedBefore = adjustments.filter((row) => String(row.date || '') <= String(payment.date || '')).reduce((sum, row) => sum + Number(row.amountCents || 0), 0);
+      dueAfterCents = Math.max(0, Number(invoice.totalCents || 0) - paidBefore - adjustedBefore);
+    }
+    const refunds = repo.adjustmentsByPayment ? (await repo.adjustmentsByPayment(payment.id)).filter((row) => row.type === 'Refund') : [];
+    return { ok: true, payment, patient: patient ? patientBrief(patient) : null, invoice, receivedBy, dueAfterCents, refunds, currentInvoiceDueCents: invoice ? Number(invoice.dueCents || 0) : null };
+  },
+
+  async globalSearch(repo, params = {}, ctx = null) {
     const query = String(params.query || '').trim();
     if (query.length < 2) return { query, results: {} };
     const limit = clampPageSize(params.limit, 8);
-    const scoped = (collection) => repo.listCollection(collection, { page: 1, pageSize: limit, query });
+    const permissions = (ctx && ctx.permissions) || [];
     const results = {};
-    const plans = [
-      ['patients', scoped('patients')],
-      ['appointments', scoped('appointments')],
-      ['invoices', scoped('invoices')],
-      ['payments', scoped('payments')],
-      ['visits', scoped('visits')],
-      ['prescriptions', scoped('prescriptions')],
-      ['inventory', scoped('inventory')],
-      ['staff', scoped('staff')],
-    ];
-    for (const [name, promise] of plans) {
-      try { const found = await promise; if (found.total) results[name] = found; } catch { /* scoped out */ }
+    // Each collection is searched only when the caller may view it.
+    const collections = ['patients', 'appointments', 'invoices', 'payments', 'visits', 'prescriptions', 'inventory', 'staff'];
+    for (const name of collections) {
+      const required = COLLECTION_PERMISSION[name];
+      if (required && !(Array.isArray(required) ? required : [required]).some((entry) => permissions.includes(entry))) continue;
+      const found = await repo.listCollection(name, { page: 1, pageSize: limit, query, filters: name === 'patients' ? { status: 'all' } : {} });
+      if (found.total) results[name] = found;
     }
     return { query, results };
   },
@@ -451,23 +515,33 @@ export const QUERIES = {
 
   /* Workspace health (diagnostics page data). */
   async workspace(repo) {
-    const [storage, integrity, counts, settings] = await Promise.all([
-      repo.storageInfo(), repo.integrityCheck(), repo.counts(), repo.getSettings(),
-    ]);
+    const storage = repo.storageInfo({ includeCounts: false });
+    const integrity = repo.quickCheck ? repo.quickCheck() : repo.integrityCheck();
+    const counts = repo.counts();
+    const settings = repo.getSettings();
     return {
       appVersion: APP_VERSION,
       schemaVersion: CURRENT_SCHEMA_VERSION,
       storage, integrity, counts,
       sessionTimeoutMinutes: settings.sessionTimeoutMinutes,
-      applicationLock: settings.applicationLock,
+      autoLockMinutes: settings.autoLockMinutes,
     };
   },
 };
 
+function patientBrief(patient) {
+  return {
+    id: patient.id, fullName: patient.fullName, patientCode: patient.patientCode, phone: patient.phone || '',
+    gender: patient.gender || '', dateOfBirth: patient.dateOfBirth || '', archived: Boolean(patient.archived),
+    balanceCents: Number(patient.balanceCents || 0), allergies: patient.allergies || '', importantAlerts: patient.importantAlerts || ''
+  };
+}
+
 export async function runQuery(repo, name, params, ctx) {
   const handler = QUERIES[name];
   if (!handler) return { ok: false, error: 'Unknown query', code: 'query-unknown' };
-  const authorized = authorizeQuery(name, ctx ? ctx.permissions : null);
+  const authenticated = Boolean(ctx && (ctx.userId || ctx.firstRun === true) && Array.isArray(ctx.permissions));
+  const authorized = authorizeQuery(name, ctx ? ctx.permissions : null, authenticated);
   if (!authorized.ok) return authorized;
   try {
     const result = await handler(repo, params || {}, ctx || null);

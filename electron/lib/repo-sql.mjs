@@ -6,10 +6,32 @@
 import { COLLECTION_TABLES } from './schema.mjs';
 import { rowToRecord, phoneNorm } from './records.mjs';
 import { DEFAULT_SETTINGS } from '../../src/migrate-state.js';
+import { CODE_KINDS } from '../../src/core.js';
 import { listCollectionSql, reportStatsSql, patientRecordCountsSql } from './list-sql.mjs';
 import { patientLedgerSql, patientFinancialSummarySql, patientLedgerRollupsSql, visitBillingForSql } from './ledger-sql.mjs';
 
 const escapeLike = (value) => String(value).replace(/[\\%_]/g, (c) => `\\${c}`);
+
+const USER_COLUMNS = 'id, name, role, staff_id, active, permissions, pin_hash, pin_salt, kdf, failed_attempts, locked_until, lockout_count, last_login, created_at, updated_at, payload';
+
+function userFromRow(row, includeSecrets) {
+  let payload = {};
+  try { payload = JSON.parse(row.payload || '{}') || {}; } catch { payload = {}; }
+  let permissions = [];
+  try { permissions = JSON.parse(row.permissions || '[]'); } catch { permissions = []; }
+  const base = {
+    ...payload,
+    id: row.id, name: row.name, role: row.role, staffId: row.staff_id || '', active: row.active !== 0,
+    permissions: Array.isArray(permissions) ? permissions : [],
+    failedAttempts: Number(row.failed_attempts || 0), lockedUntil: Number(row.locked_until || 0),
+    lockoutCount: Number(row.lockout_count || 0),
+    lastLogin: row.last_login || '', createdAt: row.created_at, updatedAt: row.updated_at,
+    hasPin: Boolean(row.pin_hash)
+  };
+  delete base.pinHash; delete base.pinSalt; delete base.kdf;
+  if (!includeSecrets) return base;
+  return { ...base, pinHash: row.pin_hash || '', pinSalt: row.pin_salt || '', kdf: row.kdf || '' };
+}
 
 export class SqlRepo {
   constructor(workspace) {
@@ -31,6 +53,46 @@ export class SqlRepo {
     counters[kind] = value + 1;
     this.setMeta('counters', counters);
     return value;
+  }
+
+  /** True when a human-readable code is already taken by the owning table. */
+  codeExists(kind, code) {
+    const spec = CODE_KINDS[kind];
+    if (!spec) return false;
+    return Boolean(this.ws.queryOne(`SELECT 1 AS hit FROM ${spec.table} WHERE ${spec.column} = ? LIMIT 1`, [String(code)]));
+  }
+
+  /** Next queue serial for a day: highest existing serial number + 1 (never a count). */
+  nextQueueSerial(date, prefix = 'Q') {
+    const rows = this.ws.query("SELECT serial FROM appointments WHERE date = ? AND serial <> ''", [String(date || '')]);
+    let max = 0;
+    for (const row of rows) {
+      const match = /(\d+)\s*$/.exec(String(row.serial || ''));
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+    return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+  }
+
+  /** Before a merge: supersede the duplicate's current tooth records that clash with the primary's. */
+  supersedeConflictingDental(duplicateId, primaryId) {
+    const clashes = this.ws.query(`SELECT d.id, d.payload FROM dental_records d
+      WHERE d.patient_id = ? AND d.superseded = 0 AND EXISTS (
+        SELECT 1 FROM dental_records p WHERE p.patient_id = ? AND p.superseded = 0 AND p.tooth = d.tooth AND p.dentition = d.dentition)`, [duplicateId, primaryId]);
+    for (const row of clashes) {
+      let payload = {};
+      try { payload = JSON.parse(row.payload) || {}; } catch { payload = {}; }
+      this.ws.run('UPDATE dental_records SET superseded = 1, payload = ? WHERE id = ?', [JSON.stringify({ ...payload, superseded: true, supersededReason: 'patient-merge' }), row.id]);
+    }
+    return clashes.length;
+  }
+
+  /** Recompute a patient's last/next visit markers from the visit and appointment tables. */
+  refreshPatientVisitDates(patientId) {
+    if (!patientId) return;
+    const patient = this.get('patients', patientId);
+    if (!patient) return;
+    const last = this.ws.queryOne('SELECT MAX(date) AS d FROM visits WHERE patient_id = ?', [patientId])?.d || '';
+    if ((patient.lastVisit || '') !== last) this.ws.upsertRecord('patients', { ...patient, lastVisit: last, updatedAt: new Date().toISOString() });
   }
 
   // ---- generic record access ------------------------------------------------
@@ -66,9 +128,18 @@ export class SqlRepo {
     const params = [];
     if (status === 'active') { where.push('archived = 0'); } else if (status === 'archived') { where.push('archived = 1'); }
     if (query) {
-      const like = `%${escapeLike(query.toLowerCase())}%`;
-      where.push('(LOWER(full_name) LIKE ? ESCAPE \'\\\' OR LOWER(patient_code) LIKE ? ESCAPE \'\\\' OR phone LIKE ? ESCAPE \'\\\' OR phone_norm LIKE ? ESCAPE \'\\\' OR LOWER(email) LIKE ? ESCAPE \'\\\' OR LOWER(COALESCE(json_extract(payload, \'$.address\'), \'\')) LIKE ? ESCAPE \'\\\')');
-      params.push(like, like, like, escapeLike(phoneNorm(query)), like, like);
+      const text = String(query).trim();
+      const like = `%${escapeLike(text.toLowerCase())}%`;
+      const digits = phoneNorm(text);
+      const clauses = ['LOWER(full_name) LIKE ? ESCAPE \'\\\'', 'LOWER(patient_code) LIKE ? ESCAPE \'\\\'', 'LOWER(email) LIKE ? ESCAPE \'\\\''];
+      const clauseParams = [like, like, like];
+      if (digits.length >= 3) { clauses.push('phone_norm LIKE ? ESCAPE \'\\\''); clauseParams.push(`%${escapeLike(digits)}%`); }
+      clauses.push('phone LIKE ? ESCAPE \'\\\'');
+      clauseParams.push(like);
+      clauses.push('LOWER(COALESCE(json_extract(payload, \'$.address\'), \'\')) LIKE ? ESCAPE \'\\\'');
+      clauseParams.push(like);
+      where.push(`(${clauses.join(' OR ')})`);
+      params.push(...clauseParams);
     }
     if (balance === 'outstanding') where.push('balance_cents > 0');
     if (balance === 'clear') where.push('balance_cents <= 0');
@@ -86,20 +157,25 @@ export class SqlRepo {
     // Extra sorts need per-patient aggregates — only compute when requested
     // (the column chooser opts in; default list path stays index-only).
     const needsAggregates = includeAggregates || ['visits','visits-desc','billed','billed-desc','paid','paid-desc'].includes(sort);
-    const orderSql = {
+    // Every ordering ends in a unique key so OFFSET pagination is deterministic
+    // (no duplicated or skipped patients across pages).
+    const orderSql = `${{
       name: 'full_name COLLATE NOCASE ASC',
       'name-desc': 'full_name COLLATE NOCASE DESC',
       recent: "COALESCE(NULLIF(last_visit,''), registration_date, created_at) DESC",
       oldest: "COALESCE(NULLIF(last_visit,''), registration_date, created_at) ASC",
       balance: 'balance_cents DESC',
+      'balance-asc': 'balance_cents ASC',
       code: 'patient_code ASC',
+      'code-desc': 'patient_code DESC',
+      registered: 'registration_date DESC',
       'visits-desc': 'visits_count DESC, full_name COLLATE NOCASE ASC',
       'billed-desc': 'billed_cents DESC, full_name COLLATE NOCASE ASC',
       'paid-desc': 'paid_cents DESC, full_name COLLATE NOCASE ASC',
       visits: 'visits_count ASC, full_name COLLATE NOCASE ASC',
       billed: 'billed_cents ASC, full_name COLLATE NOCASE ASC',
       paid: 'paid_cents ASC, full_name COLLATE NOCASE ASC'
-    }[sort] || 'full_name COLLATE NOCASE ASC';
+    }[sort] || 'full_name COLLATE NOCASE ASC'}, patients.id ASC`;
     const total = this.ws.countRecords('patients', { where: where.join(' AND '), params });
     let rows;
     if (needsAggregates) {
@@ -155,7 +231,7 @@ export class SqlRepo {
 
   updatePatientBalance(patientId) {
     if (!patientId) return 0;
-    const charges = this.ws.queryOne("SELECT COALESCE(SUM(total_cents), 0) AS cents FROM invoices WHERE patient_id = ? AND status <> 'Cancelled'", [patientId])?.cents ?? 0;
+    const charges = this.ws.queryOne("SELECT COALESCE(SUM(total_cents), 0) AS cents FROM invoices WHERE patient_id = ? AND status NOT IN ('Cancelled','Draft')", [patientId])?.cents ?? 0;
     const credits = this.ws.queryOne("SELECT COALESCE(SUM(amount_cents - refunded_cents), 0) AS cents FROM payments WHERE patient_id = ? AND status NOT IN ('Voided','Cancelled')", [patientId])?.cents ?? 0;
     // Payments recorded without patient_id but linked to this patient's invoices.
     const linkedCredits = this.ws.queryOne(`SELECT COALESCE(SUM(p.amount_cents - p.refunded_cents), 0) AS cents
@@ -194,7 +270,9 @@ export class SqlRepo {
   // ---- appointments ------------------------------------------------------------
 
   appointmentsOnDate(date) {
-    return this.ws.listRecords('appointments', { where: 'date = ?', params: [String(date || '')], order: 'time ASC, created_at ASC', limit: 500 });
+    // A single day's schedule is naturally bounded; it is never truncated.
+    const rows = this.ws.query('SELECT * FROM appointments WHERE date = ? ORDER BY time ASC, created_at ASC, id ASC', [String(date || '')]);
+    return rows.map(rowToRecord).filter(Boolean);
   }
 
   appointmentsInRange(from, to) {
@@ -335,23 +413,14 @@ export class SqlRepo {
   // ---- users / auth ------------------------------------------------------------------
 
   usersList({ includeSecrets = false } = {}) {
-    const rows = includeSecrets
-      ? this.ws.query('SELECT id, name, role, staff_id, active, permissions, pin_hash, pin_salt, kdf, failed_attempts, locked_until, last_login, created_at, updated_at FROM users ORDER BY created_at ASC')
-      : this.ws.query('SELECT payload, pin_hash FROM users ORDER BY created_at ASC');
-    return rows.map((row) => (includeSecrets
-      ? {
-        id: row.id, name: row.name, role: row.role, staffId: row.staff_id || '', active: row.active !== 0,
-        permissions: JSON.parse(row.permissions || '[]'), pinHash: row.pin_hash || '', pinSalt: row.pin_salt || '',
-        kdf: row.kdf || '', failedAttempts: Number(row.failed_attempts || 0), lockedUntil: Number(row.locked_until || 0),
-        lastLogin: row.last_login || '', createdAt: row.created_at, updatedAt: row.updated_at,
-        hasPin: Boolean(row.pin_hash)
-      }
-      : { ...rowToRecord(row), hasPin: Boolean(row.pin_hash) }));
+    const rows = this.ws.query(`SELECT ${USER_COLUMNS} FROM users ORDER BY created_at ASC, id ASC`);
+    return rows.map((row) => userFromRow(row, includeSecrets));
   }
 
   userGet(id, { includeSecrets = false } = {}) {
-    if (includeSecrets) return this.usersList({ includeSecrets: true }).find((user) => user.id === id) || null;
-    return this.usersList({ includeSecrets: false }).find((user) => user.id === id) || null;
+    if (!id) return null;
+    const row = this.ws.queryOne(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [String(id)]);
+    return row ? userFromRow(row, includeSecrets) : null;
   }
 
   /** Update authentication secrets/state. Secret columns live only in the table —
@@ -359,7 +428,8 @@ export class SqlRepo {
   setUserSecrets(userId, fields = {}) {
     const columnMap = {
       pinHash: 'pin_hash', pinSalt: 'pin_salt', kdf: 'kdf',
-      failedAttempts: 'failed_attempts', lockedUntil: 'locked_until', lastLogin: 'last_login'
+      failedAttempts: 'failed_attempts', lockedUntil: 'locked_until', lastLogin: 'last_login',
+      lockoutCount: 'lockout_count'
     };
     const assignments = [];
     const params = [];
@@ -367,14 +437,15 @@ export class SqlRepo {
       const column = columnMap[key];
       if (!column) continue;
       assignments.push(`${column} = ?`);
-      params.push(value ?? (column === 'last_login' ? '' : 0));
+      params.push(value ?? (['last_login', 'pin_hash', 'pin_salt', 'kdf'].includes(column) ? '' : 0));
     }
     if (!assignments.length) return;
     const record = this.get('users', userId) || { id: userId };
     const sanitized = { ...record, failedAttempts: fields.failedAttempts ?? record.failedAttempts ?? 0, lockedUntil: fields.lockedUntil ?? record.lockedUntil ?? 0, lastLogin: fields.lastLogin ?? record.lastLogin ?? null };
+    delete sanitized.hasPin;
     assignments.push('updated_at = ?');
     params.push(new Date().toISOString());
-    params.push(JSON.stringify({ ...sanitized, pinHash: '', pinSalt: '' }));
+    params.push(JSON.stringify({ ...sanitized, pinHash: '', pinSalt: '', kdf: '' }));
     assignments.push('payload = ?');
     params.push(userId);
     this.ws.run(`UPDATE users SET ${assignments.join(', ')} WHERE id = ?`, params);

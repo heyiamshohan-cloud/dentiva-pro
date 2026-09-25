@@ -63,7 +63,7 @@ const SPECS = {
       if (f.dentistId) { where.push('t.dentist_id = ?'); params.push(f.dentistId); }
       if (f.visitId) { where.push('t.visit_id = ?'); params.push(f.visitId); }
       if (f.planId) { where.push('t.plan_id = ?'); params.push(f.planId); }
-      if (f.outstanding) { where.push("t.status NOT IN ('Paid','Cancelled') AND t.due_cents > 0"); }
+      if (f.outstanding) { where.push("t.status NOT IN ('Paid','Cancelled','Draft') AND t.due_cents > 0"); }
     }
   },
   payments: {
@@ -164,6 +164,7 @@ const SPECS = {
     filter(where, params, f) {
       if (f.patientId) { where.push('t.patient_id = ?'); params.push(f.patientId); }
       if (f.status) { where.push('t.status = ?'); params.push(f.status); }
+      if (f.open) where.push("t.status IN ('Open','Contacted','Scheduled')");
       if (f.dueBefore) { where.push("t.due_date <> '' AND t.due_date <= ?"); params.push(f.dueBefore); }
       if (f.dueAfter) { where.push('t.due_date >= ?'); params.push(f.dueAfter); }
     }
@@ -207,7 +208,7 @@ const SPECS = {
     sorts: { name: 't.name ASC', 'price-desc': 't.default_price_cents DESC', recent: 't.created_at DESC' },
     defaultOrder: 't.name ASC',
     filter(where, params, f) {
-      if (f.archived !== 'include') where.push('t.archived = 0');
+      // The catalogue has no archive state; retired treatments are `active = 0`.
       if (f.category) { where.push('t.category = ?'); params.push(f.category); }
       if (f.active === true || f.active === 'only') where.push('t.active = 1');
       if (f.active === false || f.active === 'exclude') where.push('t.active = 0');
@@ -330,7 +331,8 @@ export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, q
   spec.filter(where, params, f);
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const order = spec.sorts[sort] || spec.defaultOrder;
-  const orderSql = order ? `ORDER BY ${order}` : '';
+  // A unique trailing key keeps OFFSET pagination deterministic.
+  const orderSql = order ? `ORDER BY ${order}, t.id ASC` : 'ORDER BY t.id ASC';
 
   const total = Number(repo.ws.queryOne(`SELECT COUNT(*) AS total FROM ${from} ${whereSql}`, params)?.total ?? 0);
   const rows = repo.ws.query(`SELECT t.* FROM ${from} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`, [...params, safeSize, (safePage - 1) * safeSize])
@@ -341,6 +343,15 @@ export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, q
 // ---- report statistics (SQL aggregates; scalars + grouped rows) -------------
 
 const money = (repo, sql, params = []) => Number(repo.ws.queryOne(sql, params)?.cents ?? 0);
+
+/** Refunds are cash out on the REFUND date (not the original payment date). */
+function refundsInRange(repo, from, to) {
+  const where = ["a.type = 'Refund'", "(a.payment_id IS NULL OR a.payment_id = '' OR EXISTS (SELECT 1 FROM payments p WHERE p.id = a.payment_id AND p.status NOT IN ('Voided','Cancelled')))"];
+  const params = [];
+  if (from) { where.push('a.date >= ?'); params.push(from); }
+  if (to) { where.push('a.date <= ?'); params.push(to); }
+  return Number(repo.ws.queryOne(`SELECT COALESCE(SUM(a.amount_cents),0) AS cents FROM payment_adjustments a WHERE ${where.join(' AND ')}`, params)?.cents ?? 0);
+}
 const count = (repo, sql, params = []) => Number(repo.ws.queryOne(sql, params)?.total ?? 0);
 const dateBound = (from, to, column = 'date') => {
   const where = []; const params = [];
@@ -355,13 +366,16 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
   switch (kind) {
     case 'revenue': {
       const activePayments = `${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled')`;
-      const liveInvoices = `${range.sql ? `${range.sql} AND` : 'WHERE'} status <> 'Cancelled'`;
+      const liveInvoices = `${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Cancelled','Draft')`;
+      const collectedCents = money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payments ${activePayments}`, range.params);
+      const refundedCents = refundsInRange(repo, from, to);
       return {
-        collectedCents: money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payments ${activePayments}`, range.params),
+        collectedCents,
+        refundedCents,
+        netCollectedCents: collectedCents - refundedCents,
         billedCents: money(repo, `SELECT COALESCE(SUM(total_cents),0) AS cents FROM invoices ${liveInvoices}`, range.params),
         expensesCents: money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM expenses ${range.sql}`, range.params),
         adjustedCents: money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payment_adjustments ${range.sql ? `${range.sql} AND` : 'WHERE'} type = 'Adjustment'`, range.params),
-        refundedCents: money(repo, `SELECT COALESCE(SUM(refunded_cents),0) AS cents FROM payments ${range.sql}`, range.params),
         paymentCount: count(repo, `SELECT COUNT(*) AS total FROM payments ${activePayments}`, range.params),
         invoiceCount: count(repo, `SELECT COUNT(*) AS total FROM invoices ${liveInvoices}`, range.params),
         expenseCount: count(repo, `SELECT COUNT(*) AS total FROM expenses ${range.sql}`, range.params)
@@ -395,8 +409,8 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
     }
     case 'outstanding':
       return {
-        dueCents: money(repo, `SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Paid','Cancelled') AND due_cents > 0`, range.params),
-        openInvoices: count(repo, `SELECT COUNT(*) AS total FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Paid','Cancelled') AND due_cents > 0`, range.params),
+        dueCents: money(repo, `SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Paid','Cancelled','Draft') AND due_cents > 0`, range.params),
+        openInvoices: count(repo, `SELECT COUNT(*) AS total FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Paid','Cancelled','Draft') AND due_cents > 0`, range.params),
         partiallyPaid: count(repo, `SELECT COUNT(*) AS total FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status = 'Partially Paid'`, range.params),
         unpaid: count(repo, `SELECT COUNT(*) AS total FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status = 'Issued'`, range.params),
         adjusted: count(repo, `SELECT COUNT(*) AS total FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status = 'Adjusted'`, range.params)
@@ -420,23 +434,24 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
     }
     case 'accounting': {
       const collectedCents = money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled')`, range.params);
+      const refundedCents = refundsInRange(repo, from, to);
       const expensesCents = money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM expenses ${range.sql}`, range.params);
-      const methods = repo.ws.query(`SELECT method AS label, COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS total FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled') GROUP BY method ORDER BY cents DESC`, range.params);
+      const methods = repo.ws.query(`SELECT method AS label, COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS total FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled') GROUP BY method ORDER BY cents DESC, method ASC`, range.params);
       return {
-        billedCents: money(repo, `SELECT COALESCE(SUM(total_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status <> 'Cancelled'`, range.params),
-        collectedCents, expensesCents,
+        billedCents: money(repo, `SELECT COALESCE(SUM(total_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Cancelled','Draft')`, range.params),
+        collectedCents, refundedCents, expensesCents,
+        netCollectedCents: collectedCents - refundedCents,
         adjustedCents: money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payment_adjustments ${range.sql ? `${range.sql} AND` : 'WHERE'} type = 'Adjustment'`, range.params),
-        refundedCents: money(repo, `SELECT COALESCE(SUM(refunded_cents),0) AS cents FROM payments ${range.sql}`, range.params),
-        netOperatingCents: collectedCents - expensesCents,
-        receivablesCents: money(repo, "SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled')"),
+        netOperatingCents: collectedCents - refundedCents - expensesCents,
+        receivablesCents: money(repo, "SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled','Draft')"),
         byMethod: methods.map((row) => ({ label: row.label || 'Other', cents: Number(row.cents || 0), count: Number(row.total || 0) }))
       };
     }
     case 'aging': {
       const bucket = (label, lo, hi) => ({
         label,
-        cents: money(repo, `SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled') AND due_cents > 0 AND (julianday('now') - julianday(date)) ${lo === null ? '<=' : '>='} ${lo === null ? hi : lo}${hi === null ? '' : ` AND (julianday('now') - julianday(date)) <= ${hi}`}`),
-        count: count(repo, `SELECT COUNT(*) AS total FROM invoices WHERE status NOT IN ('Paid','Cancelled') AND due_cents > 0 AND (julianday('now') - julianday(date)) ${lo === null ? '<=' : '>='} ${lo === null ? hi : lo}${hi === null ? '' : ` AND (julianday('now') - julianday(date)) <= ${hi}`}`)
+        cents: money(repo, `SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled','Draft') AND due_cents > 0 AND (julianday('now') - julianday(date)) ${lo === null ? '<=' : '>='} ${lo === null ? hi : lo}${hi === null ? '' : ` AND (julianday('now') - julianday(date)) <= ${hi}`}`),
+        count: count(repo, `SELECT COUNT(*) AS total FROM invoices WHERE status NOT IN ('Paid','Cancelled','Draft') AND due_cents > 0 AND (julianday('now') - julianday(date)) ${lo === null ? '<=' : '>='} ${lo === null ? hi : lo}${hi === null ? '' : ` AND (julianday('now') - julianday(date)) <= ${hi}`}`)
       });
       return { rows: [bucket('Current (0–30 days)', null, 30), bucket('31–60 days', 31, 60), bucket('61–90 days', 61, 90), bucket('Over 90 days', 91, null)] };
     }
@@ -447,16 +462,17 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
       };
     case 'analytics': {
       const collectedCents = money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled')`, range.params);
-      const months = repo.ws.query(`SELECT strftime('%Y-%m', date) AS month, COALESCE(SUM(amount_cents),0) AS cents FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled') GROUP BY month ORDER BY month ASC LIMIT 24`, range.params);
-      const visitMonths = repo.ws.query(`SELECT strftime('%Y-%m', date) AS month, COUNT(*) AS total FROM visits ${range.sql} GROUP BY month ORDER BY month ASC LIMIT 24`, range.params);
+      const months = repo.ws.query(`SELECT strftime('%Y-%m', date) AS month, COALESCE(SUM(amount_cents),0) AS cents FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled') GROUP BY month ORDER BY month DESC LIMIT 36`, range.params).reverse();
+      const visitMonths = repo.ws.query(`SELECT strftime('%Y-%m', date) AS month, COUNT(*) AS total FROM visits ${range.sql} GROUP BY month ORDER BY month DESC LIMIT 36`, range.params).reverse();
       const methods = repo.ws.query(`SELECT method AS label, COALESCE(SUM(amount_cents),0) AS cents FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled') GROUP BY method ORDER BY cents DESC LIMIT 12`, range.params);
       const regRange = dateBound(from, to, 'registration_date');
       return {
         totals: {
           collectedCents,
-          billedCents: money(repo, `SELECT COALESCE(SUM(total_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status <> 'Cancelled'`, range.params),
+          refundedCents: refundsInRange(repo, from, to),
+          billedCents: money(repo, `SELECT COALESCE(SUM(total_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Cancelled','Draft')`, range.params),
           expensesCents: money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM expenses ${range.sql}`, range.params),
-          outstandingCents: money(repo, "SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled')")
+          outstandingCents: money(repo, "SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled','Draft')")
         },
         counts: {
           patients: count(repo, 'SELECT COUNT(*) AS total FROM patients WHERE archived = 0'),

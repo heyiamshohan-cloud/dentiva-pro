@@ -16,10 +16,12 @@
 // both Node (Buffer) and browsers (atob).
 
 import {
-  calculateInvoice, paymentStatusFor, validatePayment, validateMoney, appointmentsOverlap,
+  calculateInvoice, validatePayment, validateMoney, appointmentsOverlap,
   moneyToCents, centsToMoney, toNumber, hasPermission, sanitizeFilename, validateAttachmentFile,
-  MOVEMENT_TYPES, FOLLOWUP_STATUSES, REFERRAL_STATUSES, INVOICE_STATUSES, APPOINTMENT_STATUSES
+  MOVEMENT_TYPES, FOLLOWUP_STATUSES, REFERRAL_STATUSES, APPOINTMENT_STATUSES,
+  PERMISSIONS, roleDefinitions, localDateInTimeZone, appointmentTransitionAllowed, CODE_KINDS, sanitizeCodePrefix
 } from './core.js';
+import { isValidFdi, dentitionOf } from './dental.js';
 import { deriveNotifications, reconcileNotifications, normalizeNotificationRules } from './notifications.js';
 import { normalizeCustomFields } from './migrate-state.js';
 import { normaliseTags, validatePatientInput, validateTreatmentPlanInput } from './domain.js';
@@ -28,12 +30,37 @@ export function makeId(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function nextCode(repo, kind, settingKey, fallbackPrefix, pad = 4) {
+/**
+ * Allocate the next human-readable code for a document kind. Each kind has its
+ * own prefix and counter; the code is verified unique against the owning table
+ * so counter drift (restores, imports, prefix changes) can never produce a
+ * duplicate or a constraint failure.
+ */
+function nextCode(repo, kind, pad = 4) {
+  const spec = CODE_KINDS[kind];
+  if (!spec) throw new Error(`Unknown code kind: ${kind}`);
   const settings = repo.getSettings();
-  const prefix = String(settings[settingKey] || fallbackPrefix || kind.slice(0, 3).toUpperCase());
-  const n = repo.nextCounter(kind);
-  return `${prefix}-${String(n).padStart(pad, '0')}`;
+  const prefix = sanitizeCodePrefix(settings[spec.setting]) || spec.fallback;
+  for (let attempt = 0; attempt < 10000; attempt += 1) {
+    const n = repo.nextCounter(kind);
+    const code = `${prefix}-${String(n).padStart(pad, '0')}`;
+    if (!repo.codeExists || !repo.codeExists(kind, code)) return code;
+  }
+  throw new Error(`Could not allocate a unique ${kind} code.`);
 }
+
+const ROLE_NAMES = Object.keys(roleDefinitions());
+const PERMISSION_SET = new Set(PERMISSIONS);
+
+const PATIENT_EDITABLE_FIELDS = [
+  'fullName', 'preferredName', 'phone', 'email', 'gender', 'dateOfBirth', 'bloodGroup', 'address', 'city', 'district',
+  'occupation', 'maritalStatus', 'emergencyName', 'emergencyPhone', 'emergencyRelation', 'preferredContact',
+  'communicationNotes', 'allergies', 'medicalHistory', 'medications', 'dentalHistory', 'importantAlerts', 'notes', 'tags'
+];
+const VISIT_EDITABLE_FIELDS = [
+  'date', 'reason', 'chiefComplaint', 'symptoms', 'findings', 'diagnosis', 'treatmentPerformed', 'procedures', 'teeth',
+  'anesthesia', 'medications', 'notes', 'followUpDate', 'dentistId', 'status'
+];
 
 const requireRecord = (repo, collection, id, label = 'record') => {
   if (!id) return { error: `A ${label} identifier is required.` };
@@ -60,26 +87,37 @@ export function dataUrlToBytes(dataUrl) {
   return bytes;
 }
 
-/** Net payment state of an invoice from its live payments (single financial projection). */
+/**
+ * Net payment state of an invoice from its live payments and adjustments —
+ * the single financial projection every screen and document derives from.
+ *   paid      = Σ(payment amount − refunded)   over non-voided payments
+ *   adjusted  = Σ forgiveness adjustments
+ *   due       = max(0, total − paid − adjusted)
+ */
 function computeInvoiceState(repo, invoice) {
   const payments = invoice?.id ? repo.paymentsByInvoice(invoice.id) : [];
-  const status = paymentStatusFor(invoice?.total ?? 0, payments);
-  const adjustments = invoice?.id
-    ? (repo.adjustmentsByInvoice ? repo.adjustmentsByInvoice(invoice.id) : [])
-    : [];
+  const live = payments.filter((payment) => !['Voided', 'Cancelled'].includes(payment.status));
+  const grossCents = live.reduce((sum, payment) => sum + Math.max(0, moneyToCents(payment.amount)), 0);
+  const refundedCents = live.reduce((sum, payment) => sum + Math.max(0, Math.min(moneyToCents(payment.refundedAmount || 0), moneyToCents(payment.amount))), 0);
+  const adjustments = invoice?.id && repo.adjustmentsByInvoice ? repo.adjustmentsByInvoice(invoice.id) : [];
   const adjustedCents = adjustments
     .filter((adjustment) => adjustment.type === 'Adjustment')
     .reduce((sum, adjustment) => sum + Math.max(0, moneyToCents(adjustment.amount)), 0);
   const totalCents = Math.max(0, moneyToCents(invoice?.total ?? 0));
-  const dueCents = Math.max(0, totalCents - moneyToCents(status.paid) - adjustedCents);
-  return { paid: status.paid, paidCents: moneyToCents(status.paid), dueCents, adjustedCents };
+  const paidCents = Math.max(0, grossCents - refundedCents);
+  const dueCents = Math.max(0, totalCents - paidCents - adjustedCents);
+  return { totalCents, grossCents, refundedCents, paidCents, adjustedCents, dueCents, paid: centsToMoney(paidCents) };
 }
 
+/** Status is DERIVED from money; only Draft (not yet issued) and Cancelled are sticky. */
 function invoiceStatusFrom(state, previousStatus) {
-  if (['Draft', 'Cancelled', 'Refunded'].includes(previousStatus)) return previousStatus;
-  if (state.dueCents === 0 && state.paidCents > 0) return 'Paid';
+  if (previousStatus === 'Cancelled') return 'Cancelled';
+  if (previousStatus === 'Draft' && state.grossCents === 0 && state.adjustedCents === 0) return 'Draft';
+  if (state.totalCents > 0 && state.dueCents === 0 && state.paidCents > 0) return 'Paid';
+  if (state.totalCents === 0 && state.adjustedCents === 0 && state.paidCents === 0 && state.refundedCents === 0) return 'Paid';
   if (state.dueCents === 0 && state.paidCents === 0 && state.adjustedCents > 0) return 'Adjusted';
   if (state.paidCents > 0) return 'Partially Paid';
+  if (state.refundedCents > 0) return 'Refunded';
   if (state.adjustedCents > 0) return 'Adjusted';
   return 'Issued';
 }
@@ -89,13 +127,47 @@ function refreshInvoicePaymentState(repo, invoice, nowIso) {
   const updated = {
     ...invoice,
     paid: centsToMoney(state.paidCents),
-    due: centsToMoney(state.dueCents),
+    due: invoice.status === 'Cancelled' ? 0 : centsToMoney(state.dueCents),
     status: invoiceStatusFrom(state, invoice.status),
     updatedAt: nowIso || invoice.updatedAt
   };
   repo.update('invoices', updated);
   repo.updatePatientBalance(updated.patientId);
   return updated;
+}
+
+const QTY_PATTERN = /^\d+(?:\.\d{1,2})?$/;
+
+/** Parse + validate invoice lines into exact integer-cent rows. Errors, never silent coercion. */
+function buildInvoiceItems(payload) {
+  const raw = Array.isArray(payload.items) ? payload.items : [];
+  const items = [];
+  for (let index = 0; index < raw.length; index += 1) {
+    const item = raw[index] || {};
+    const name = str(item.name);
+    const priceText = str(item.unitPrice);
+    if (!name && !priceText) continue; // untouched blank row
+    const label = `Line ${index + 1}`;
+    if (!name) return { error: `${label}: enter a description.` };
+    const qtyText = str(item.quantity === undefined || item.quantity === '' ? 1 : item.quantity);
+    if (!QTY_PATTERN.test(qtyText) || Number(qtyText) <= 0) return { error: `${label}: quantity must be a positive number with at most two decimals.` };
+    if (!validateMoney(priceText)) return { error: `${label}: enter a valid unit price (digits with at most two decimals).` };
+    const quantity = Number(qtyText);
+    const unitPriceCents = moneyToCents(priceText);
+    const lineTotalCents = Math.round(quantity * unitPriceCents);
+    items.push({
+      name, quantity,
+      unitPrice: centsToMoney(unitPriceCents), unitPriceCents,
+      total: centsToMoney(lineTotalCents), lineTotalCents,
+      treatmentId: str(item.treatmentId), tooth: str(item.tooth), note: str(item.note)
+    });
+  }
+  if (!items.length && str(payload.itemName)) {
+    return buildInvoiceItems({ items: [{ name: payload.itemName, quantity: payload.quantity ?? 1, unitPrice: payload.unitPrice, tooth: payload.tooth }] });
+  }
+  if (!items.length) return { error: 'Add at least one line item with a description and price.' };
+  if (items.length > 300) return { error: 'An invoice can hold at most 300 line items — split the charges across several invoices.' };
+  return { items };
 }
 
 // ---------------------------------------------------------------------------
@@ -175,49 +247,41 @@ function buildExpense(repo, payload, ctx, existing = null) {
 
 function buildInvoice(repo, payload, ctx, existing = null) {
   const settings = repo.getSettings();
-  const items = (Array.isArray(payload.items) ? payload.items : [])
-    .map((item) => ({
-      name: str(item.name),
-      quantity: Math.max(0, toNumber(item.quantity) || 1),
-      unitPrice: Math.max(0, toNumber(item.unitPrice)),
-      treatmentId: str(item.treatmentId),
-      tooth: str(item.tooth),
-      note: str(item.note)
-    }))
-    .filter((item) => item.name && item.quantity > 0)
-    .map((item) => {
-      const line = calculateInvoice({ quantity: item.quantity, unitPrice: item.unitPrice, discount: 0, taxRate: 0 });
-      return { ...item, unitPrice: line.subtotal / (item.quantity || 1), total: line.subtotal };
-    });
-  if (!items.length) {
-    if (!str(payload.itemName) || !validateMoney(payload.unitPrice)) {
-      return { error: 'Add at least one line item with a valid two-decimal price.' };
-    }
-    const quantity = Math.max(1, toNumber(payload.quantity) || 1);
-    const line = calculateInvoice({ quantity, unitPrice: payload.unitPrice, discount: 0, taxRate: 0 });
-    items.push({ name: str(payload.itemName), quantity, unitPrice: line.subtotal / quantity, total: line.subtotal, treatmentId: '', tooth: str(payload.tooth), note: '' });
-  }
-  if (!validateMoney(payload.discount ?? 0)) return { error: 'Discount must be a valid two-decimal amount.' };
-  const subtotal = centsToMoney(items.reduce((sum, item) => sum + moneyToCents(item.total), 0));
-  const taxRate = settings.taxEnabled && payload.taxRate === undefined ? toNumber(settings.taxRate) : toNumber(payload.taxRate);
-  const totals = calculateInvoice({ quantity: 1, unitPrice: subtotal, discount: payload.discount, taxRate });
+  const built = buildInvoiceItems(payload);
+  if (built.error) return { error: built.error };
+  const { items } = built;
+  const subtotalCents = items.reduce((sum, item) => sum + item.lineTotalCents, 0);
+  const discountText = payload.discount === undefined || payload.discount === null || str(payload.discount) === '' ? '0' : str(payload.discount);
+  if (!validateMoney(discountText)) return { error: 'Discount must be a valid amount with at most two decimals.' };
+  const discountCents = moneyToCents(discountText);
+  if (discountCents > subtotalCents) return { error: 'The discount cannot be larger than the subtotal.' };
+  const taxInput = payload.taxRate === undefined || payload.taxRate === null || str(payload.taxRate) === ''
+    ? (settings.taxEnabled ? settings.taxRate : 0)
+    : payload.taxRate;
+  const taxRate = Number(taxInput);
+  if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) return { error: 'The tax rate must be between 0 and 100%.' };
+  const taxableCents = subtotalCents - discountCents;
+  const taxCents = Math.round((taxableCents * taxRate) / 100);
+  const totalCents = taxableCents + taxCents;
+  if (payload.date !== undefined && payload.date !== '' && !dateValid(payload.date)) return { error: 'Enter a valid invoice date.' };
   return {
     record: {
       ...(existing || {}),
       id: existing?.id || makeId('invoice'),
-      invoiceNumber: existing?.invoiceNumber || nextCode(repo, 'invoice', 'invoicePrefix', 'INV'),
+      invoiceNumber: existing?.invoiceNumber || nextCode(repo, 'invoice'),
       patientId: payload.patientId,
       visitId: str(payload.visitId),
       planId: str(payload.planId),
       dentistId: str(payload.dentistId),
       date: dateValid(payload.date) ? payload.date : (existing?.date || ctx.today()),
       items,
-      subtotal: totals.subtotal,
-      discount: totals.discount,
-      taxRate: totals.taxRate,
-      tax: totals.tax,
-      total: totals.total,
+      subtotal: centsToMoney(subtotalCents),
+      discount: centsToMoney(discountCents),
+      taxRate,
+      tax: centsToMoney(taxCents),
+      total: centsToMoney(totalCents),
       notes: str(payload.notes),
+      createdBy: existing?.createdBy || ctx.userName || '',
       createdAt: existing?.createdAt || ctx.now(),
       updatedAt: ctx.now()
     }
@@ -249,8 +313,10 @@ const MED_FORMS = ['Tablet', 'Capsule', 'Syrup', 'Suspension', 'Cream', 'Gel', '
 const MED_DURATION_UNITS = ['Days', 'Weeks', 'Months'];
 const FOOD_RELATIONS = ['Before food', 'After food', 'With food', 'At bedtime', 'Any time'];
 
+export const MAX_PRESCRIPTION_ROWS = 60;
+
 function normalizeMedicationRows(rawRows) {
-  const rows = (Array.isArray(rawRows) ? rawRows : []).slice(0, 40);
+  const rows = Array.isArray(rawRows) ? rawRows : [];
   return rows.map((item) => {
     const durationValue = Math.max(0, Math.round(toNumber(item.durationValue ?? '')) || 0);
     const durationUnit = MED_DURATION_UNITS.includes(str(item.durationUnit)) ? str(item.durationUnit) : '';
@@ -303,6 +369,10 @@ function prescriptionUpsert(repo, payload, ctx, existing) {
   const patient = repo.get('patients', payload.patientId || existing?.patientId || '');
   if (!patient) return { ok: false, error: 'Choose an existing patient.' };
   if (!str(payload.doctor ?? existing?.doctor)) return { ok: false, error: 'The prescriber name is required.' };
+  if (Array.isArray(payload.medications) && payload.medications.filter((row) => str(row?.medicine)).length > MAX_PRESCRIPTION_ROWS) {
+    return { ok: false, error: `A prescription can list at most ${MAX_PRESCRIPTION_ROWS} medicines.` };
+  }
+  if (payload.date !== undefined && payload.date !== '' && !dateValid(payload.date)) return { ok: false, error: 'Enter a valid prescription date.' };
   let medications = normalizeMedicationRows(payload.medications);
   if (!medications.length && str(payload.medicine)) {
     medications = normalizeMedicationRows([{ medicine: payload.medicine, strength: payload.strength, dosage: payload.dosage, frequency: payload.frequency, duration: payload.duration, route: payload.route, instructions: payload.instructions }]);
@@ -320,7 +390,7 @@ function prescriptionUpsert(repo, payload, ctx, existing) {
   const record = {
     ...(existing || {}),
     id: existing?.id || makeId('rx'),
-    prescriptionCode: existing?.prescriptionCode || nextCode(repo, 'prescription', 'appointmentPrefix', settings.appointmentPrefix || 'RX'),
+    prescriptionCode: existing?.prescriptionCode || nextCode(repo, 'prescription'),
     patientId: patient.id,
     visitId: payload.visitId !== undefined ? str(payload.visitId) : str(existing?.visitId || ''),
     date: dateValid(payload.date) ? payload.date : (existing?.date || ctx.today()),
@@ -347,11 +417,11 @@ export const OPS = {
     run(repo, payload, ctx) {
       const current = repo.getSettings();
       const allowed = [
-        'clinicName', 'chamberName', 'dentistName', 'professionalTitle', 'phone', 'secondaryPhone',
-        'email', 'address', 'city', 'district', 'country', 'logo', 'language', 'currency', 'timezone',
+        'clinicName', 'chamberName', 'dentistName', 'professionalTitle', 'qualifications', 'phone', 'secondaryPhone',
+        'email', 'address', 'city', 'district', 'country', 'logo', 'currency', 'timezone',
         'dentistRegistration', 'clinicWebsite',
         'dateFormat', 'timeFormat', 'patientPrefix', 'invoicePrefix', 'appointmentPrefix', 'serialPrefix',
-        'receiptPrefix', 'visitPrefix', 'staffPrefix', 'itemPrefix', 'defaultDuration', 'taxEnabled', 'taxRate', 'notificationRules',
+        'receiptPrefix', 'visitPrefix', 'prescriptionPrefix', 'staffPrefix', 'itemPrefix', 'defaultDuration', 'taxEnabled', 'taxRate', 'notificationRules',
         'autoLockMinutes', 'sessionTimeoutMinutes', 'notifications', 'paymentMethods', 'expenseCategories',
         'inventoryCategories', 'chairs', 'rooms', 'backupEnabled', 'backupIntervalHours', 'backupRetention',
         'backupDirectory', 'lowStockThreshold', 'attachmentMaxMb', 'accent', 'density', 'printPageSize', 'documentFooter',
@@ -361,44 +431,97 @@ export const OPS = {
       const changed = [];
       for (const key of allowed) {
         if (payload[key] === undefined) continue;
-        if (key === 'logo' && payload.logo && !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(String(payload.logo))) continue;
+        if (key === 'logo' && payload.logo && !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(String(payload.logo))) {
+          return { ok: false, error: 'The logo must be a PNG, JPEG or WebP image.' };
+        }
         next[key] = payload[key];
         changed.push(key);
       }
+      for (const legacy of ['language', 'applicationLock', 'pinHash', 'pinSalt']) delete next[legacy];
+      // Document code prefixes: valid, and distinct per document kind so an
+      // invoice number can never look like a receipt, visit or appointment code.
+      const prefixKeys = ['patientPrefix', 'appointmentPrefix', 'visitPrefix', 'prescriptionPrefix', 'invoicePrefix', 'receiptPrefix', 'staffPrefix', 'itemPrefix', 'serialPrefix'];
+      for (const key of prefixKeys) {
+        if (payload[key] === undefined) continue;
+        const clean = sanitizeCodePrefix(payload[key]);
+        if (!clean) return { ok: false, error: 'Code prefixes must be 1–8 letters, digits or hyphens (for example INV or RCP).' };
+        next[key] = clean;
+      }
+      const seen = new Map();
+      for (const key of prefixKeys) {
+        const value = sanitizeCodePrefix(next[key]) || '';
+        if (!value) continue;
+        if (seen.has(value)) return { ok: false, error: `Each document type needs its own prefix — "${value}" is used twice.` };
+        seen.set(value, key);
+      }
+      if (payload.timezone !== undefined && str(payload.timezone)) {
+        try { new Intl.DateTimeFormat('en-US', { timeZone: str(payload.timezone) }); next.timezone = str(payload.timezone); } catch { return { ok: false, error: 'Choose a valid time zone.' }; }
+      }
+      if (payload.currency !== undefined && !SUPPORTED_CURRENCIES.includes(str(payload.currency))) return { ok: false, error: 'Choose a supported currency.' };
       if (next.dateFormat !== undefined) next.dateFormat = /dmy|DD\/MM\/YYYY/i.test(String(next.dateFormat)) ? 'dmy' : 'short';
       if (next.documentFooter !== undefined) next.documentTemplate = { ...(next.documentTemplate && typeof next.documentTemplate === 'object' ? next.documentTemplate : {}), footer: str(next.documentFooter) };
       if (next.notificationRules !== undefined) next.notificationRules = normalizeNotificationRules(next.notificationRules);
       if (next.customPatientFields !== undefined) next.customPatientFields = normalizeCustomFields(next.customPatientFields);
-      if (Array.isArray(next.paymentMethods)) next.paymentMethods = [...new Set(next.paymentMethods.map(str).filter(Boolean))].slice(0, 30);
-      if (Array.isArray(next.expenseCategories)) next.expenseCategories = [...new Set(next.expenseCategories.map(str).filter(Boolean))].slice(0, 40);
-      if (Array.isArray(next.inventoryCategories)) next.inventoryCategories = [...new Set(next.inventoryCategories.map(str).filter(Boolean))].slice(0, 40);
-      if (Array.isArray(next.chairs)) next.chairs = [...new Set(next.chairs.map(str).filter(Boolean))].slice(0, 20);
-      if (Array.isArray(next.rooms)) next.rooms = [...new Set(next.rooms.map(str).filter(Boolean))].slice(0, 20);
-      if (next.taxRate !== undefined) next.taxRate = Math.min(100, Math.max(0, toNumber(next.taxRate)));
+      if (next.medicationTemplates !== undefined) next.medicationTemplates = normalizeMedicationTemplates(next.medicationTemplates);
+      const cleanList = (list, max, label) => {
+        const values = [...new Set((Array.isArray(list) ? list : []).map(str).filter(Boolean))];
+        if (values.length > max) throw new RangeError(`At most ${max} ${label} can be configured.`);
+        return values;
+      };
+      try {
+        if (payload.paymentMethods !== undefined) next.paymentMethods = cleanList(next.paymentMethods, 30, 'payment methods');
+        if (payload.expenseCategories !== undefined) next.expenseCategories = cleanList(next.expenseCategories, 60, 'expense categories');
+        if (payload.inventoryCategories !== undefined) next.inventoryCategories = cleanList(next.inventoryCategories, 60, 'inventory categories');
+        if (payload.chairs !== undefined) next.chairs = cleanList(next.chairs, 40, 'chairs');
+        if (payload.rooms !== undefined) next.rooms = cleanList(next.rooms, 40, 'rooms');
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+      if (payload.paymentMethods !== undefined && !next.paymentMethods.length) return { ok: false, error: 'Keep at least one payment method.' };
+      if (next.taxRate !== undefined) {
+        const rate = Number(next.taxRate);
+        if (!Number.isFinite(rate) || rate < 0 || rate > 100) return { ok: false, error: 'The tax rate must be between 0 and 100%.' };
+        next.taxRate = Math.round(rate * 100) / 100;
+      }
+      next.taxEnabled = next.taxEnabled === true || next.taxEnabled === 'true' || next.taxEnabled === 'on';
       if (next.defaultDuration !== undefined) next.defaultDuration = Math.min(480, Math.max(5, Math.round(toNumber(next.defaultDuration) || 30)));
       if (next.attachmentMaxMb !== undefined) next.attachmentMaxMb = Math.min(4096, Math.max(1, toNumber(next.attachmentMaxMb) || 256));
       if (next.sessionTimeoutMinutes !== undefined) next.sessionTimeoutMinutes = Math.min(480, Math.max(0, Math.round(toNumber(next.sessionTimeoutMinutes))));
       if (next.autoLockMinutes !== undefined) next.autoLockMinutes = Math.min(480, Math.max(0, Math.round(toNumber(next.autoLockMinutes))));
       if (next.backupIntervalHours !== undefined) next.backupIntervalHours = Math.min(720, Math.max(1, Math.round(toNumber(next.backupIntervalHours) || 24)));
       if (next.backupRetention !== undefined) next.backupRetention = Math.min(365, Math.max(1, Math.round(toNumber(next.backupRetention) || 10)));
-      if (next.backupDirectory !== undefined) next.backupDirectory = str(next.backupDirectory).slice(0, 400);
+      if (next.backupDirectory !== undefined) {
+        next.backupDirectory = str(next.backupDirectory).slice(0, 400);
+        if (next.backupDirectory && !/^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(next.backupDirectory)) return { ok: false, error: 'The backup folder must be an absolute path.' };
+      }
+      if (next.lowStockThreshold !== undefined) next.lowStockThreshold = Math.max(0, toNumber(next.lowStockThreshold));
       if (next.documentTemplate && typeof next.documentTemplate === 'object') next.documentTemplate = { footer: str(next.documentTemplate.footer).slice(0, 500), showLogo: next.documentTemplate.showLogo !== false, showClinicContact: next.documentTemplate.showClinicContact !== false };
+      if (next.printPageSize !== undefined && !['A4', 'A5', 'Letter', 'Legal', 'Receipt80'].includes(next.printPageSize)) next.printPageSize = 'A4';
       repo.setMeta('settings', next);
       return { ok: true, settings: next, audit: [{ action: 'Settings updated', entity: 'Settings', entityId: '', summary: changed.slice(0, 12).join(', ') || 'Settings reviewed' }] };
     }
   },
 
   'setup.complete': {
-    permission: null, // wrapper additionally requires first-run OR settings.edit
+    // First-run setup authority, or settings.edit for a signed-in administrator.
+    permission: (payload, ctx) => (ctx && ctx.firstRun === true ? null : 'settings.edit'),
     run(repo, payload) {
       const current = repo.getSettings();
       const identity = {};
-      for (const key of ['clinicName', 'dentistName', 'professionalTitle', 'phone', 'email', 'address', 'city', 'chamberName', 'language', 'currency', 'timezone', 'dentistRegistration', 'clinicWebsite']) {
+      for (const key of ['clinicName', 'dentistName', 'professionalTitle', 'qualifications', 'phone', 'email', 'address', 'city', 'district', 'chamberName', 'currency', 'timezone', 'dentistRegistration', 'clinicWebsite']) {
         if (payload[key] !== undefined) identity[key] = str(payload[key]);
       }
-      repo.setMeta('settings', { ...current, ...identity });
+      const clinicName = identity.clinicName !== undefined ? identity.clinicName : str(current.clinicName);
+      if (!clinicName) return { ok: false, error: 'Enter the clinic name. It appears on every printed document.' };
+      if (identity.currency !== undefined && identity.currency && !SUPPORTED_CURRENCIES.includes(identity.currency)) return { ok: false, error: 'Choose a supported currency.' };
+      if (identity.timezone) {
+        try { new Intl.DateTimeFormat('en-US', { timeZone: identity.timezone }); } catch { return { ok: false, error: 'Choose a valid time zone.' }; }
+      }
+      const next = { ...current, ...identity };
+      for (const legacy of ['language', 'applicationLock', 'pinHash', 'pinSalt']) delete next[legacy];
+      repo.setMeta('settings', next);
       repo.setMeta('setupComplete', true);
-      return { ok: true, audit: [{ action: 'Workspace setup completed', entity: 'Settings', entityId: '', summary: str(identity.clinicName) || 'Clinic identity saved' }] };
+      return { ok: true, settings: next, audit: [{ action: 'Workspace setup completed', entity: 'Settings', entityId: '', summary: clinicName }] };
     }
   },
 
@@ -419,7 +542,7 @@ export const OPS = {
       const customFields = Object.fromEntries((settings.customPatientFields || []).map((definition) => [definition.key, str(payload.customFields?.[definition.key] ?? payload[`custom_${definition.key}`] ?? '')]));
       const record = {
         id: makeId('patient'),
-        patientCode: nextCode(repo, 'patient', 'patientPrefix', 'PT'),
+        patientCode: nextCode(repo, 'patient'),
         fullName: str(payload.fullName),
         preferredName: str(payload.preferredName),
         phone: str(payload.phone),
@@ -461,19 +584,30 @@ export const OPS = {
       const found = requireRecord(repo, 'patients', payload.id, 'patient');
       if (found.error) return { ok: false, error: found.error };
       const existing = found.record;
-      const merged = { ...existing, ...payload, id: existing.id, patientCode: existing.patientCode, registrationDate: existing.registrationDate, createdAt: existing.createdAt };
+      // Only clinical/demographic fields are editable here. Identity (code,
+      // registration), archive state (patient.archive) and balances are owned
+      // by dedicated operations.
+      const editable = {};
+      for (const key of PATIENT_EDITABLE_FIELDS) {
+        if (payload[key] !== undefined) editable[key] = key === 'tags' ? payload[key] : str(payload[key]);
+      }
+      const merged = { ...existing, ...editable };
       const validation = validatePatientInput(merged);
       if (!validation.valid) return { ok: false, error: validation.errors[0], errors: validation.errors };
       const settings = repo.getSettings();
       const record = {
         ...merged,
+        id: existing.id,
+        patientCode: existing.patientCode,
+        registrationDate: existing.registrationDate,
+        createdAt: existing.createdAt,
         fullName: str(merged.fullName),
         phone: str(merged.phone),
         email: str(merged.email),
         tags: normaliseTags(merged.tags),
         customFields: Object.fromEntries((settings.customPatientFields || []).map((definition) => [definition.key, str(payload.customFields?.[definition.key] ?? payload[`custom_${definition.key}`] ?? existing.customFields?.[definition.key] ?? '')])),
-        status: str(merged.status) || 'Active',
-        archived: merged.archived === true || merged.status === 'Archived',
+        status: existing.status || (existing.archived ? 'Archived' : 'Active'),
+        archived: Boolean(existing.archived),
         balanceCents: existing.balanceCents ?? 0,
         updatedAt: ctx.now()
       };
@@ -490,7 +624,7 @@ export const OPS = {
       const archived = payload.archived !== false;
       const record = { ...found.record, archived, status: archived ? 'Archived' : 'Active', updatedAt: ctx.now() };
       repo.update('patients', record);
-      return { ok: true, record, audit: [{ action: archived ? 'Patient archived' : 'Patient reactivated', entity: 'Patient', entityId: record.id, summary: record.fullName }] };
+      return { ok: true, record, audit: [{ action: archived ? 'Patient archived' : 'Patient reactivated', entity: 'Patient', entityId: record.id, summary: `${record.patientCode} · ${record.fullName}` }] };
     }
   },
 
@@ -501,36 +635,45 @@ export const OPS = {
       const duplicate = repo.get('patients', payload.duplicateId);
       if (!primary || !duplicate) return { ok: false, error: 'Both the primary and the duplicate patient must exist.' };
       if (primary.id === duplicate.id) return { ok: false, error: 'Choose two different patients.' };
-      if (duplicate.archived === false && primary.archived) return { ok: false, error: 'The primary patient cannot be archived.' };
+      if (duplicate.mergedInto) return { ok: false, error: `${duplicate.fullName} was already merged into another record.` };
       if (!payload.confirm) {
         return { ok: false, code: 'merge-confirm', error: `Merging moves every record from ${duplicate.fullName} (${duplicate.patientCode}) into ${primary.fullName} (${primary.patientCode}) and archives the duplicate. Confirm to continue.` };
       }
+      // Dental chart: the primary's current tooth records win; the duplicate's
+      // conflicting current records become history (never deleted).
+      const supersededTeeth = repo.supersedeConflictingDental ? repo.supersedeConflictingDental(duplicate.id, primary.id) : 0;
       const moved = repo.reassignPatientRecords(duplicate.id, primary.id);
+      const latest = (a, b) => (String(a || '') > String(b || '') ? a : b) || '';
       const mergedRecord = {
         ...primary,
         tags: normaliseTags([...(primary.tags || []), ...(duplicate.tags || [])]),
         notes: [primary.notes, duplicate.notes && `Merged notes (from ${duplicate.patientCode}): ${duplicate.notes}`].filter(Boolean).join('\n'),
+        phone: primary.phone || duplicate.phone,
         email: primary.email || duplicate.email,
         dateOfBirth: primary.dateOfBirth || duplicate.dateOfBirth,
         gender: primary.gender || duplicate.gender,
         bloodGroup: primary.bloodGroup || duplicate.bloodGroup,
         address: primary.address || duplicate.address,
-        allergies: [primary.allergies, duplicate.allergies].filter(Boolean).join('; '),
-        medicalHistory: [primary.medicalHistory, duplicate.medicalHistory].filter(Boolean).join('; '),
-        importantAlerts: [primary.importantAlerts, duplicate.importantAlerts].filter(Boolean).join('; '),
+        allergies: [...new Set([primary.allergies, duplicate.allergies].filter(Boolean))].join('; '),
+        medicalHistory: [...new Set([primary.medicalHistory, duplicate.medicalHistory].filter(Boolean))].join('; '),
+        medications: [...new Set([primary.medications, duplicate.medications].filter(Boolean))].join('; '),
+        importantAlerts: [...new Set([primary.importantAlerts, duplicate.importantAlerts].filter(Boolean))].join('; '),
         emergencyName: primary.emergencyName || duplicate.emergencyName,
         emergencyPhone: primary.emergencyPhone || duplicate.emergencyPhone,
+        lastVisit: latest(primary.lastVisit, duplicate.lastVisit),
         archived: false,
         status: 'Active',
         updatedAt: ctx.now()
       };
       repo.update('patients', mergedRecord);
-      repo.update('patients', { ...duplicate, archived: true, status: 'Archived', mergedInto: primary.id, updatedAt: ctx.now() });
+      repo.update('patients', { ...duplicate, archived: true, status: 'Archived', mergedInto: primary.id, mergedAt: ctx.now(), updatedAt: ctx.now() });
       repo.updatePatientBalance(primary.id);
+      repo.updatePatientBalance(duplicate.id);
       return {
         ok: true,
         record: mergedRecord,
         moved,
+        supersededTeeth,
         audit: [{ action: 'Patients merged', entity: 'Patient', entityId: primary.id, summary: `${duplicate.patientCode} merged into ${primary.patientCode} · ${moved} record(s) reassigned` }]
       };
     }
@@ -547,7 +690,7 @@ export const OPS = {
       const settings = repo.getSettings();
       const candidate = {
         id: makeId('appointment'),
-        appointmentCode: nextCode(repo, 'appointment', 'appointmentPrefix', 'APT'),
+        appointmentCode: nextCode(repo, 'appointment'),
         patientId: payload.patientId,
         date: payload.date,
         time: str(payload.time),
@@ -580,7 +723,16 @@ export const OPS = {
       const found = requireRecord(repo, 'appointments', payload.id, 'appointment');
       if (found.error) return { ok: false, error: found.error };
       const existing = found.record;
+      if (payload.date !== undefined && payload.date !== '' && !dateValid(payload.date)) return { ok: false, error: 'Enter a valid appointment date.' };
+      if (payload.time !== undefined && payload.time !== '' && !/^\d{2}:\d{2}$/.test(str(payload.time))) return { ok: false, error: 'Enter a valid start time (HH:MM).' };
       const settings = repo.getSettings();
+      const status = APPOINTMENT_STATUSES.includes(payload.status) ? payload.status : existing.status;
+      if (status !== existing.status) {
+        if (!appointmentTransitionAllowed(existing.status, status)) return { ok: false, error: `An appointment cannot move from ${existing.status} to ${status}.`, code: 'invalid-transition' };
+        if (status === 'Cancelled' && !hasPermission({ role: ctx.role, permissions: ctx.permissions }, 'appointments.cancel')) {
+          return { ok: false, error: 'Your account is not allowed to cancel appointments.', code: 'permission-denied', permission: 'appointments.cancel' };
+        }
+      }
       const record = {
         ...existing,
         patientId: payload.patientId || existing.patientId,
@@ -593,46 +745,44 @@ export const OPS = {
         reason: payload.reason !== undefined ? str(payload.reason) : existing.reason,
         treatment: payload.treatment !== undefined ? str(payload.treatment) : existing.treatment,
         notes: payload.notes !== undefined ? str(payload.notes) : existing.notes,
-        status: APPOINTMENT_STATUSES.includes(payload.status) ? payload.status : existing.status,
+        status,
         updatedAt: ctx.now()
       };
+      if (!str(record.reason)) return { ok: false, error: 'A reason for the appointment is required.' };
+      if (status === 'Cancelled' && existing.status !== 'Cancelled') record.cancelledAt = ctx.now();
       if (!repo.get('patients', record.patientId)) return { ok: false, error: 'Choose an existing patient.' };
-      const conflict = repo.appointmentsOnDate(record.date)
+      const conflict = !['Cancelled', 'No Show', 'Completed'].includes(record.status) && repo.appointmentsOnDate(record.date)
         .find((appointment) => appointmentsOverlap(record, appointment, settings.defaultDuration));
       if (conflict && !payload.confirmConflict) {
-        return { ok: false, code: 'conflict-confirm', conflict, error: `This overlaps another appointment (${conflict.time}). Confirm to reschedule anyway.` };
+        return { ok: false, code: 'conflict-confirm', conflict, error: `This overlaps another appointment (${conflict.time}, ${conflict.chair || 'chair'}${conflict.room ? `, ${conflict.room}` : ''}). Confirm to reschedule anyway.` };
       }
       repo.update('appointments', record);
       const rescheduled = record.date !== existing.date || record.time !== existing.time;
-      return { ok: true, record, audit: [{ action: rescheduled ? 'Appointment rescheduled' : 'Appointment edited', entity: 'Appointment', entityId: record.id, summary: `${record.date} ${record.time} · ${record.status}` }] };
+      return { ok: true, record, audit: [{ action: rescheduled ? 'Appointment rescheduled' : 'Appointment edited', entity: 'Appointment', entityId: record.id, summary: `${record.appointmentCode || ''} · ${record.date} ${record.time} · ${record.status}` }] };
     }
   },
 
   'appointment.setStatus': {
-    permission: ['appointments.queue', 'appointments.edit'],
+    permission: (payload) => (payload.status === 'Cancelled' ? 'appointments.cancel' : ['appointments.queue', 'appointments.edit']),
     run(repo, payload, ctx) {
       const found = requireRecord(repo, 'appointments', payload.id, 'appointment');
       if (found.error) return { ok: false, error: found.error };
       const existing = found.record;
       const status = str(payload.status);
       if (!APPOINTMENT_STATUSES.includes(status)) return { ok: false, error: 'Unknown appointment status.' };
+      if (!appointmentTransitionAllowed(existing.status, status)) return { ok: false, error: `An appointment cannot move from ${existing.status || 'Scheduled'} to ${status}.`, code: 'invalid-transition' };
       const record = { ...existing, status, updatedAt: ctx.now() };
-      if (status === 'In Treatment' && !record.startedAt) record.startedAt = ctx.now();
-      if (status === 'Completed' && !record.completedAt) record.completedAt = ctx.now();
-      if (['Checked In', 'Waiting'].includes(status) && !record.checkedInAt) {
-        record.checkedInAt = ctx.now();
-        if (!record.serial) {
-          const settings = repo.getSettings();
-          const serialNumber = repo.appointmentsOnDate(record.date).filter((appointment) => appointment.serial).length + 1;
-          record.serial = `${settings.serialPrefix || 'Q'}-${String(serialNumber).padStart(3, '0')}`;
-        }
+      if (['Checked In', 'Waiting', 'In Treatment'].includes(status) && !record.checkedInAt) record.checkedInAt = ctx.now();
+      if (['Checked In', 'Waiting', 'In Treatment'].includes(status) && !record.serial) {
+        record.serial = repo.nextQueueSerial ? repo.nextQueueSerial(record.date, repo.getSettings().serialPrefix || 'Q') : `${repo.getSettings().serialPrefix || 'Q'}-001`;
       }
       if (status === 'In Treatment') record.startedAt = record.startedAt || ctx.now();
       if (status === 'Completed') { record.completedAt = ctx.now(); record.startedAt = record.startedAt || ctx.now(); }
-      if (status === 'Cancelled') record.cancelledAt = ctx.now();
+      if (status === 'Cancelled') { record.cancelledAt = ctx.now(); record.cancelReason = str(payload.reason) || record.cancelReason || ''; }
       if (status === 'No Show') record.noShowAt = ctx.now();
+      if (status === 'Scheduled' && ['Cancelled', 'No Show'].includes(existing.status)) { record.cancelledAt = ''; record.noShowAt = ''; record.reinstatedAt = ctx.now(); }
       repo.update('appointments', record);
-      return { ok: true, record, audit: [{ action: 'Appointment status changed', entity: 'Appointment', entityId: record.id, summary: `${existing.status || 'Scheduled'} → ${status}${record.serial ? ` · serial ${record.serial}` : ''}` }] };
+      return { ok: true, record, audit: [{ action: 'Appointment status changed', entity: 'Appointment', entityId: record.id, summary: `${record.appointmentCode || ''} · ${existing.status || 'Scheduled'} → ${status}${record.serial ? ` · serial ${record.serial}` : ''}` }] };
     }
   },
 
@@ -641,9 +791,11 @@ export const OPS = {
     run(repo, payload, ctx) {
       const found = requireRecord(repo, 'appointments', payload.id, 'appointment');
       if (found.error) return { ok: false, error: found.error };
+      if (found.record.status === 'Cancelled') return { ok: false, error: 'This appointment is already cancelled.' };
+      if (!appointmentTransitionAllowed(found.record.status, 'Cancelled')) return { ok: false, error: `A ${found.record.status.toLowerCase()} appointment cannot be cancelled.`, code: 'invalid-transition' };
       const record = { ...found.record, status: 'Cancelled', cancelReason: str(payload.reason), cancelledAt: ctx.now(), updatedAt: ctx.now() };
       repo.update('appointments', record);
-      return { ok: true, record, audit: [{ action: 'Appointment cancelled', entity: 'Appointment', entityId: record.id, summary: record.cancelReason || 'Cancelled' }] };
+      return { ok: true, record, audit: [{ action: 'Appointment cancelled', entity: 'Appointment', entityId: record.id, summary: `${record.appointmentCode || ''} · ${record.cancelReason || 'Cancelled'}` }] };
     }
   },
 
@@ -657,7 +809,7 @@ export const OPS = {
       const date = dateValid(payload.date) ? payload.date : ctx.today();
       const record = {
         id: makeId('visit'),
-        visitCode: nextCode(repo, 'visit', 'visitPrefix', settings.appointmentPrefix || 'V'),
+        visitCode: nextCode(repo, 'visit'),
         patientId: payload.patientId,
         appointmentId: str(payload.appointmentId),
         date,
@@ -678,6 +830,10 @@ export const OPS = {
         createdAt: ctx.now(),
         updatedAt: ctx.now()
       };
+      if (record.appointmentId) {
+        const appointment = repo.get('appointments', record.appointmentId);
+        if (!appointment || appointment.patientId !== record.patientId) return { ok: false, error: 'The linked appointment does not belong to this patient.' };
+      }
       repo.insert('visits', record);
       const patient = repo.get('patients', record.patientId);
       if (patient && (!patient.lastVisit || record.date > patient.lastVisit)) {
@@ -705,9 +861,15 @@ export const OPS = {
     run(repo, payload, ctx) {
       const found = requireRecord(repo, 'visits', payload.id, 'visit');
       if (found.error) return { ok: false, error: found.error };
-      const record = { ...found.record, ...payload, id: found.record.id, visitCode: found.record.visitCode, patientId: found.record.patientId, createdAt: found.record.createdAt, updatedAt: ctx.now() };
-      if (record.followUpDate && !dateValid(record.followUpDate)) record.followUpDate = '';
+      const existing = found.record;
+      if (payload.date !== undefined && payload.date !== '' && !dateValid(payload.date)) return { ok: false, error: 'Enter a valid visit date.' };
+      if (payload.followUpDate !== undefined && payload.followUpDate !== '' && !dateValid(payload.followUpDate)) return { ok: false, error: 'Enter a valid follow-up date.' };
+      const next = { ...existing };
+      for (const key of VISIT_EDITABLE_FIELDS) if (payload[key] !== undefined) next[key] = str(payload[key]);
+      if (!str(next.reason) && !str(next.chiefComplaint)) return { ok: false, error: 'A reason or chief complaint is required.' };
+      const record = { ...next, id: existing.id, visitCode: existing.visitCode, patientId: existing.patientId, createdAt: existing.createdAt, updatedAt: ctx.now() };
       repo.update('visits', record);
+      if (record.date !== existing.date && repo.refreshPatientVisitDates) repo.refreshPatientVisitDates(record.patientId);
       return { ok: true, record, audit: [{ action: 'Visit edited', entity: 'Visit', entityId: record.id, summary: `${record.visitCode} · ${record.date}` }] };
     }
   },
@@ -718,8 +880,9 @@ export const OPS = {
       const patient = repo.get('patients', payload.patientId);
       if (!patient) return { ok: false, error: 'Choose a patient first.' };
       const tooth = Number(payload.tooth);
-      if (!Number.isInteger(tooth) || tooth <= 0) return { ok: false, error: 'Choose a valid tooth.' };
-      const dentition = payload.dentition === 'primary' ? 'primary' : 'adult';
+      const dentition = dentitionOf(tooth);
+      if (!dentition || !isValidFdi(tooth, dentition)) return { ok: false, error: 'Choose a valid FDI tooth (11–48 permanent, 51–85 primary).' };
+      if (payload.dentition && payload.dentition !== dentition) return { ok: false, error: `Tooth ${tooth} belongs to the ${dentition} dentition.` };
       const status = str(payload.status);
       const note = str(payload.note);
       if (!status && !note && !str(payload.procedure)) return { ok: false, error: 'Record a status, procedure or note for this tooth.' };
@@ -729,6 +892,7 @@ export const OPS = {
         id: makeId('dental'),
         patientId: patient.id,
         tooth,
+        toothSystem: 'FDI',
         dentition,
         status,
         note,
@@ -826,7 +990,7 @@ export const OPS = {
       const settings = repo.getSettings();
       const visit = {
         id: makeId('visit'),
-        visitCode: nextCode(repo, 'visit', 'visitPrefix', settings.appointmentPrefix || 'V'),
+        visitCode: nextCode(repo, 'visit'),
         patientId: plan.patientId,
         date: dateValid(payload.date) ? payload.date : ctx.today(),
         reason: `Treatment plan: ${plan.title}`,
@@ -889,11 +1053,11 @@ export const OPS = {
         ...built.record,
         paid: 0,
         due: built.record.total,
-        status: payload.status === 'Draft' ? 'Draft' : 'Issued'
+        status: payload.status === 'Draft' ? 'Draft' : (moneyToCents(built.record.total) === 0 ? 'Paid' : 'Issued')
       };
       repo.insert('invoices', record);
       repo.updatePatientBalance(patient.id);
-      return { ok: true, record, audit: [{ action: 'Invoice created', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · ${patient.fullName} · ${record.status}` }] };
+      return { ok: true, record, audit: [{ action: 'Invoice created', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · ${patient.patientCode || ''} ${patient.fullName} · ${record.total} · ${record.status}` }] };
     }
   },
 
@@ -903,38 +1067,59 @@ export const OPS = {
       const found = requireRecord(repo, 'invoices', payload.id, 'invoice');
       if (found.error) return { ok: false, error: found.error };
       const existing = found.record;
-      const state = computeInvoiceState(repo, existing);
-      if (state.paidCents > 0 || state.adjustedCents > 0) {
-        // Money exists: only notes/status transitions are safe; re-pricing is rejected
-        // outright — never silently ignored — so financial history stays trustworthy.
-        const repricingAttempted = ['items', 'itemName', 'unitPrice', 'quantity', 'discount', 'taxRate', 'subtotal', 'total']
-          .some((key) => payload[key] !== undefined);
-        if (repricingAttempted) {
-          return { ok: false, error: 'Invoice pricing is locked after payments or adjustments exist. Record an adjustment or refund instead.', code: 'invoice-locked' };
-        }
-        const status = INVOICE_STATUSES.includes(payload.status) ? payload.status : existing.status;
-        if (['Paid', 'Partially Paid'].includes(status) && status !== invoiceStatusFrom(state, existing.status) && status !== 'Cancelled') {
-          return { ok: false, error: 'Payment status follows recorded payments and cannot be set manually.' };
-        }
-        const record = { ...existing, notes: payload.notes !== undefined ? str(payload.notes) : existing.notes, status, updatedAt: ctx.now() };
-        repo.update('invoices', record);
-        repo.updatePatientBalance(record.patientId);
-        return { ok: true, record, audit: [{ action: 'Invoice edited', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · ${record.status}` }] };
+      if (existing.status === 'Cancelled') return { ok: false, error: 'Cancelled invoices are read-only.', code: 'invoice-cancelled' };
+      // Status is derived from money. The only manual transition is issuing a draft;
+      // cancellation goes through invoice.cancel (billing.void + refund-first guard).
+      const requested = payload.status === undefined || payload.status === '' ? existing.status : String(payload.status);
+      const issuing = existing.status === 'Draft' && requested === 'Issued';
+      if (requested !== existing.status && !issuing) {
+        if (requested === 'Cancelled') return { ok: false, error: 'Use "Cancel invoice" to cancel an invoice.', code: 'use-cancel' };
+        if (requested === 'Draft') return { ok: false, error: 'An issued invoice cannot return to draft.', code: 'status-locked' };
+        return { ok: false, error: 'Invoice status follows recorded payments and adjustments and cannot be set manually.', code: 'status-locked' };
       }
-      const built = buildInvoice(repo, { ...existing, ...payload }, ctx, existing);
+      const state = computeInvoiceState(repo, existing);
+      const moneyExists = state.grossCents > 0 || state.adjustedCents > 0;
+      if (moneyExists) {
+        const repricingAttempted = ['items', 'itemName', 'unitPrice', 'quantity', 'discount', 'taxRate', 'subtotal', 'total', 'patientId']
+          .some((key) => payload[key] !== undefined && JSON.stringify(payload[key]) !== JSON.stringify(existing[key]));
+        if (repricingAttempted) {
+          return { ok: false, error: 'Invoice pricing and patient are locked after payments or adjustments exist. Record an adjustment or refund instead.', code: 'invoice-locked' };
+        }
+        const record = { ...existing, notes: payload.notes !== undefined ? str(payload.notes) : existing.notes, updatedAt: ctx.now() };
+        repo.update('invoices', record);
+        const refreshed = refreshInvoicePaymentState(repo, record, ctx.now());
+        return { ok: true, record: refreshed, audit: [{ action: 'Invoice edited', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · notes updated` }] };
+      }
+      const targetPatientId = payload.patientId !== undefined && payload.patientId !== '' ? payload.patientId : existing.patientId;
+      const patient = repo.get('patients', targetPatientId);
+      if (!patient) return { ok: false, error: 'Choose an existing patient.' };
+      const built = buildInvoice(repo, {
+        items: payload.items !== undefined ? payload.items : existing.items,
+        itemName: payload.itemName, unitPrice: payload.unitPrice, quantity: payload.quantity,
+        discount: payload.discount !== undefined ? payload.discount : existing.discount,
+        taxRate: payload.taxRate !== undefined ? payload.taxRate : existing.taxRate,
+        date: payload.date !== undefined ? payload.date : existing.date,
+        notes: payload.notes !== undefined ? payload.notes : existing.notes,
+        visitId: payload.visitId !== undefined ? payload.visitId : existing.visitId,
+        planId: payload.planId !== undefined ? payload.planId : existing.planId,
+        dentistId: payload.dentistId !== undefined ? payload.dentistId : existing.dentistId,
+        patientId: patient.id
+      }, ctx, existing);
       if (built.error) return { ok: false, error: built.error };
+      const nextStatus = issuing ? 'Issued' : existing.status;
       const record = {
         ...built.record,
         id: existing.id,
         invoiceNumber: existing.invoiceNumber,
         paid: 0,
         due: built.record.total,
-        status: INVOICE_STATUSES.includes(payload.status) ? payload.status : (payload.status === 'Draft' ? 'Draft' : 'Issued'),
+        status: nextStatus === 'Draft' ? 'Draft' : (moneyToCents(built.record.total) === 0 ? 'Paid' : 'Issued'),
         createdAt: existing.createdAt
       };
       repo.update('invoices', record);
       repo.updatePatientBalance(record.patientId);
-      return { ok: true, record, audit: [{ action: 'Invoice edited', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · ${record.status}` }] };
+      if (existing.patientId && existing.patientId !== record.patientId) repo.updatePatientBalance(existing.patientId);
+      return { ok: true, record, audit: [{ action: issuing ? 'Invoice issued' : 'Invoice edited', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · ${record.total} · ${record.status}` }] };
     }
   },
 
@@ -945,12 +1130,14 @@ export const OPS = {
       if (found.error) return { ok: false, error: found.error };
       const invoice = found.record;
       if (invoice.status === 'Cancelled') return { ok: false, error: 'This invoice is already cancelled.' };
+      if (!str(payload.reason)) return { ok: false, error: 'A cancellation reason is required.' };
       const state = computeInvoiceState(repo, invoice);
       if (state.paidCents > 0) return { ok: false, error: 'Refund the recorded payments before cancelling this invoice.' };
-      const record = { ...invoice, status: 'Cancelled', cancelReason: str(payload.reason), paid: 0, due: 0, updatedAt: ctx.now() };
+      if (state.adjustedCents > 0) return { ok: false, error: 'This invoice has balance adjustments and cannot be cancelled.' };
+      const record = { ...invoice, status: 'Cancelled', cancelReason: str(payload.reason), cancelledAt: ctx.now(), cancelledBy: ctx.userName || '', paid: 0, due: 0, updatedAt: ctx.now() };
       repo.update('invoices', record);
       repo.updatePatientBalance(record.patientId);
-      return { ok: true, record, audit: [{ action: 'Invoice cancelled', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber}${record.cancelReason ? ` · ${record.cancelReason}` : ''}` }] };
+      return { ok: true, record, audit: [{ action: 'Invoice cancelled', entity: 'Invoice', entityId: record.id, summary: `${record.invoiceNumber} · ${record.cancelReason}` }] };
     }
   },
 
@@ -960,27 +1147,28 @@ export const OPS = {
       const patient = repo.get('patients', payload.patientId);
       if (!patient) return { ok: false, error: 'Choose an existing patient.' };
       if (!dateValid(payload.date)) return { ok: false, error: 'A valid payment date is required.' };
-      const amount = toNumber(payload.amount);
       const invoice = payload.invoiceId ? repo.get('invoices', payload.invoiceId) : null;
       if (payload.invoiceId && !invoice) return { ok: false, error: 'That invoice no longer exists.' };
-      let due = amount;
-      if (invoice) {
-        const state = computeInvoiceState(repo, invoice);
-        due = centsToMoney(state.dueCents);
-      }
-      const validation = validatePayment({ amount, due, invoiceStatus: invoice?.status || 'Unpaid' });
+      if (invoice && invoice.patientId !== patient.id) return { ok: false, error: 'That invoice belongs to a different patient.' };
+      if (invoice?.status === 'Draft') return { ok: false, error: 'Issue this draft invoice before recording a payment against it.' };
+      const amountText = str(payload.amount);
+      if (!validateMoney(amountText, { allowZero: false })) return { ok: false, error: 'Enter a payment amount greater than zero with at most two decimals.' };
+      let state = null;
+      if (invoice) state = computeInvoiceState(repo, invoice);
+      const validation = validatePayment({ amount: amountText, due: invoice ? centsToMoney(state.dueCents) : amountText, invoiceStatus: invoice?.status || 'Unpaid' });
       if (!validation.valid) return { ok: false, error: validation.errors[0], errors: validation.errors };
       const settings = repo.getSettings();
       const method = str(payload.method) || 'Cash';
       if (!(settings.paymentMethods || []).includes(method) && !['Cash', 'Bank', 'Card'].includes(method)) {
         return { ok: false, error: `"${method}" is not a configured payment method.` };
       }
+      const amountCents = moneyToCents(amountText);
       const record = {
         id: makeId('payment'),
-        receiptNumber: nextCode(repo, 'receipt', 'receiptPrefix', settings.invoicePrefix || 'INV'),
+        receiptNumber: nextCode(repo, 'receipt'),
         invoiceId: invoice?.id || '',
         patientId: patient.id,
-        amount: validation.amount,
+        amount: centsToMoney(amountCents),
         refundedAmount: 0,
         status: 'Recorded',
         date: payload.date,
@@ -989,13 +1177,17 @@ export const OPS = {
         transactionId: str(payload.transactionId) || str(payload.reference),
         provider: str(payload.provider),
         notes: str(payload.notes),
+        receivedBy: ctx.userName || '',
+        receivedById: ctx.userId || '',
+        invoiceDueBeforeCents: invoice ? state.dueCents : null,
+        invoiceDueAfterCents: invoice ? Math.max(0, state.dueCents - amountCents) : null,
         createdAt: ctx.now(),
         updatedAt: ctx.now()
       };
       repo.insert('payments', record);
       if (invoice) refreshInvoicePaymentState(repo, repo.get('invoices', invoice.id), ctx.now());
       repo.updatePatientBalance(patient.id);
-      return { ok: true, record, audit: [{ action: 'Payment recorded', entity: 'Payment', entityId: record.id, summary: `${record.receiptNumber} · ${record.method} · ${record.amount}` }] };
+      return { ok: true, record, audit: [{ action: 'Payment recorded', entity: 'Payment', entityId: record.id, summary: `${record.receiptNumber} · ${patient.patientCode || ''} · ${record.method} · ${record.amount}${invoice ? ` · ${invoice.invoiceNumber}` : ''}` }] };
     }
   },
 
@@ -1005,11 +1197,13 @@ export const OPS = {
       const found = requireRecord(repo, 'payments', payload.id ?? payload.paymentId, 'payment');
       if (found.error) return { ok: false, error: found.error };
       const payment = found.record;
+      if (['Voided', 'Cancelled'].includes(payment.status)) return { ok: false, error: 'This payment is void and cannot be refunded.' };
       if (!validateMoney(payload.amount, { allowZero: false })) return { ok: false, error: 'Refund must be a positive amount with at most two decimals.' };
       const amountCents = moneyToCents(payload.amount);
       const remainingCents = Math.max(0, moneyToCents(payment.amount) - moneyToCents(payment.refundedAmount));
-      if (amountCents > remainingCents) return { ok: false, error: 'Refund cannot exceed the remaining payment balance.' };
+      if (amountCents > remainingCents) return { ok: false, error: `Refund cannot exceed the refundable balance of this payment (${centsToMoney(remainingCents).toFixed(2)}).` };
       if (!str(payload.reason)) return { ok: false, error: 'A refund reason is required.' };
+      if (payload.date !== undefined && payload.date !== '' && !dateValid(payload.date)) return { ok: false, error: 'Enter a valid refund date.' };
       const adjustment = {
         id: makeId('adjustment'),
         type: 'Refund',
@@ -1019,6 +1213,8 @@ export const OPS = {
         amount: centsToMoney(amountCents),
         date: dateValid(payload.date) ? payload.date : ctx.today(),
         reason: str(payload.reason),
+        method: str(payload.method) || payment.method || '',
+        recordedBy: ctx.userName || '',
         createdAt: ctx.now()
       };
       repo.insert('paymentAdjustments', adjustment);
@@ -1032,12 +1228,7 @@ export const OPS = {
       repo.update('payments', updatedPayment);
       if (updatedPayment.invoiceId) {
         const invoice = repo.get('invoices', updatedPayment.invoiceId);
-        if (invoice) {
-          const refreshed = refreshInvoicePaymentState(repo, invoice, ctx.now());
-          if (refundedCents >= moneyToCents(payment.amount) && computeInvoiceState(repo, refreshed).paidCents === 0) {
-            repo.update('invoices', { ...refreshed, status: 'Refunded', updatedAt: ctx.now() });
-          }
-        }
+        if (invoice) refreshInvoicePaymentState(repo, invoice, ctx.now());
       }
       if (adjustment.patientId) repo.updatePatientBalance(adjustment.patientId);
       return { ok: true, record: adjustment, payment: updatedPayment, audit: [{ action: 'Payment refunded', entity: 'Payment adjustment', entityId: adjustment.id, summary: `${updatedPayment.receiptNumber} · ${adjustment.amount} · ${adjustment.reason}` }] };
@@ -1050,11 +1241,14 @@ export const OPS = {
       const invoice = repo.get('invoices', payload.invoiceId);
       if (!invoice) return { ok: false, error: 'Choose the invoice this adjustment applies to.' };
       if (invoice.status === 'Cancelled') return { ok: false, error: 'Cancelled invoices cannot be adjusted.' };
+      if (invoice.status === 'Draft') return { ok: false, error: 'Issue this draft invoice before adjusting it.' };
       if (!validateMoney(payload.amount, { allowZero: false })) return { ok: false, error: 'Adjustment must be a positive amount with at most two decimals.' };
       if (!str(payload.reason)) return { ok: false, error: 'An adjustment reason is required.' };
+      if (payload.date !== undefined && payload.date !== '' && !dateValid(payload.date)) return { ok: false, error: 'Enter a valid adjustment date.' };
       const state = computeInvoiceState(repo, invoice);
-      const amountCents = Math.min(moneyToCents(payload.amount), state.dueCents);
-      if (amountCents <= 0) return { ok: false, error: 'This invoice has no outstanding balance to adjust.' };
+      const amountCents = moneyToCents(payload.amount);
+      if (state.dueCents <= 0) return { ok: false, error: 'This invoice has no outstanding balance to adjust.' };
+      if (amountCents > state.dueCents) return { ok: false, error: `The adjustment cannot exceed the outstanding balance (${centsToMoney(state.dueCents).toFixed(2)}).` };
       const adjustment = {
         id: makeId('adjustment'),
         type: 'Adjustment',
@@ -1064,6 +1258,7 @@ export const OPS = {
         amount: centsToMoney(amountCents),
         date: dateValid(payload.date) ? payload.date : ctx.today(),
         reason: str(payload.reason),
+        recordedBy: ctx.userName || '',
         createdAt: ctx.now()
       };
       repo.insert('paymentAdjustments', adjustment);
@@ -1108,7 +1303,7 @@ export const OPS = {
       const openingStock = Math.max(0, toNumber(payload.currentStock ?? payload.openingStock ?? 0));
       const record = {
         id: makeId('stock'),
-        itemCode: str(payload.itemCode) || nextCode(repo, 'item', 'itemPrefix', 'IT'),
+        itemCode: str(payload.itemCode) || nextCode(repo, 'item'),
         name: str(payload.name),
         category: str(payload.category) || 'Other',
         brand: str(payload.brand),
@@ -1274,7 +1469,7 @@ export const OPS = {
       if (!str(payload.name)) return { ok: false, error: 'Staff name is required.' };
       const record = {
         id: makeId('staff'),
-        staffCode: nextCode(repo, 'staff', 'staffPrefix', 'STF'),
+        staffCode: nextCode(repo, 'staff'),
         name: str(payload.name),
         role: str(payload.role) || 'Other',
         phone: str(payload.phone),
@@ -1513,16 +1708,16 @@ export const OPS = {
   'user.toggleActive': {
     permission: 'users.manage',
     run(repo, payload, ctx) {
-      const found = requireRecord(repo, 'users', payload.id, 'user account');
-      if (found.error) return { ok: false, error: found.error };
-      const user = found.record;
+      const user = repo.userGet ? repo.userGet(payload.id) : repo.get('users', payload.id);
+      if (!user) return { ok: false, error: 'That user account no longer exists.' };
       if (user.id === ctx.userId) return { ok: false, error: 'You cannot deactivate the signed-in account.' };
       const nextActive = user.active === false;
       if (!nextActive && user.role === 'Administrator') {
-        const otherAdmins = repo.usersList().filter((candidate) => candidate.id !== user.id && candidate.active !== false && candidate.role === 'Administrator').length;
-        if (otherAdmins < 1) return { ok: false, error: 'Keep at least one active Administrator account.' };
+        const otherAdmins = repo.usersList().filter((candidate) => candidate.id !== user.id && candidate.active !== false && candidate.role === 'Administrator' && candidate.hasPin).length;
+        if (otherAdmins < 1) return { ok: false, error: 'Keep at least one active Administrator account with a PIN.' };
       }
-      const record = { ...user, active: nextActive, updatedAt: ctx.now() };
+      const { pinHash, pinSalt, kdf, hasPin, ...safeUser } = user;
+      const record = { ...safeUser, active: nextActive, updatedAt: ctx.now() };
       repo.update('users', record);
       return { ok: true, record: sanitizeUser(record), audit: [{ action: nextActive ? 'User account activated' : 'User account deactivated', entity: 'User', entityId: user.id, summary: `${user.name} · ${user.role}` }] };
     }
@@ -1713,7 +1908,8 @@ export const OPS = {
       const patient = repo.get('patients', payload.patientId);
       if (!patient) return { ok: false, error: 'Choose a patient first.' };
       const tooth = Number(payload.tooth);
-      const dentition = payload.dentition === 'primary' ? 'primary' : 'adult';
+      const dentition = dentitionOf(tooth);
+      if (!dentition) return { ok: false, error: 'Choose a valid FDI tooth.' };
       const removed = repo.supersedeDental(patient.id, tooth, dentition);
       if (!removed) return { ok: false, error: 'There is no current record for this tooth.' };
       return { ok: true, audit: [{ action: 'Dental chart record cleared', entity: 'Dental record', entityId: patient.id, summary: `Tooth ${tooth} (${dentition}) · history preserved` }] }
@@ -1757,41 +1953,50 @@ const RESET_ORDER = [
 
 export function sanitizeUser(record) {
   if (!record) return null;
-  const { pinHash, pinSalt, ...safe } = record;
+  const { pinHash, pinSalt, kdf, ...safe } = record;
   return { ...safe, hasPin: Boolean(pinHash || record.hasPin) };
 }
+
+export const SUPPORTED_CURRENCIES = ['BDT', 'USD', 'EUR', 'GBP', 'INR', 'AUD', 'CAD', 'SGD', 'AED', 'SAR', 'MYR', 'NPR', 'LKR', 'PKR'];
 
 function userUpsert(repo, payload, ctx, editing) {
   const name = str(payload.name);
   if (!name) return { ok: false, error: 'Enter the account holder name.' };
-  const role = str(payload.role) || 'Receptionist';
   let existing = null;
   if (editing) {
-    const found = requireRecord(repo, 'users', payload.id, 'user account');
-    if (found.error) return { ok: false, error: found.error };
-    existing = found.record;
+    existing = repo.userGet ? repo.userGet(payload.id) : repo.get('users', payload.id);
+    if (!existing) return { ok: false, error: 'That user account no longer exists.' };
   }
-  const permissions = Array.isArray(payload.permissions) ? payload.permissions : [];
+  const role = str(payload.role) || existing?.role || 'Receptionist';
+  if (!ROLE_NAMES.includes(role)) return { ok: false, error: `"${role}" is not a recognised role.` };
+  const permissions = Array.isArray(payload.permissions)
+    ? [...new Set(payload.permissions.map(str).filter((permission) => PERMISSION_SET.has(permission)))]
+    : (existing?.permissions || []);
+  if (role === 'Custom Role' && !permissions.length) return { ok: false, error: 'Choose at least one permission for a custom role.' };
+  // Sanitized base only: authentication secrets are never part of a user record
+  // passed through a generic write (the repository also refuses to touch them).
+  const base = existing
+    ? { id: existing.id, createdAt: existing.createdAt, lastLogin: existing.lastLogin || null }
+    : { id: makeId('user'), createdAt: ctx.now(), lastLogin: null };
   const record = {
-    ...(existing || { id: makeId('user'), createdAt: ctx.now(), failedAttempts: 0, lockedUntil: 0, lastLogin: null }),
+    ...base,
     name,
     role,
-    staffId: str(payload.staffId),
+    staffId: str(payload.staffId ?? existing?.staffId),
     active: payload.active === undefined ? (existing ? existing.active !== false : true) : payload.active !== false && payload.active !== 'false',
-    permissions,
+    permissions: role === 'Custom Role' ? permissions : [],
     updatedAt: ctx.now()
   };
   if (record.active === false && record.id === ctx.userId) return { ok: false, error: 'You cannot deactivate the signed-in account.' };
-  // Project the admin population after this upsert. On create the new record
-  // is not in the table yet (its id was just generated); on edit it replaces
-  // the stored row. Either way the workspace must end with >=1 active admin.
+  // The workspace must always keep at least one active Administrator who can sign in.
   const allUsers = repo.usersList();
   const otherAdmins = allUsers
     .filter((candidate) => candidate.id !== record.id)
-    .filter((candidate) => candidate.active !== false && candidate.role === 'Administrator').length;
-  const projectedAdmins = otherAdmins + (record.active !== false && record.role === 'Administrator' ? 1 : 0);
-  if (projectedAdmins < 1) return { ok: false, error: 'Keep at least one active Administrator account.' };
+    .filter((candidate) => candidate.active !== false && candidate.role === 'Administrator' && candidate.hasPin).length;
   const pinRequest = payload.pin !== undefined && payload.pin !== '' ? str(payload.pin) : null;
+  const willHavePin = pinRequest !== null || Boolean(existing?.hasPin);
+  const projectedAdmins = otherAdmins + (record.active !== false && record.role === 'Administrator' && willHavePin ? 1 : 0);
+  if (projectedAdmins < 1) return { ok: false, error: 'Keep at least one active Administrator account with a PIN.' };
   if (pinRequest !== null) {
     if (!/^\d{4,12}$/.test(pinRequest)) return { ok: false, error: 'PINs must be 4–12 digits.' };
     if (pinRequest !== str(payload.confirmPin)) return { ok: false, error: 'PIN confirmation does not match.' };
@@ -1801,25 +2006,30 @@ function userUpsert(repo, payload, ctx, editing) {
   repo.insert('users', record);
   return {
     ok: true,
-    record: sanitizeUser(record),
+    record: sanitizeUser({ ...record, hasPin: willHavePin }),
     pinToSet: pinRequest !== null ? { userId: record.id, pin: pinRequest } : null,
     audit: [{ action: editing ? 'User account updated' : 'User account created', entity: 'User', entityId: record.id, summary: `${record.name} · ${record.role}${pinRequest !== null ? ' · PIN set' : ''}` }]
   };
 }
 
-/** Permission required for an op given its payload (string, list = any-of, fn, or null). */
-export function opPermission(name, payload = {}) {
+/** Permission required for an op given its payload/context (string, list = any-of, or null). */
+export function opPermission(name, payload = {}, ctx = null) {
   const op = OPS[name];
   if (!op) return undefined;
-  if (typeof op.permission === 'function') return op.permission(payload);
+  if (typeof op.permission === 'function') return op.permission(payload || {}, ctx);
   if (Array.isArray(op.permission)) return op.permission;
   return op.permission;
 }
 
+/** An authorization context is authenticated only with a signed-in user or first-run setup authority. */
+export function isAuthenticatedContext(ctx) {
+  return Boolean(ctx && typeof ctx === 'object' && (ctx.userId || ctx.firstRun === true) && Array.isArray(ctx.permissions));
+}
+
 export function authorizeOp(name, payload, ctx) {
-  const permission = opPermission(name, payload);
-  if (permission === undefined) return { ok: false, error: `Unknown operation: ${name}` };
-  if (!ctx) return { ok: false, error: 'Sign in to continue.', code: 'auth-required' };
+  const permission = opPermission(name, payload, ctx);
+  if (permission === undefined) return { ok: false, error: `Unknown operation: ${name}`, code: 'unknown-op' };
+  if (!isAuthenticatedContext(ctx)) return { ok: false, error: 'Sign in to continue.', code: 'auth-required' };
   if (permission === null) return { ok: true };
   const candidate = { active: true, role: ctx.role, permissions: ctx.permissions };
   const candidates = Array.isArray(permission) ? permission : [permission];
@@ -1827,12 +2037,21 @@ export function authorizeOp(name, payload, ctx) {
   return { ok: false, error: 'Your account is not allowed to perform this action.', code: 'permission-denied', permission: candidates[0] };
 }
 
-export function runOp(repo, name, payload = {}, ctx = {}) {
+export function runOp(repo, name, payload = {}, ctx = null) {
   const op = OPS[name];
-  if (!op) return { ok: false, error: `Unknown operation: ${name}` };
-  const authorization = authorizeOp(name, payload, ctx);
+  if (!op) return { ok: false, error: `Unknown operation: ${name}`, code: 'unknown-op' };
+  const safePayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const authorization = authorizeOp(name, safePayload, ctx);
   if (!authorization.ok) return authorization;
-  return op.run(repo, payload, { now: () => new Date().toISOString(), today: () => new Date().toISOString().slice(0, 10), ...ctx });
+  const timeZone = repo.getSettings().timezone;
+  return op.run(repo, safePayload, {
+    now: () => new Date().toISOString(),
+    today: () => localDateInTimeZone(timeZone),
+    ...ctx
+  });
 }
+
+/** Ops that are background/system housekeeping: they never count as user activity. */
+export const BACKGROUND_OPS = new Set(['notifications.scan']);
 
 export { normaliseTags };

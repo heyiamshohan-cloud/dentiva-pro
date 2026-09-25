@@ -62,7 +62,7 @@ test('PIN authentication is server-side with lockout and legacy upgrade', () => 
   assert.match(auth, /210_000|210000/);
   assert.match(auth, /120_000|120000/);
   assert.match(auth, /MAX_FAILED_ATTEMPTS/);
-  assert.match(auth, /LOCKOUT_MS/);
+  assert.match(auth, /LOCKOUT_STEPS_MS/);
 });
 
 test('future layouts are preserved and blocked from silent overwrite', () => {
@@ -104,6 +104,9 @@ test('ops are authorized server-side, never only by UI visibility', () => {
   assert.match(queries, /permission-denied/);
   assert.match(queries, /export function authorizeQuery/);
   const ipc = fs.readFileSync(path.join(root, 'electron/lib/ipc.mjs'), 'utf8');
-  assert.match(ipc, /requirePermission/);
-  assert.match(ipc, /auditInsert/);
+  const handlers = fs.readFileSync(path.join(root, 'electron/lib/ipc-handlers.mjs'), 'utf8');
+  assert.match(ipc, /isTrustedSender/);
+  assert.match(handlers, /requirePermission/);
+  assert.match(handlers, /auditInsert/);
+  assert.match(handlers, /repo\.transaction/);
 });

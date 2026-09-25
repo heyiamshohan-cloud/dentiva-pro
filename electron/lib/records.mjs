@@ -371,7 +371,7 @@ const mappers = {
     created_at: str(r.createdAt),
     updated_at: str(r.updatedAt),
     // Secrets never ride in the payload: the sanitized record is what any reader sees.
-    payload: json({ ...r, pinHash: '', pinSalt: '' })
+    payload: json((({ pinHash, pinSalt, kdf, hasPin, ...safe }) => safe)(r))
   }),
   medicationCatalog: (r) => ({
     id: str(r.id),

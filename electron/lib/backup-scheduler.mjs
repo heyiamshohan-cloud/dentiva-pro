@@ -14,35 +14,23 @@ export async function runScheduledBackupTick({ repo, ws, now = new Date(), creat
   if (!decision.due) return { ran: false, reason: decision.reason };
   if (state.running) return { ran: false, reason: 'already-running' };
   state.running = true;
+  const directory = String(settings.backupDirectory || '').trim();
+  const record = (status) => repo.setMeta('lastAutoBackupStatus', { at: now.toISOString(), ...status });
   try {
-    // Same-second folder names are timestamp-derived; retry with a suffix so
-    // back-to-back runs (tests, double-clicks, clock quirks) never collide.
-    let result = null;
-    for (const attempt of ['automatic', 'automatic-b', 'automatic-c']) {
-      result = createBackupFn(ws, { label: attempt, createdBy: 'scheduler' });
-      if (!result || result.ok === false) {
-        if (/already exists/i.test(result?.error || '')) continue;
-        return { ran: false, reason: 'failed', error: (repo.setMeta('lastAutoBackupStatus', JSON.stringify({ at: now.toISOString(), ok: false, error: result?.error || 'Automatic backup failed.' })), result?.error || 'Automatic backup failed.') };
-      }
-      break;
-    }
+    const result = createBackupFn(ws, { label: 'automatic', createdBy: 'scheduler', kind: 'automatic', directory });
     if (!result || result.ok === false) {
       const message = result?.error || 'Automatic backup failed.';
-      repo.setMeta('lastAutoBackupStatus', JSON.stringify({ at: now.toISOString(), ok: false, error: message }));
+      record({ ok: false, error: message });
       return { ran: false, reason: 'failed', error: message };
     }
-    const pruned = pruneBackupsFn(ws, decision.schedule.retention);
-    const backupName = result.path ? String(result.path).split(/[\\/]/).pop() : (result.manifest?.name || result.name || '');
-    repo.setMeta('lastAutoBackupStatus', JSON.stringify({
-      at: now.toISOString(), ok: true,
-      name: backupName,
-      pruned: Number(pruned?.removed || 0),
-      kept: decision.schedule.retention
-    }));
-    return { ran: true, name: backupName, pruned: Number(pruned?.removed || 0) };
+    const pruned = pruneBackupsFn(ws, decision.schedule.retention, { extraDirectory: directory });
+    const backupName = result.name || (result.path ? String(result.path).split(/[\\/]/).pop() : '');
+    const removed = Array.isArray(pruned?.removed) ? pruned.removed.length : Number(pruned?.removed || 0);
+    record({ ok: true, name: backupName, path: result.path || '', pruned: removed, kept: decision.schedule.retention });
+    return { ran: true, name: backupName, pruned: removed };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    repo.setMeta('lastAutoBackupStatus', JSON.stringify({ at: now.toISOString(), ok: false, error: message }));
+    record({ ok: false, error: message });
     return { ran: false, reason: 'failed', error: message };
   } finally {
     state.running = false;

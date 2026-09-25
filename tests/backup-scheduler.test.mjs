@@ -49,7 +49,8 @@ test('tick runs once when due, honours disabled/fresh, single-flights and record
 
   const first = await runScheduledBackupTick({ repo, ws: {}, now: new Date(), createBackupFn: create, pruneBackupsFn: prune, state });
   assert.deepEqual([first.ran, created], [true, 1]);
-  const status = JSON.parse(meta.get('lastAutoBackupStatus'));
+  const status = meta.get('lastAutoBackupStatus');
+  assert.equal(typeof status, 'object', 'status is stored as a structured object (not double-encoded JSON)');
   assert.equal(status.ok, true);
   assert.equal(status.pruned, 2);
 
@@ -68,7 +69,7 @@ test('tick runs once when due, honours disabled/fresh, single-flights and record
   // Failure is recorded without throwing.
   const boom = await runScheduledBackupTick({ repo, ws: {}, now: new Date(), createBackupFn: () => { throw new Error('disk full'); }, pruneBackupsFn: prune, state });
   assert.equal(boom.reason, 'failed');
-  assert.match(JSON.parse(meta.get('lastAutoBackupStatus')).error, /disk full/);
+  assert.match(meta.get('lastAutoBackupStatus').error, /disk full/);
 
   // Disabled scheduler never runs.
   const disabledRepo = { ...repo, getSettings: () => ({ backupEnabled: false }) };
@@ -100,7 +101,7 @@ test('end-to-end: overdue workspace gets a real automatic backup and retention p
     assert.equal(second.ran, true);
     backups = listBackups(ws).filter((entry) => /automatic/i.test(entry.label || ''));
     assert.equal(backups.length, 1, 'older automatic backups are pruned to retention');
-    const status = JSON.parse(ws.getMeta('lastAutoBackupStatus') || '{}');
+    const status = ws.getMeta('lastAutoBackupStatus') || {};
     assert.equal(status.ok, true);
     ws.close();
   } finally {

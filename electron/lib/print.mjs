@@ -6,7 +6,10 @@ export const PRINT_PAGE_SIZES = ['A4', 'A5', 'Letter', 'Legal', 'Receipt80'];
 // 80 mm thermal receipt width with a tall page so long lists paginate.
 export const RECEIPT_PAGE = { width: 80000, height: 200000 };
 
-const BLOCKED_ACTIVE = /<\s*\/?\s*script\b|<iframe\b|<object\b|<embed\b|javascript:|src\s*=\s*['"]https?:/i;
+const BLOCKED_ACTIVE = /<\s*\/?\s*script\b|<iframe\b|<object\b|<embed\b|<frame\b|<link\b|<base\b|javascript:|src\s*=\s*['"]?https?:|url\(\s*['"]?https?:|@import|<meta[^>]+http-equiv\s*=\s*['"]?refresh/i;
+
+// The isolated print document may load nothing but inline styles and data: images/fonts.
+export const PRINT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";
 
 export function normalizePageSize(name) {
   const value = String(name || '').trim();
@@ -30,10 +33,17 @@ export function validatePrintHtml(html, { maxBytes = 30 * 1024 * 1024 } = {}) {
   return { ok: true };
 }
 
-// Isolated wrapper used for the hidden print/pdf window. No scripts, no remote
-// content; images only from data:/blob: (clinic logo is a data: URL).
-export function buildIsolatedHtml(bodyHtml) {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:;"><style>html,body{background:#fff;color:#111}body{margin:0}</style></head><body>${bodyHtml}</body></html>`;
+// Isolated document for the hidden print/PDF window. No scripts, no remote
+// content; images only as data: URLs (the clinic logo is a data: URL). A
+// complete document keeps its own <head> (styles, @page) with the CSP injected.
+export function buildIsolatedHtml(documentHtml) {
+  const html = String(documentHtml || '');
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${PRINT_CSP}">`;
+  if (/<html[\s>]/i.test(html)) {
+    if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${cspMeta}`);
+    return html.replace(/<html([^>]*)>/i, `<html$1><head><meta charset="utf-8">${cspMeta}</head>`);
+  }
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${cspMeta}<style>html,body{background:#fff;color:#111}body{margin:0}</style></head><body>${html}</body></html>`;
 }
 
 const INVALID_FILENAME = /[\\/:*?"<>|]/g;

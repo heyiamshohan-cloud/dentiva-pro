@@ -24,6 +24,8 @@ import {
   Workspace, DB_FILENAME, LEGACY_FILENAME, V4_PRESERVED_SUFFIX, ATTACHMENT_DIRECTORY
 } from './db.mjs';
 import { SCHEMA_SQL, WRITE_ORDER, COLLECTION_TABLES } from './schema.mjs';
+import { pendingMigrations, applyMigrations } from './schema-migrations.mjs';
+import { createBackup } from './backup.mjs';
 import { migrateState, defaultState, APP_VERSION, META_KEYS } from '../../src/migrate-state.js';
 
 /**
@@ -113,14 +115,26 @@ export function migrateWorkspace(directory, { log = () => {} } = {}) {
 
   if (layout === 'v5' && sourcePath === dbPath) {
     const ws = new Workspace(dir);
-    ws.open();
+    ws.open({ migrate: false });
     try {
       const metaStatus = ensureStateMeta(ws);
       if (metaStatus === 'seeded') result.errors.push('State metadata was missing and has been re-seeded with default values.');
+      const pending = pendingMigrations(ws);
+      if (pending.length) {
+        // Upgrade safety net: snapshot the untouched store before any layout
+        // migration runs. A failed migration rolls back its own transaction;
+        // this backup additionally survives any unforeseen failure.
+        const safety = createBackup(ws, { label: `pre-upgrade-layout-${pending[pending.length - 1].version}`, kind: 'pre-upgrade', createdBy: 'upgrade' });
+        if (!safety.ok) throw new Error(`pre-upgrade backup failed: ${safety.error}`);
+        result.preUpgradeBackup = safety.path;
+        result.applied = applyMigrations(ws, { log });
+        result.status = 'upgraded';
+      } else {
+        result.status = 'current';
+      }
     } finally {
       ws.close();
     }
-    result.status = 'current';
     result.durationMs = Date.now() - started;
     return result;
   }

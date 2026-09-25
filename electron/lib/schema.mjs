@@ -11,7 +11,9 @@
 // - The audit table is append-only at the API level (no update/delete channel exists).
 // - No table or column imposes any record-count or database-size limit (§6).
 
-export const DB_LAYOUT_VERSION = 1;
+// Latest relational layout. The tables below are the layout-1 baseline; every
+// later change is a migration in schema-migrations.mjs (kept in lockstep by tests).
+export const DB_LAYOUT_VERSION = 2;
 
 export const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;

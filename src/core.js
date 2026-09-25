@@ -86,8 +86,10 @@ const roleTemplates = {
   ],
   Receptionist: ['patients.view', 'patients.create', 'patients.edit', 'patients.archive', 'patients.import', 'patients.export', 'appointments.view', 'appointments.create', 'appointments.edit', 'appointments.cancel', 'appointments.move', 'appointments.queue', 'queue.manage', 'billing.view', 'billing.create', 'payments.view', 'payments.create', 'inventory.view', 'reports.view', 'data.export', 'backup.create', 'backup.validate', 'settings.view'],
   'Dental Assistant': ['patients.view', 'clinical.view', 'clinical.create', 'clinical.attachments', 'appointments.view', 'appointments.queue', 'queue.manage', 'prescriptions.view', 'prescriptions.print', 'inventory.view', 'inventory.consume', 'inventory.expiry', 'reports.view', 'settings.view'],
-  Cleaner: ['settings.view'],
-  Other: [],
+  // Intentionally minimal read-only roles (documented in docs/RBAC.md):
+  // a Cleaner sees the day's schedule to prepare rooms; Other is a basic viewer.
+  Cleaner: ['appointments.view'],
+  Other: ['patients.view', 'appointments.view'],
   'Custom Role': []
 };
 
@@ -102,6 +104,68 @@ export function hasPermission(user, permission) {
 
 export function roleDefinitions() {
   return Object.fromEntries(Object.entries(roleTemplates).map(([role, permissions]) => [role, [...permissions]]));
+}
+
+export const ROLE_NAMES = Object.keys(roleTemplates);
+
+/* ── Document codes: one prefix + counter per kind (never shared) ── */
+export const CODE_KINDS = {
+  patient: { setting: 'patientPrefix', fallback: 'DP', table: 'patients', column: 'patient_code' },
+  appointment: { setting: 'appointmentPrefix', fallback: 'APT', table: 'appointments', column: 'appointment_code' },
+  visit: { setting: 'visitPrefix', fallback: 'VIS', table: 'visits', column: 'visit_code' },
+  prescription: { setting: 'prescriptionPrefix', fallback: 'RX', table: 'prescriptions', column: 'prescription_code' },
+  invoice: { setting: 'invoicePrefix', fallback: 'INV', table: 'invoices', column: 'invoice_number' },
+  receipt: { setting: 'receiptPrefix', fallback: 'RCP', table: 'payments', column: 'receipt_number' },
+  staff: { setting: 'staffPrefix', fallback: 'STF', table: 'staff', column: 'staff_code' },
+  item: { setting: 'itemPrefix', fallback: 'IT', table: 'inventory', column: 'item_code' }
+};
+
+/** Prefixes are 1–8 characters of A–Z, 0–9 or '-' (upper-cased); anything else is rejected. */
+export function sanitizeCodePrefix(value) {
+  const text = String(value ?? '').trim().toUpperCase();
+  return /^[A-Z0-9][A-Z0-9-]{0,7}$/.test(text) ? text : '';
+}
+
+/* ── Clinic-local calendar dates ── */
+export function resolveTimeZone(timeZone) {
+  const candidate = String(timeZone || '').trim();
+  if (candidate) {
+    try { new Intl.DateTimeFormat('en-US', { timeZone: candidate }); return candidate; } catch { /* invalid zone → system */ }
+  }
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
+
+/** YYYY-MM-DD for `date` in the clinic's time zone (system zone when unset). */
+export function localDateInTimeZone(timeZone, date = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: resolveTimeZone(timeZone), year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(date).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+/** Add whole days to a YYYY-MM-DD string (calendar arithmetic, zone-free). */
+export function addDaysIso(isoDate, days) {
+  const [y, m, d] = String(isoDate).split('-').map(Number);
+  const value = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  value.setUTCDate(value.getUTCDate() + Number(days || 0));
+  return value.toISOString().slice(0, 10);
+}
+
+/* ── Appointment status machine ── */
+const APPOINTMENT_TRANSITIONS = {
+  Scheduled: ['Confirmed', 'Checked In', 'Waiting', 'In Treatment', 'Completed', 'Cancelled', 'No Show'],
+  Confirmed: ['Scheduled', 'Checked In', 'Waiting', 'In Treatment', 'Completed', 'Cancelled', 'No Show'],
+  'Checked In': ['Waiting', 'In Treatment', 'Completed', 'Cancelled', 'Scheduled', 'Confirmed'],
+  Waiting: ['Checked In', 'In Treatment', 'Completed', 'Cancelled'],
+  'In Treatment': ['Waiting', 'Completed'],
+  Completed: [],
+  Cancelled: ['Scheduled'],
+  'No Show': ['Scheduled']
+};
+
+export function appointmentTransitionAllowed(from, to) {
+  const current = APPOINTMENT_STATUSES.includes(from) ? from : 'Scheduled';
+  if (current === to) return true;
+  return (APPOINTMENT_TRANSITIONS[current] || []).includes(to);
 }
 
 export function toNumber(value) {
@@ -250,12 +314,20 @@ export function restoreCollection(localRecords, incomingRecords, strategy = 'Kee
   const local = Array.isArray(localRecords) ? localRecords : [];
   const incoming = Array.isArray(incomingRecords) ? incomingRecords : [];
   const result = local.map((record) => ({ ...record }));
+  const indexById = new Map();
+  result.forEach((record, index) => { if (record.id) indexById.set(record.id, index); });
   let added = 0; let skipped = 0; let replaced = 0; let copied = 0;
   incoming.forEach((record) => {
-    const index = result.findIndex((localRecord) => localRecord.id && record.id && localRecord.id === record.id);
-    if (index < 0) { result.push({ ...record }); added += 1; return; }
+    const index = record.id ? indexById.get(record.id) : undefined;
+    if (index === undefined) { result.push({ ...record }); if (record.id) indexById.set(record.id, result.length - 1); added += 1; return; }
     if (strategy === 'Replace') { result[index] = { ...record }; replaced += 1; return; }
-    if (strategy === 'Create New Copy') { result.push({ ...record, id: `${record.id || 'record'}_copy_${copied + 1}` }); copied += 1; return; }
+    if (strategy === 'Create New Copy') {
+      let copyId = '';
+      do { copied += 1; copyId = `${record.id || 'record'}_copy_${copied}`; } while (indexById.has(copyId));
+      result.push({ ...record, id: copyId });
+      indexById.set(copyId, result.length - 1);
+      return;
+    }
     skipped += 1;
   });
   return { records: result, added, skipped, replaced, copied };
@@ -342,10 +414,10 @@ export function buildRestorePlan(local, incoming, { modules = Object.keys(module
       return;
     }
     const incomingRecords = (incoming[key] || []).filter(allowedPatient).map((record) => ({ ...record }));
-    const localRecords = local[key] || [];
+    const localIds = new Set((local[key] || []).map((localRecord) => localRecord.id).filter(Boolean));
     plan.collections[key] = incomingRecords;
     incomingRecords.forEach((record) => {
-      if (record.id && localRecords.some((localRecord) => localRecord.id === record.id)) plan.conflicts.push({ collection: key, id: record.id, label: record.fullName || record.invoiceNumber || record.name || record.id });
+      if (record.id && localIds.has(record.id)) plan.conflicts.push({ collection: key, id: record.id, label: record.fullName || record.invoiceNumber || record.name || record.id });
     });
   });
   const patientFilterActive = usePatientFilter || plan.collections.patients !== undefined;
@@ -365,16 +437,21 @@ export function applyRestorePlan(local, plan) {
     Object.entries(plan.collections || {}).forEach(([key, incoming]) => {
       if (!Array.isArray(incoming)) return;
       idMaps[key] = {};
+      const taken = new Set([...(result[key] || []).map((record) => record.id), ...incoming.map((record) => record?.id)].filter(Boolean));
       let copyIndex = 0;
+      const localIds = new Set((result[key] || []).map((record) => record.id).filter(Boolean));
       incoming.forEach((record) => {
-        if (!record?.id || !(result[key] || []).some((localRecord) => localRecord.id === record.id)) return;
+        if (!record?.id || !localIds.has(record.id)) return;
         let copyId = '';
-        do { copyIndex += 1; copyId = `${record.id}_copy_${copyIndex}`; } while ((result[key] || []).some((localRecord) => localRecord.id === copyId) || incoming.some((other) => other !== record && other.id === copyId));
+        do { copyIndex += 1; copyId = `${record.id}_copy_${copyIndex}`; } while (taken.has(copyId));
+        taken.add(copyId);
         idMaps[key][record.id] = copyId;
         copied += 1;
       });
     });
   }
+  // Copies must not collide on human-readable codes either.
+  const CODE_FIELDS = { patients: 'patientCode', invoices: 'invoiceNumber', payments: 'receiptNumber', appointments: 'appointmentCode', visits: 'visitCode', prescriptions: 'prescriptionCode' };
   const relationMaps = { patientId: 'patients', invoiceId: 'invoices', paymentId: 'payments', itemId: 'inventory', supplierId: 'suppliers', appointmentId: 'appointments', visitId: 'visits' };
   const rewrite = (record) => {
     const next = { ...record };
@@ -386,7 +463,22 @@ export function applyRestorePlan(local, plan) {
       if (plan.strategy !== 'Keep Existing' && incoming[0]) result[key] = { ...incoming[0] };
       return;
     }
-    const records = (incoming || []).map((record) => { const next = rewrite(record); if (key === 'attachments') next.name = sanitizeFilename(next.name); if (idMaps[key]?.[next.id]) next.id = idMaps[key][next.id]; return next; });
+    const codeField = CODE_FIELDS[key];
+    const usedCodes = codeField ? new Set((result[key] || []).map((record) => record[codeField]).filter(Boolean)) : null;
+    const records = (incoming || []).map((record) => {
+      const next = rewrite(record);
+      if (key === 'attachments') next.name = sanitizeFilename(next.name);
+      if (idMaps[key]?.[next.id]) {
+        next.id = idMaps[key][next.id];
+        if (codeField && next[codeField] && usedCodes.has(next[codeField])) {
+          let suffix = 1;
+          while (usedCodes.has(`${next[codeField]}-C${suffix}`)) suffix += 1;
+          next[codeField] = `${next[codeField]}-C${suffix}`;
+        }
+      }
+      if (codeField && next[codeField]) usedCodes.add(next[codeField]);
+      return next;
+    });
     const outcome = restoreCollection(result[key] || [], records, plan.strategy === 'Create New Copy' ? 'Keep Existing' : plan.strategy);
     result[key] = outcome.records;
     added += outcome.added; skipped += outcome.skipped; replaced += outcome.replaced;

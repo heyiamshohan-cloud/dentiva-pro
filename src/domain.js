@@ -31,27 +31,33 @@ export function inDateRange(value, bounds) {
 }
 
 export function statementEntries({ invoices = [], payments = [], adjustments = [] } = {}, patientId = '') {
-  // v1.4.0 unified statement semantics (§32): integer cents are authoritative.
-  // Invoice = debit (cancelled invoices never debit — ops guarantee cancelled
-  // invoices have zero collected), payment = gross credit, refund/adjustment =
-  // debit rows. Decimal fields are only a fallback for legacy v4-shaped data.
+  // Reference implementation of the patient ledger (the SQL ledger in
+  // electron/lib/ledger-sql.mjs must match it row for row):
+  //   Invoice = debit (issued only: drafts and cancelled never debit),
+  //   Payment = gross credit, Refund = debit, Adjustment = credit.
+  // Running balance = Σ debit − Σ credit, never clamped (negative = credit).
+  // Order: date, creation time, event rank, reference, id.
   const totalCentsOf = (record) => (record.totalCents !== undefined ? Math.max(0, Number(record.totalCents || 0)) : moneyToCents(record.total));
   const amountCentsOf = (record) => (record.amountCents !== undefined ? Math.max(0, Number(record.amountCents || 0)) : moneyToCents(record.amount));
-  const refundedCentsOf = (record) => (record.refundedCents !== undefined ? Math.max(0, Number(record.refundedCents || 0)) : moneyToCents(record.refundedAmount || 0));
-  const patientInvoices = invoices.filter((record) => (!patientId || record.patientId === patientId) && record.status !== 'Cancelled');
+  const patientInvoices = invoices.filter((record) => (!patientId || record.patientId === patientId) && !['Cancelled', 'Draft'].includes(record.status));
+  const invoiceNumber = new Map(invoices.map((record) => [record.id, record.invoiceNumber || '']));
   const patientPayments = payments.filter((record) => (!patientId || record.patientId === patientId) && record.status !== 'Voided' && record.status !== 'Cancelled');
-  const paymentIds = new Set(patientPayments.map((record) => record.id));
-  const patientAdjustments = adjustments.filter((record) => (!patientId || record.patientId === patientId) && (!record.paymentId || paymentIds.has(record.paymentId)));
+  const paymentById = new Map(payments.map((record) => [record.id, record]));
+  const liveIds = new Set(patientPayments.map((record) => record.id));
+  const patientAdjustments = adjustments.filter((record) => (!patientId || record.patientId === patientId) && (!record.paymentId || liveIds.has(record.paymentId)));
+  const dateOf = (record) => record.date || String(record.createdAt || '').slice(0, 10);
   const entries = [
-    ...patientInvoices.map((record) => ({ date: record.date, type: 'Invoice', reference: record.invoiceNumber || record.id, debitCents: totalCentsOf(record), creditCents: 0, note: `${record.items?.length || 0} item(s)` })),
-    ...patientPayments.map((record) => ({ date: record.date, type: 'Payment', reference: record.receiptNumber || record.id, debitCents: 0, creditCents: amountCentsOf(record), note: record.method || 'Payment' })),
-    ...patientAdjustments.filter((record) => record.type === 'Refund').map((record) => ({ date: record.date || record.createdAt?.slice(0, 10), type: 'Refund', reference: record.receiptNumber || record.id, debitCents: amountCentsOf(record), creditCents: 0, note: record.reason || 'Refund / reversal' })),
-    ...patientAdjustments.filter((record) => record.type === 'Adjustment').map((record) => ({ date: record.date || record.createdAt?.slice(0, 10), type: 'Adjustment', reference: record.id, debitCents: 0, creditCents: amountCentsOf(record), note: record.reason || 'Balance adjustment' }))
-  ].sort((a, b) => `${a.date || ''}${a.reference}`.localeCompare(`${b.date || ''}${b.reference}`));
+    ...patientInvoices.map((record) => ({ date: record.date, createdAt: record.createdAt || '', rank: 1, id: record.id, type: 'Invoice', reference: record.invoiceNumber || record.id, debitCents: totalCentsOf(record), creditCents: 0, note: `${record.items?.length || 0} item(s)` })),
+    ...patientPayments.map((record) => ({ date: record.date, createdAt: record.createdAt || '', rank: 2, id: record.id, type: 'Payment', reference: record.receiptNumber || record.id, debitCents: 0, creditCents: amountCentsOf(record), note: [record.method || 'Payment', invoiceNumber.get(record.invoiceId)].filter(Boolean).join(' · ') })),
+    ...patientAdjustments.filter((record) => record.type === 'Refund').map((record) => ({ date: dateOf(record), createdAt: record.createdAt || '', rank: 3, id: record.id, type: 'Refund', reference: `Refund · ${paymentById.get(record.paymentId)?.receiptNumber || 'payment'}`, debitCents: amountCentsOf(record), creditCents: 0, note: record.reason || 'Refund' })),
+    ...patientAdjustments.filter((record) => record.type === 'Adjustment').map((record) => ({ date: dateOf(record), createdAt: record.createdAt || '', rank: 4, id: record.id, type: 'Adjustment', reference: `Adjustment · ${invoiceNumber.get(record.invoiceId) || 'balance'}`, debitCents: 0, creditCents: amountCentsOf(record), note: record.reason || 'Balance adjustment' }))
+  ];
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  entries.sort((a, b) => cmp(a.date || '', b.date || '') || cmp(a.createdAt, b.createdAt) || a.rank - b.rank || cmp(a.reference, b.reference) || cmp(a.id, b.id));
   let runningCents = 0;
-  return entries.map((entry) => {
+  return entries.map(({ rank, createdAt, id, ...entry }) => {
     runningCents += entry.debitCents - entry.creditCents;
-    return { ...entry, balanceCents: Math.max(0, runningCents), debit: centsToMoney(entry.debitCents), credit: centsToMoney(entry.creditCents), balance: centsToMoney(Math.max(0, runningCents)) };
+    return { ...entry, recordId: id, balanceCents: runningCents, debit: centsToMoney(entry.debitCents), credit: centsToMoney(entry.creditCents), balance: centsToMoney(runningCents) };
   });
 }
 

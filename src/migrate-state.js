@@ -6,7 +6,7 @@
 import { ARRAY_COLLECTIONS, CURRENT_SCHEMA_VERSION } from './core.js';
 import { normalizeNotificationRules } from './notifications.js';
 
-export const APP_VERSION = '1.6.1';
+export const APP_VERSION = '2.0.0';
 
 export const DEFAULT_SETTINGS = {
   clinicName: '',
@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS = {
   dentistRegistration: '',
   clinicWebsite: '',
   professionalTitle: 'Dr.',
+  qualifications: '',
   phone: '',
   secondaryPhone: '',
   email: '',
@@ -23,9 +24,9 @@ export const DEFAULT_SETTINGS = {
   country: 'Bangladesh',
   chamberName: '',
   logo: '',
-  language: 'English',
   currency: 'BDT',
-  timezone: 'Asia/Dhaka',
+  // '' = use the computer's time zone; clinics can pin an IANA zone in Settings.
+  timezone: '',
   dateFormat: 'dd MMM yyyy',
   timeFormat: '12-hour',
   invoicePrefix: 'INV',
@@ -33,6 +34,10 @@ export const DEFAULT_SETTINGS = {
   appointmentPrefix: 'APT',
   serialPrefix: 'Q',
   receiptPrefix: 'RCP',
+  visitPrefix: 'VIS',
+  prescriptionPrefix: 'RX',
+  staffPrefix: 'STF',
+  itemPrefix: 'IT',
   defaultDuration: 30,
   taxEnabled: false,
   taxRate: 0,
@@ -40,9 +45,6 @@ export const DEFAULT_SETTINGS = {
   autoLockMinutes: 30,
   sessionTimeoutMinutes: 30,
   notifications: true,
-  applicationLock: false,
-  pinHash: '',
-  pinSalt: '',
   paymentMethods: ['Cash', 'Bank', 'Card', 'bKash', 'Nagad', 'Rocket', 'Upay'],
   expenseCategories: ['Clinic rent', 'Electricity', 'Internet', 'Water', 'Staff salary', 'Cleaning', 'Maintenance', 'Equipment', 'Supplies', 'Marketing', 'Transport', 'Other'],
   inventoryCategories: ['Medicine', 'Dental material', 'Consumable', 'Accessory', 'Equipment consumable', 'Other'],
@@ -199,12 +201,10 @@ export function migrateState(saved, appVersion = APP_VERSION) {
     ? { ...patient, archived: Boolean(patient.archived || patient.status === 'Archived') }
     : patient));
 
-  // A legacy application lock without hash material is not a lock; disarm it explicitly.
-  if (merged.settings.applicationLock && (!merged.settings.pinHash || !merged.settings.pinSalt)) {
-    merged.settings.applicationLock = false;
-    merged.settings.pinHash = '';
-    merged.settings.pinSalt = '';
-  }
+  // v2.0.0: the legacy settings-level application lock (and its hash material)
+  // and the language switch are retired — per-user PIN sign-in is the only lock
+  // and the product is English-only. Strip the obsolete keys.
+  for (const legacy of ['applicationLock', 'pinHash', 'pinSalt', 'language']) delete merged.settings[legacy];
   return merged;
 }
 

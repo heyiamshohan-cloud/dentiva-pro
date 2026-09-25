@@ -13,37 +13,47 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 
 
 export const LEDGER_LIMIT = 500;
 
-/** Union of all ledger events for a patient (invoices, payments, refunds, adjustments). */
+/**
+ * Union of all ledger events for a patient. Semantics (integer cents):
+ *   Invoice    → debit  (issued invoices only; drafts and cancelled excluded)
+ *   Payment    → credit (gross amount of non-voided payments)
+ *   Refund     → debit  (money returned; dated on the refund date)
+ *   Adjustment → credit (balance forgiveness)
+ * Running balance = Σ debit − Σ credit. Positive = the patient owes the clinic;
+ * negative = credit in the patient's favour. It is never clamped.
+ */
 const LEDGER_EVENTS_SQL = `
-  SELECT date, reference, type, debit_cents, credit_cents, note, record_id FROM (
-    SELECT i.date AS date, i.invoice_number AS reference, 'Invoice' AS type,
+  SELECT date, created_at, rank, reference, type, debit_cents, credit_cents, note, record_id FROM (
+    SELECT i.date AS date, i.created_at AS created_at, 1 AS rank, i.invoice_number AS reference, 'Invoice' AS type,
            i.total_cents AS debit_cents, 0 AS credit_cents,
            printf('%d item(s)', CASE WHEN json_valid(i.items) THEN json_array_length(i.items) ELSE 0 END) AS note,
            i.id AS record_id
     FROM invoices i
-    WHERE i.patient_id = ? AND i.status <> 'Cancelled'
+    WHERE i.patient_id = ? AND i.status NOT IN ('Cancelled','Draft')
     UNION ALL
-    SELECT p.date, p.receipt_number, 'Payment', 0, p.amount_cents,
-           COALESCE(NULLIF(p.method,''), 'Payment'), p.id
+    SELECT p.date, p.created_at, 2, p.receipt_number, 'Payment', 0, p.amount_cents,
+           trim(COALESCE(NULLIF(p.method,''), 'Payment') || COALESCE(' · ' || (SELECT i2.invoice_number FROM invoices i2 WHERE i2.id = p.invoice_id), '')), p.id
     FROM payments p
     WHERE p.patient_id = ? AND p.status NOT IN ('Voided','Cancelled')
     UNION ALL
-    SELECT COALESCE(NULLIF(a.date,''), substr(a.created_at,1,10)),
-           a.id,
+    SELECT COALESCE(NULLIF(a.date,''), substr(a.created_at,1,10)), a.created_at, 3,
+           'Refund · ' || COALESCE((SELECT p2.receipt_number FROM payments p2 WHERE p2.id = a.payment_id), 'payment'),
            'Refund', a.amount_cents, 0,
-           printf('%s · %s', COALESCE(NULLIF(a.reason,''), 'Refund / reversal'),
-                  COALESCE((SELECT p2.receipt_number FROM payments p2 WHERE p2.id = a.payment_id), '—')), a.id
+           COALESCE(NULLIF(a.reason,''), 'Refund'), a.id
     FROM payment_adjustments a
     WHERE a.patient_id = ? AND a.type = 'Refund'
       AND (a.payment_id IS NULL OR a.payment_id = '' OR EXISTS (
              SELECT 1 FROM payments p3 WHERE p3.id = a.payment_id AND p3.status NOT IN ('Voided','Cancelled')))
     UNION ALL
-    SELECT COALESCE(NULLIF(a.date,''), substr(a.created_at,1,10)), a.id,
+    SELECT COALESCE(NULLIF(a.date,''), substr(a.created_at,1,10)), a.created_at, 4,
+           'Adjustment · ' || COALESCE((SELECT i3.invoice_number FROM invoices i3 WHERE i3.id = a.invoice_id), 'balance'),
            'Adjustment', 0, a.amount_cents,
            COALESCE(NULLIF(a.reason,''), 'Balance adjustment'), a.id
     FROM payment_adjustments a
     WHERE a.patient_id = ? AND a.type = 'Adjustment'
   )`;
+
+const LEDGER_ORDER = 'date ASC, created_at ASC, rank ASC, reference ASC, record_id ASC';
 
 /**
  * Paginated running-balance statement for one patient.
@@ -60,28 +70,43 @@ export function patientLedgerSql(ws, patientId, { page = 1, pageSize = 50, from 
   const base = `${LEDGER_EVENTS_SQL} WHERE 1=1${rangeSql}`;
   const params = [id, id, id, id, ...rangeParams];
 
-  const total = ws.query(`SELECT COUNT(*) AS n FROM (${base})`, params)[0]?.n || 0;
+  const totals = ws.query(`SELECT COUNT(*) AS n, COALESCE(SUM(debit_cents),0) AS debit, COALESCE(SUM(credit_cents),0) AS credit,
+      COALESCE(SUM(CASE WHEN type = 'Invoice' THEN debit_cents ELSE 0 END),0) AS invoiced,
+      COALESCE(SUM(CASE WHEN type = 'Payment' THEN credit_cents ELSE 0 END),0) AS paid,
+      COALESCE(SUM(CASE WHEN type = 'Refund' THEN debit_cents ELSE 0 END),0) AS refunded,
+      COALESCE(SUM(CASE WHEN type = 'Adjustment' THEN credit_cents ELSE 0 END),0) AS adjusted
+    FROM (${base})`, params)[0] || {};
+  const total = Number(totals.n) || 0;
 
-  // Opening balance = net of all events strictly before the window.
-  // Window events sort by (date, reference) — replicated 1:1 from statementEntries.
+  // Opening balance = net of all events strictly before the window (signed).
   const opening = from
-    ? ws.query(`SELECT COALESCE(SUM(debit_cents - credit_cents),0) AS v FROM (${LEDGER_EVENTS_SQL} WHERE date < ?)`, [id, id, id, id, from])[0]?.v || 0
+    ? Number(ws.query(`SELECT COALESCE(SUM(debit_cents - credit_cents),0) AS v FROM (${LEDGER_EVENTS_SQL} WHERE date < ?)`, [id, id, id, id, from])[0]?.v || 0)
     : 0;
 
   const rows = ws.query(
     `SELECT date, reference, type, debit_cents, credit_cents, note, record_id,
-            MAX(0, ${Number(opening) || 0} + SUM(debit_cents - credit_cents) OVER (ORDER BY date ASC, reference ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)) AS balance_cents
-     FROM (${LEDGER_EVENTS_SQL} WHERE 1=1${rangeSql})
-     ORDER BY date ASC, reference ASC
+            ${opening} + SUM(debit_cents - credit_cents) OVER (ORDER BY ${LEDGER_ORDER} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS balance_cents
+     FROM (${base})
+     ORDER BY ${LEDGER_ORDER}
      LIMIT ? OFFSET ?`,
-    [id, id, id, id, ...rangeParams, safeSize, (safePage - 1) * safeSize]
+    [...params, safeSize, (safePage - 1) * safeSize]
   ).map((r) => ({
     date: r.date, type: r.type, reference: r.reference, note: r.note || '', recordId: r.record_id,
     debitCents: Number(r.debit_cents) || 0, creditCents: Number(r.credit_cents) || 0,
     balanceCents: Number(r.balance_cents) || 0,
   }));
 
-  return { ok: true, rows, total, page: safePage, pageSize: safeSize, openingBalanceCents: Math.max(0, opening), pageTotalCents: rows.reduce((s, r) => s + r.debitCents - r.creditCents, 0) };
+  const periodDebit = Number(totals.debit) || 0;
+  const periodCredit = Number(totals.credit) || 0;
+  return {
+    ok: true, rows, total, page: safePage, pageSize: safeSize,
+    openingBalanceCents: opening,
+    closingBalanceCents: opening + periodDebit - periodCredit,
+    periodDebitCents: periodDebit, periodCreditCents: periodCredit,
+    periodInvoicedCents: Number(totals.invoiced) || 0, periodPaidCents: Number(totals.paid) || 0,
+    periodRefundedCents: Number(totals.refunded) || 0, periodAdjustedCents: Number(totals.adjusted) || 0,
+    pageTotalCents: rows.reduce((sum, r) => sum + r.debitCents - r.creditCents, 0)
+  };
 }
 
 /** Lifetime financial summary + counts for Patient 360 overview cards. */
@@ -90,10 +115,11 @@ export function patientFinancialSummarySql(ws, patientId) {
   if (!id) return { ok: false, error: 'Patient id required' };
   const inv = ws.query(
     `SELECT COUNT(*) AS n,
-            COALESCE(SUM(CASE WHEN status <> 'Cancelled' THEN total_cents ELSE 0 END),0) AS billed,
-            COALESCE(SUM(CASE WHEN status <> 'Cancelled' THEN discount_cents ELSE 0 END),0) AS discounts,
-            COALESCE(SUM(CASE WHEN status <> 'Cancelled' THEN tax_cents ELSE 0 END),0) AS tax,
-            COALESCE(SUM(CASE WHEN status NOT IN ('Cancelled','Paid') THEN due_cents ELSE 0 END),0) AS outstanding
+            COALESCE(SUM(CASE WHEN status NOT IN ('Cancelled','Draft') THEN total_cents ELSE 0 END),0) AS billed,
+            COALESCE(SUM(CASE WHEN status NOT IN ('Cancelled','Draft') THEN discount_cents ELSE 0 END),0) AS discounts,
+            COALESCE(SUM(CASE WHEN status NOT IN ('Cancelled','Draft') THEN tax_cents ELSE 0 END),0) AS tax,
+            COALESCE(SUM(CASE WHEN status NOT IN ('Cancelled','Draft','Paid') THEN due_cents ELSE 0 END),0) AS outstanding,
+            COALESCE(SUM(CASE WHEN status = 'Draft' THEN 1 ELSE 0 END),0) AS drafts
      FROM invoices WHERE patient_id = ?`, [id])[0] || {};
   const pay = ws.query(
     `SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents),0) AS paid,
@@ -103,20 +129,25 @@ export function patientFinancialSummarySql(ws, patientId) {
   const adj = ws.query(`SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents),0) AS v FROM payment_adjustments WHERE patient_id = ? AND type = 'Adjustment'`, [id])[0] || {};
   const last = ws.query(
     `SELECT date, receipt_number, amount_cents, method FROM payments
-     WHERE patient_id = ? AND status NOT IN ('Voided','Cancelled') ORDER BY date DESC, created_at DESC LIMIT 1`, [id])[0] || null;
+     WHERE patient_id = ? AND status NOT IN ('Voided','Cancelled') ORDER BY date DESC, created_at DESC, id DESC LIMIT 1`, [id])[0] || null;
   const visitCount = ws.query(`SELECT COUNT(*) AS n FROM visits WHERE patient_id = ?`, [id])[0]?.n || 0;
   const billed = Number(inv.billed) || 0;
   const paid = Number(pay.paid) || 0;
   const refunded = Number(pay.refunded) || 0;
   const adjusted = Number(adj.v) || 0;
+  const netPaid = Math.max(0, paid - refunded);
+  // Signed ledger balance: billed − net paid − forgiven. Positive = owed, negative = credit.
+  const balance = billed - netPaid - adjusted;
   return {
     ok: true,
     billedCents: billed, paidCents: paid, refundedCents: refunded, adjustedCents: adjusted,
     discountCents: Number(inv.discounts) || 0, taxCents: Number(inv.tax) || 0,
-    netPaidCents: Math.max(0, paid - refunded),
-    dueCents: Math.max(0, billed + adjusted - paid + refunded) === Math.max(0, Number(inv.outstanding) || 0)
-      ? Math.max(0, Number(inv.outstanding) || 0) // trust invoice due_cents denorm; fallback formula matches if ledger intact
-      : Math.max(0, billed + adjusted - paid + refunded),
+    netPaidCents: netPaid,
+    balanceCents: balance,
+    creditCents: Math.max(0, -balance),
+    dueCents: Math.max(0, balance),
+    outstandingInvoiceCents: Math.max(0, Number(inv.outstanding) || 0),
+    draftInvoiceCount: Number(inv.drafts) || 0,
     invoiceCount: Number(inv.n) || 0, paymentCount: Number(pay.n) || 0,
     refundCount: Number(refunds.n) || 0, adjustmentCount: Number(adj.n) || 0,
     visitCount: Number(visitCount) || 0,
@@ -156,12 +187,14 @@ export function visitBillingForSql(ws, visitIds = []) {
   const ph = ids.map(() => '?').join(',');
   const invoices = ws.query(
     `SELECT id, visit_id, invoice_number, date, status, total_cents, paid_cents, due_cents
-     FROM invoices WHERE visit_id IN (${ph}) AND status <> 'Cancelled'`, ids);
+     FROM invoices WHERE visit_id IN (${ph}) AND status NOT IN ('Cancelled','Draft')`, ids);
   const invoiceIds = invoices.map((i) => i.id);
   const payments = invoiceIds.length
-    ? ws.query(`SELECT id, invoice_id, receipt_number, date, amount_cents, method, status
-                FROM payments WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) AND status NOT IN ('Voided','Cancelled')`, invoiceIds)
+    ? ws.query(`SELECT id, invoice_id, receipt_number, date, amount_cents, refunded_cents, method, status
+                FROM payments WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) AND status NOT IN ('Voided','Cancelled')
+                ORDER BY date ASC, created_at ASC, id ASC`, invoiceIds)
     : [];
+  const invoiceById = new Map(invoices.map((inv) => [inv.id, inv]));
   const byVisit = {};
   for (const inv of invoices) {
     const key = inv.visit_id;
@@ -171,11 +204,12 @@ export function visitBillingForSql(ws, visitIds = []) {
     byVisit[key].dueCents += Number(inv.due_cents) || 0;
   }
   for (const pay of payments) {
-    const inv = invoices.find((i) => i.id === pay.invoice_id);
+    const inv = invoiceById.get(pay.invoice_id);
     if (!inv) continue;
-    byVisit[inv.visit_id].payments.push({ id: pay.id, receiptNumber: pay.receipt_number, date: pay.date, amountCents: Number(pay.amount_cents) || 0, method: pay.method || '' });
-    byVisit[inv.visit_id].paidCents += Number(pay.amount_cents) || 0;
+    const net = Math.max(0, (Number(pay.amount_cents) || 0) - (Number(pay.refunded_cents) || 0));
+    byVisit[inv.visit_id].payments.push({ id: pay.id, receiptNumber: pay.receipt_number, date: pay.date, amountCents: Number(pay.amount_cents) || 0, refundedCents: Number(pay.refunded_cents) || 0, method: pay.method || '' });
+    byVisit[inv.visit_id].paidCents += net;
   }
-  for (const key of Object.keys(byVisit)) byVisit[key].dueCents = Math.max(0, byVisit[key].billedCents - byVisit[key].paidCents);
+  // Due mirrors each invoice's authoritative due (it already nets refunds and adjustments).
   return byVisit;
 }

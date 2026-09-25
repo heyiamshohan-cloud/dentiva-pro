@@ -1,10 +1,11 @@
-// Dentiva Pro v1.4.0 — scale benchmark on the REAL relational store.
+// Dentiva Pro v2.0.0 — scale benchmark on the REAL relational store.
 //
 // Seeds synthetic patients + related records into a throwaway workspace
 // (never the application store), then measures the operations the renderer
-// actually performs: boot/migration, paginated listing, text search (Latin +
-// Bengali), patient aggregate, statement, report stats, directory resolution
-// and backup creation. Nothing is capped — the only limits are the machine's.
+// actually performs: boot/migration, paginated listing, text search (name,
+// patient code and phone), patient aggregate, statement, report stats,
+// directory resolution and backup creation. Nothing is capped — the only
+// limits are the machine's.
 //
 // Usage: node scripts/dataset-benchmark.mjs [size1,size2,...]
 
@@ -53,7 +54,7 @@ function seed(directory, size) {
       for (let i = start; i < end; i += 1) {
         const pId = `p_${i}`;
         const code = `PT-${String(i + 1).padStart(6, '0')}`;
-        const name = i % 500 === 0 ? 'বেনচমার্ক রোগী' : `Benchmark Patient ${i + 1}`;
+        const name = i % 500 === 0 ? 'बेंचमार्क मरीज़' : `Benchmark Patient ${i + 1}`;
         repo.insert('patients', { id: pId, patientCode: code, fullName: name, phone: `017${String(i).padStart(8, '0')}`, registrationDate: '2026-01-15', status: 'Active', balanceCents: 0, createdAt: nowIso });
         repo.insert('visits', { id: `v_${i}`, visitCode: `V-${String(i + 1).padStart(6, '0')}`, patientId: pId, date: '2026-08-20', reason: 'Benchmark check', diagnosis: 'Review', createdAt: nowIso });
         repo.insert('appointments', { id: `a_${i}`, appointmentCode: `APT-${String(i + 1).padStart(6, '0')}`, patientId: pId, date: '2026-09-15', time: '09:00', duration: 30, status: 'Completed', createdAt: nowIso });
@@ -74,12 +75,25 @@ function seed(directory, size) {
   return { ws, repo };
 }
 
-async function time(label, fn) {
-  const start = performance.now();
-  const value = await Promise.resolve(fn());
-  const ms = performance.now() - start;
-  console.log(`  ${label.padEnd(46)} ${ms.toFixed(1).padStart(9)} ms`);
-  return { value, ms };
+/**
+ * Measure a step and report the MEDIAN of `repeat` runs. A single timing on a
+ * shared machine is dominated by whichever other process happened to run at
+ * that instant (observed swings of 3–10x on identical code), so the recorded
+ * figure is the median and the raw spread is kept for the audit trail.
+ */
+async function time(label, fn, { repeat = 3 } = {}) {
+  const samples = [];
+  let value;
+  for (let i = 0; i < repeat; i += 1) {
+    const start = performance.now();
+    value = await Promise.resolve(fn());
+    samples.push(performance.now() - start);
+  }
+  const sorted = [...samples].sort((a, b) => a - b);
+  const ms = sorted[Math.floor(sorted.length / 2)];
+  const spread = repeat > 1 ? `  (median of ${repeat}: ${samples.map((n) => n.toFixed(1)).join(', ')})` : '';
+  console.log(`  ${label.padEnd(46)} ${ms.toFixed(1).padStart(9)} ms${spread}`);
+  return { value, ms, samples };
 }
 
 for (const size of sizes) {
@@ -110,7 +124,7 @@ for (const size of sizes) {
     await time('patient list with aggregates + sort=balance', () => runQuery(repo2, 'list', { collection: 'patients', page: 1, pageSize: 25, sort: 'balance', filters: { includeAggregates: true } }, ctx));
     await time('aggregated patient search + sort=visits-desc', () => runQuery(repo2, 'list', { collection: 'patients', query: 'Benchmark', page: 1, pageSize: 25, sort: 'visits-desc', filters: { includeAggregates: true } }, ctx));
     await time('patient search "Benchmark Patient 4" (Latin)', () => runQuery(repo2, 'list', { collection: 'patients', query: 'Benchmark Patient 4' }, ctx));
-    await time('patient search "বেনচমার্ক" (Bengali)', () => runQuery(repo2, 'list', { collection: 'patients', query: 'বেনচমার্ক' }, ctx));
+    await time('patient search "बेंचमार्क" (non-Latin Unicode)', () => runQuery(repo2, 'list', { collection: 'patients', query: 'बेंचमार्क' }, ctx));
     await time('appointment list page 1', () => runQuery(repo2, 'list', { collection: 'appointments', page: 1, pageSize: 30, sort: 'date-desc' }, ctx));
     await time('invoices outstanding filter', () => runQuery(repo2, 'list', { collection: 'invoices', page: 1, pageSize: 25, filters: { outstanding: true } }, ctx));
     await time('directory (name resolution, 2000 cap)', () => runQuery(repo2, 'directory', {}, ctx));
@@ -120,10 +134,10 @@ for (const size of sizes) {
     await time('report revenue (all)', () => runQuery(repo2, 'report', { type: 'revenue', rangeKey: 'all' }, ctx));
     await time('accounting summary (aging + methods)', () => runQuery(repo2, 'accountingSummary', { rangeKey: 'all' }, ctx));
     await time('analytics (monthly trends)', () => runQuery(repo2, 'analytics', { rangeKey: 'year' }, ctx));
-    await time('global search "Benchmark" (3 collections)', () => runQuery(repo2, 'globalSearch', { query: 'Benchmark' }, ctx));
+    await time('global search "Benchmark" (command palette)', () => runQuery(repo2, 'globalSearch', { query: 'Benchmark', limit: 5 }, ctx));
     await time('audit list page 1', () => runQuery(repo2, 'auditList', { page: 1, pageSize: 50 }, ctx));
-    await time('integrity check (all tables)', () => ws2.integrityCheck());
-    const backup = (await time('backup (VACUUM INTO + attachments + manifest)', () => createBackup(ws2, { label: 'bench' }))).value;
+    await time('integrity check (all tables)', () => ws2.integrityCheck(), { repeat: 2 });
+    const backup = (await time('backup (VACUUM INTO + attachments + manifest)', () => createBackup(ws2, { label: 'bench' }), { repeat: 1 })).value;
     const storage = ws2.storageInfo();
     console.log(`  database size                                   ${storage.bytes.toLocaleString().padStart(9)} B`);
     console.log(`  integrity ok                                    ${String(ws2.integrityCheck().ok).padStart(9)}`);

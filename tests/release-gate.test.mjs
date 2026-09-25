@@ -39,7 +39,7 @@ test('dateFormat setting is wired into the renderer date helper (no dead setting
   // into the single date() helper that renders every list/table date.
   assert.match(renderer, /selectField\('Date format', 'dateFormat', \[\['short', '23 Sep 2026'\], \['dmy', '23\/09\/2026'\]\]/);
   assert.match(renderer, /appState\.settings\.dateFormat === 'dmy'/);
-  assert.match(renderer, /Intl\.DateTimeFormat\('en-GB'\)/);
+  assert.match(renderer, /Intl\.DateTimeFormat\('en-GB'/);
   assert.doesNotMatch(renderer, /field\('Date format', 'dateFormat'/);
 });
 
@@ -50,18 +50,35 @@ test('in-app APP_VERSION cannot drift from the package version', () => {
     'src/migrate-state.js APP_VERSION must equal package.json version (in-app version + upgrade target drift otherwise)');
 });
 
-test('Bengali locale covers the release-critical document and workflow surfaces', () => {
-  for (const label of [
-    'Dashboard', 'Patients', 'Patient timeline', 'Appointments', 'Today’s Queue', 'Clinical records',
-    'Dental chart', 'Treatment plan', 'Prescriptions', 'Billing', 'Payments', 'Inventory', 'Suppliers',
-    'Staff', 'Accounting', 'Reports', 'Backup & restore', 'Settings', 'Security', 'Notifications',
-    'Saved views', 'Save view', 'Patient views', 'Save this patient view', 'View name', 'No saved searches', 'Load', 'Done', 'Day', 'Week', 'Month', 'Agenda', 'Upcoming agenda', 'Saved medication', 'Choose a saved medicine...', 'Save current medicine to catalog',
-    'Financial statement', 'Print statement', 'Export PDF', 'No matching records', 'No notifications',
-    'Validate and restore selection', 'Create a secure user account', 'Effective permissions'
-  ]) assert.match(renderer, new RegExp(`['\\"]${label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}['\\"]\\s*:`), `Bengali translation missing: ${label}`);
-  assert.match(renderer, /function translateDom/);
-  assert.match(renderer, /'bn-BD'/);
-  assert.match(renderer, /new Intl\.NumberFormat\(appState\.settings\.language === 'Bengali' \? 'bn-BD' : 'en-BD'/);
+test('English-only product: zero Bengali codepoints and no language switch in shipped code', () => {
+  // v2.0.0 is an English-only release (Phase 11). The previous release asserted a
+  // Bengali dictionary existed; the requirement is now the exact opposite, so this
+  // gate asserts universal ABSENCE across every shipped module instead of presence.
+  const productFiles = [
+    'src/main.js', 'src/ops.js', 'src/queries.js', 'src/core.js', 'src/domain.js', 'src/api.js',
+    'src/repo-local.js', 'src/migrate-state.js', 'src/notifications.js', 'src/doc-engine.js',
+    'src/backup-schedule.mjs', 'src/styles.css',
+    'electron/main.mjs', 'electron/preload.cjs', 'electron/lib/ipc.mjs', 'electron/lib/db.mjs',
+    'electron/lib/schema.mjs', 'electron/lib/records.mjs', 'electron/lib/list-sql.mjs',
+    'electron/lib/repo-sql.mjs', 'electron/lib/ledger-sql.mjs', 'electron/lib/backup.mjs',
+    'electron/lib/auth.mjs', 'electron/lib/migrate.mjs', 'electron/lib/print.mjs',
+    'electron/lib/diagnostics.mjs', 'electron/lib/backup-scheduler.mjs'
+  ];
+  const bengali = /[\u0980-\u09FF]/;
+  for (const file of productFiles) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const hit = text.match(bengali);
+    assert.equal(hit, null, `${file} must not contain Bengali codepoints (found ${hit && hit[0]})`);
+  }
+  // No half-working language control may survive: the dictionary, the DOM
+  // translator, the language setting/selector and bn-BD formatters are all gone.
+  assert.doesNotMatch(renderer, /BENGALI_DICT|translateDom|'bn-BD'/);
+  assert.doesNotMatch(renderer, /\blanguage\b\s*[:=]|name="language"|settings\.language/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/migrate-state.js'), 'utf8'), /language:/);
+  // The release-critical English surfaces the dictionary used to cover still exist.
+  for (const label of ['Dashboard', 'Patients', 'Appointments', 'Clinical Records', 'Prescriptions', 'Billing', 'Payments', 'Inventory', 'Reports', 'Settings']) {
+    assert.ok(renderer.includes(label), `navigation label missing: ${label}`);
+  }
 });
 
 test('release workflow retains the exact current-version artifact contract', () => {

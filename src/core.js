@@ -3,6 +3,52 @@
 // without a browser and prevents UI code from becoming the source of truth.
 
 export const CURRENT_SCHEMA_VERSION = 5;
+
+/* ── the clinic's calendar day ─────────────────────────────────────────────
+ * Every date default in the product (new invoice, new payment, "today's"
+ * queue, aging buckets, reporting periods) means the CLINIC's day, never
+ * UTC's. A clinic in Dhaka at 01:00 local is still on the previous UTC date,
+ * so a UTC-based "today" would silently date tonight's invoices yesterday and
+ * empty the dashboard. `timezone` is a clinic setting (default Asia/Dhaka)
+ * and the same helper is used by the JSON runtime, the SQLite runtime and the
+ * renderer, so all three agree on what day it is. */
+export const DEFAULT_TIMEZONE = 'Asia/Dhaka';
+
+export function timeZoneOf(repo, fallback = DEFAULT_TIMEZONE) {
+  try {
+    const settings = repo && typeof repo.getSettings === 'function' ? repo.getSettings() : null;
+    const zone = settings && typeof settings.timezone === 'string' ? settings.timezone.trim() : '';
+    if (zone) return zone;
+  } catch { /* fall through to the product default */ }
+  return fallback;
+}
+
+export function clinicDate(date = new Date(), timeZone = DEFAULT_TIMEZONE) {
+  const stamp = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(stamp.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(stamp);
+  } catch {
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}`;
+  }
+}
+
+export function clinicToday(repo, date = new Date()) {
+  return clinicDate(date, timeZoneOf(repo));
+}
+
+/** Calendar-day distance between two YYYY-MM-DD strings (b − a). */
+export function daysBetween(a, b) {
+  const dayNumber = (value) => {
+    const [year, month, day] = String(value || '').slice(0, 10).split('-').map(Number);
+    if (!year || !month || !day) return NaN;
+    return Date.UTC(year, month - 1, day) / 86400000;
+  };
+  const left = dayNumber(a);
+  const right = dayNumber(b);
+  return Number.isNaN(left) || Number.isNaN(right) ? NaN : right - left;
+}
 // Attachment ceilings are configurable, resource-aware guards (settings.attachmentMaxMb) —
 // never a fixed product limit. This default is deliberately generous for clinical imaging.
 export const DEFAULT_ATTACHMENT_MAX_BYTES = 256 * 1024 * 1024;

@@ -6,7 +6,7 @@
 import { ARRAY_COLLECTIONS, CURRENT_SCHEMA_VERSION } from './core.js';
 import { normalizeNotificationRules } from './notifications.js';
 
-export const APP_VERSION = '1.6.1';
+export const APP_VERSION = '2.0.0';
 
 export const DEFAULT_SETTINGS = {
   clinicName: '',
@@ -23,7 +23,9 @@ export const DEFAULT_SETTINGS = {
   country: 'Bangladesh',
   chamberName: '',
   logo: '',
-  language: 'English',
+  // v2.0.0 is an English-only product (defect V2-05): the language key is gone
+  // from defaults and from the settings allowlist, and any legacy value is
+  // stripped during migration so no half-working language switch can remain.
   currency: 'BDT',
   timezone: 'Asia/Dhaka',
   dateFormat: 'dd MMM yyyy',
@@ -59,7 +61,6 @@ export const DEFAULT_SETTINGS = {
   accent: 'teal',
   density: 'comfortable',
   printPageSize: 'A4',
-  paperProfile: 'A4',
   customPatientFields: [],
   medicationTemplates: [],
   documentTemplate: { showLogo: true, showClinicContact: true, footer: 'Thank you for choosing our practice.' }
@@ -172,6 +173,7 @@ export function migrateState(saved, appVersion = APP_VERSION) {
   merged.users = Array.isArray(merged.users) ? merged.users : [];
   merged.rooms = normalizeRooms(source, merged.settings);
 
+  delete merged.settings.paperProfile; // retired in v2.0.0: nothing read it
   merged.settings = {
     ...base.settings,
     ...(merged.settings || {}),

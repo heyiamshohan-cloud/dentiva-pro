@@ -45,7 +45,7 @@ export function normalizeNotificationRules(value) {
 
 const pad = (n) => String(n).padStart(2, '0');
 const isoDay = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-const moneyText = (cents) => `৳${(Math.round(Number(cents) || 0) / 100).toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
+const moneyText = (cents) => `Tk ${(Math.round(Number(cents) || 0) / 100).toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
 
 const total = (result) => Number(result?.total || 0);
 

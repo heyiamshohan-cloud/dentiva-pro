@@ -1,5 +1,81 @@
 # Changelog
 
+## 2.0.0 (2026-09-25) — Final audit, hardening and English-only release
+
+The last major cycle: a full-surface forensic pass over **both** runtimes (the
+SQLite desktop engine and the JSON-ledger engine), followed by fixes, regression
+tests and re-verification. Fifteen defects were found and fixed; the complete
+evidence table lives in [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELEASE_AUDIT.md).
+
+### Fixed — patient selection (critical)
+- **The patient picker never worked.** The searchable picker called `query
+  patientLookup`, which no query registry ever implemented, so every
+  patient-selecting form (appointment, visit, invoice, payment, prescription,
+  attachment, dental, treatment plan) returned "Unknown query" with no way to
+  choose a patient. `patientLookup` now exists on both runtimes: search by name,
+  patient code, phone, email or address, paged, archived patients included and
+  flagged so historical documents still resolve.
+- **The desktop picker had been empty** because the `directory` query failed on
+  the packaged engine (a filter on a column that does not exist). Fixed, and the
+  packaging/differential gates now cover it.
+- Patient #501 and beyond are reachable again: the directory snapshot is a
+  bounded lookup list, not a hard ceiling — every list is paged to its last row.
+
+### Fixed — money
+- Goodwill **adjustments are credits** everywhere. The recomputed patient balance
+  in the financial-summary fallback had added them instead of subtracting, so a
+  patient with an adjustment could show a balance inflated by twice the
+  adjustment. The ledger, the cached balance and the invoice all agree now, and
+  the ledger-vs-summary identity is asserted in tests.
+- **Refunds now reduce the net operating KPI** (`collected − refunded −
+  expenses`) instead of being ignored, while gross `collected` stays gross. The
+  accounting card label says exactly what it computes.
+- Invoice ≠ receipt ≠ prescription remains enforced: the prescription document
+  carries zero financial information by contract test.
+
+### Fixed — dates and the clinic's day
+- Every date default uses the **clinic's calendar day** (settings timezone,
+  Asia/Dhaka by default), not UTC. Previously, at 01:00 Dhaka time a new invoice
+  or payment was dated *yesterday*, the dashboard "today" panel queried the wrong
+  day, aging buckets and reporting windows shifted, and "next day" in the
+  calendar was a no-op in any non-UTC timezone. One shared helper now serves the
+  operations layer, both repositories and the renderer; SQL date boundaries are
+  bound parameters on that day.
+
+### Fixed — correctness and consistency between runtimes
+- **List ordering is identical in both runtimes** — 18 collections now mirror the
+  SQL engine's default order exactly (treatments alphabetical, money lists
+  newest-first, a tooth's current dental record ahead of its superseded history,
+  saved reports and notification rules in storage order).
+- **Every query payload carries its patient's name and code**, so lists, agendas,
+  dashboards and printed documents never fall back to "Unassigned patient" for a
+  patient outside the loaded lookup page.
+- A dead setting (`paperProfile` — stored, writable, never read) is retired and
+  removed from existing workspaces.
+- The `count`/`totalExact` listing contract now behaves identically in both
+  runtimes for every collection, including unknown ones.
+
+### Performance
+- The command palette ran a multi-collection search **on every keystroke** and
+  paid for exact counts it never displayed. It is now debounced (180 ms) with a
+  stale-response guard, searches only the six groups it renders, and requests
+  rows without totals: 25,000 patients 320 ms → 209 ms, 100,000 patients
+  1.34 s → 0.79 s. Measured medians at every scale (1k/10k/25k/50k/100k) are in
+  the release audit, including the honest limit that substring search is a scan.
+
+### English-only
+- The product surface is English-only: the bilingual dictionary, the DOM
+  translation pass, the `language` setting and selector, and the locale-specific
+  number/date formatters are gone. Patient names and clinical text still accept
+  any Unicode script (regression-tested).
+
+### Verification for this release
+- `npm test` — 142 tests, 140 pass, 0 fail, 2 skipped.
+- Differential probe (SQL vs JSON engine, every query payload) — 0 findings.
+- Full-surface sweep (every operation, query, collection and sort key) — 0 failures.
+- Scale benchmark — 100,000 patients / 945,086 records / 394 MB, integrity clean.
+
+
 ## 1.6.1 (2026-09-24) — Final flagship polish + document workflow verification
 
 - **Installed-app document verification (new CI gate):** the Windows smoke gains a `docs` phase that drives the REAL v1.6.1 UI through all four production documents — prescription (mandated C/C + O/E chips, R/E, Advice, med rows incl. Bengali, long names, quantity) → preview → PDF on **A4 + A5**; invoice (18 rows, Bengali items, discount) → preview → PDF on **A4 + Letter**; payment receipt (bKash reference, remaining due) → preview → PDF on **80 mm + A5**; patient statement (opening/closing balance, patient code) → preview → PDF on **A4**. PDF bytes are asserted and archived as run evidence (`windows-smoke-evidence/document-pdfs/`).

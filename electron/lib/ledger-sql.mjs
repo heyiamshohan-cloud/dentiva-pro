@@ -114,9 +114,12 @@ export function patientFinancialSummarySql(ws, patientId) {
     billedCents: billed, paidCents: paid, refundedCents: refunded, adjustedCents: adjusted,
     discountCents: Number(inv.discounts) || 0, taxCents: Number(inv.tax) || 0,
     netPaidCents: Math.max(0, paid - refunded),
-    dueCents: Math.max(0, billed + adjusted - paid + refunded) === Math.max(0, Number(inv.outstanding) || 0)
-      ? Math.max(0, Number(inv.outstanding) || 0) // trust invoice due_cents denorm; fallback formula matches if ledger intact
-      : Math.max(0, billed + adjusted - paid + refunded),
+    // billed − write-offs − net paid. Adjustments are credits, exactly as the
+    // ledger books them (V2-09). Prefer the invoice due_cents denorm when it
+    // agrees; otherwise the recomputed formula is authoritative.
+    dueCents: Math.max(0, Number(inv.outstanding) || 0) === Math.max(0, billed - adjusted - paid + refunded)
+      ? Math.max(0, Number(inv.outstanding) || 0)
+      : Math.max(0, billed - adjusted - paid + refunded),
     invoiceCount: Number(inv.n) || 0, paymentCount: Number(pay.n) || 0,
     refundCount: Number(refunds.n) || 0, adjustmentCount: Number(adj.n) || 0,
     visitCount: Number(visitCount) || 0,
@@ -125,15 +128,17 @@ export function patientFinancialSummarySql(ws, patientId) {
 }
 
 /** Monthly (and yearly) nets for the patient financial summary tab. */
-export function patientLedgerRollupsSql(ws, patientId, months = 12, years = 5) {
+export function patientLedgerRollupsSql(ws, patientId, months = 12, years = 5, today = '') {
   const id = String(patientId || '');
   if (!id) return { monthly: [], yearly: [] };
+  // Start of the month 11 months before the clinic's current month.
+  const windowStart = `${String(today || new Date().toISOString().slice(0, 10)).slice(0, 7)}-01`;
   const monthly = ws.query(
     `SELECT strftime('%Y-%m', date) AS bucket,
             SUM(debit_cents) AS billed, SUM(credit_cents) AS received, SUM(debit_cents - credit_cents) AS net
-     FROM (${LEDGER_EVENTS_SQL}) WHERE date >= date('now','start of month', '-11 months')
+     FROM (${LEDGER_EVENTS_SQL}) WHERE date >= date(?, 'start of month', '-11 months')
      GROUP BY bucket ORDER BY bucket DESC LIMIT ${Math.max(1, months)}`,
-    [id, id, id, id]
+    [id, id, id, id, windowStart]
   );
   const yearly = ws.query(
     `SELECT strftime('%Y', date) AS bucket,

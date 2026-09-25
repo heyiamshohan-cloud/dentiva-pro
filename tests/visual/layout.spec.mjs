@@ -152,7 +152,7 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await page.goto('/');
     await completeFirstRun(page);
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
-    await createPatientViaUi(page, 'ডেন্টিভা প্রিমিয়াম রোগী Long Name Patient');
+    await createPatientViaUi(page, 'Premium Multi-Script Patient 日本語のテキスト Long Name');
     // creation routes straight to Patient 360 (fixed router); go back to the list via the sidebar
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
     await expect(page.locator('text=DP-').first()).toBeVisible({ timeout: 10_000 });
@@ -179,14 +179,14 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await expect(page.locator('#command-results .command-row.focused')).toHaveCount(1);
     await page.locator('[data-input="command-search"]').pressSequentially('queue');
     await page.keyboard.press('Enter');
-    await expect(page.locator('h1, h2').filter({ hasText: /queue|দিন/i }).first()).toBeVisible();
+    await expect(page.locator('h1, h2').filter({ hasText: /queue|today/i }).first()).toBeVisible();
   });
 
   test('patient 360: identity strip, financial cards, tabs; statement shows opening balance', async ({ page }) => {
     await page.goto('/');
     await completeFirstRun(page);
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
-    await createPatientViaUi(page, 'ThreeSixty Test Patient ঢাকা');
+    await createPatientViaUi(page, 'ThreeSixty Test Patient Dhaka');
     if (!(await page.locator('.patient-sub').count())) {
       const dump = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').slice(0, 1500));
       const modal = await page.evaluate(() => (document.querySelector('.modal-overlay') || { textContent: '' }).textContent.replace(/\s+/g, ' ').slice(0, 600));
@@ -209,7 +209,7 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await page.goto('/');
     await completeFirstRun(page);
     await page.locator('aside [data-action="navigate"][data-page="patients"]').first().click();
-    await createPatientViaUi(page, 'Rx Premium Patient রোগী');
+    await createPatientViaUi(page, 'Rx Premium Patient 日本語');
     await page.locator('aside [data-action="navigate"][data-page="prescriptions"]').first().click();
   }
   test('rx: stage 1 modal opens', async ({ page }) => {
@@ -240,18 +240,18 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await rxForm.locator('textarea[name="requiredExamination"]').fill('IOPA 46');
     // Advice lives inside a collapsed <details> — expand it first (locale-proof)
     await page.evaluate(() => { const ta = document.querySelector('textarea[name="advice"]'); if (ta?.closest('details')) ta.closest('details').open = true; });
-    await rxForm.locator('textarea[name="advice"]').fill('Warm saline rinse. দুই বেলা মুখ ধুবেন।');
-    await rxForm.locator('[name="medications[0][medicine]"]').fill('Amoxicillin ক্যাপসুল');
+    await rxForm.locator('textarea[name="advice"]').fill('Warm saline rinse. Twice daily after meals.');
+    await rxForm.locator('[name="medications[0][medicine]"]').fill('Amoxicillin カプセル');
     await rxForm.locator('[name="medications[0][quantity]"]').fill('15');
     await page.locator('[data-action="rx-preview"]').click();
     const frame = page.locator('.print-preview-frame');
     await expect(frame).toBeVisible({ timeout: 15_000 });
     const srcdoc = await frame.getAttribute('srcdoc');
-    const probe = { len: (srcdoc || '').length, cc: srcdoc?.includes('C/C'), oe: srcdoc?.includes('O/E'), re: srcdoc?.includes('R/E'), advice: srcdoc?.includes('Advice'), pain: srcdoc?.includes('Pain On'), dp: srcdoc?.includes('DP-'), med: srcdoc?.includes('ক্যাপসুল'), clinic: srcdoc?.includes('Playwright Clinic'), rxSym: srcdoc?.includes('℞'), medTable: srcdoc?.includes('med-table'), secLabel: srcdoc?.includes('doc-section-label'), bodyIdx: srcdoc?.indexOf('<body') };
-    const missing = ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'DP-', 'ক্যাপসুল', 'Playwright Clinic', 'Dr. Ayesha Rahman'].filter((token) => !srcdoc?.includes(token));
+    const probe = { len: (srcdoc || '').length, cc: srcdoc?.includes('C/C'), oe: srcdoc?.includes('O/E'), re: srcdoc?.includes('R/E'), advice: srcdoc?.includes('Advice'), pain: srcdoc?.includes('Pain On'), dp: srcdoc?.includes('DP-'), med: srcdoc?.includes('カプセル'), clinic: srcdoc?.includes('Playwright Clinic'), rxSym: srcdoc?.includes('℞'), medTable: srcdoc?.includes('med-table'), secLabel: srcdoc?.includes('doc-section-label'), bodyIdx: srcdoc?.indexOf('<body') };
+    const missing = ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'DP-', 'カプセル', 'Playwright Clinic', 'Dr. Ayesha Rahman'].filter((token) => !srcdoc?.includes(token));
     expect(missing.join(','), 'PROBE ' + JSON.stringify(probe) + ' TAIL[' + ((srcdoc || '').slice(-400)).replace(/[\n\r]+/g, ' ') + ']').toBe('');
     const content = srcdoc.slice(srcdoc.indexOf('</style>'));
-    for (const bad of ['৳', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment', 'invoice', 'doc-totals']) {
+    for (const bad of ['Tk ', 'BDT', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment', 'invoice', 'doc-totals']) {
       expect(content, `preview leaked ${bad}`).not.toContain(bad);
     }
     await page.screenshot({ path: 'test-results/audit-rx-preview.png', fullPage: true });

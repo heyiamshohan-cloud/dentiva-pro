@@ -6,6 +6,7 @@
 
 import { COLLECTION_TABLES } from './schema.mjs';
 import { rowToRecord } from './records.mjs';
+import { clinicToday, clinicDate, timeZoneOf, daysBetween } from '../../src/core.js';
 
 const escapeLike = (value) => String(value).replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -191,8 +192,11 @@ const SPECS = {
   },
   dentalRecords: {
     text: ['t.note', 't.procedure_name', 't.tooth'], joinPatient: true,
-    sorts: { recent: 't.created_at DESC', tooth: 't.dentition ASC, t.tooth ASC' },
-    defaultOrder: 't.created_at DESC',
+    // 'superseded ASC' keeps the CURRENT record for a tooth ahead of its
+    // superseded history when both carry the same created_at (they usually do:
+    // a status change seconds apart). Mirrored by LocalRepo.#sortRecords.
+    sorts: { recent: 't.created_at DESC, t.superseded ASC, t.tooth ASC', tooth: 't.dentition ASC, t.tooth ASC' },
+    defaultOrder: 't.created_at DESC, t.superseded ASC, t.tooth ASC',
     filter(where, params, f) {
       if (f.patientId) { where.push('t.patient_id = ?'); params.push(f.patientId); }
       const tooth = f.tooth || f.toothNumber;
@@ -207,7 +211,10 @@ const SPECS = {
     sorts: { name: 't.name ASC', 'price-desc': 't.default_price_cents DESC', recent: 't.created_at DESC' },
     defaultOrder: 't.name ASC',
     filter(where, params, f) {
-      if (f.archived !== 'include') where.push('t.archived = 0');
+      // Treatments are enabled/disabled with `active`; the table has no
+      // `archived` column (a stale `t.archived = 0` filter here made EVERY
+      // treatment list — and therefore the shared `directory` query that feeds
+      // every patient/staff/treatment picker — fail on the SQLite runtime).
       if (f.category) { where.push('t.category = ?'); params.push(f.category); }
       if (f.active === true || f.active === 'only') where.push('t.active = 1');
       if (f.active === false || f.active === 'exclude') where.push('t.active = 0');
@@ -269,10 +276,13 @@ const SPECS = {
   }
 };
 
-export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, query = '', sort = '', filters = {} } = {}) {
+export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, query = '', sort = '', filters = {}, count = true } = {}) {
   const safePage = Math.max(1, Number(page) || 1);
   const safeSize = Math.max(1, Math.min(500, Number(pageSize) || 25));
-  const empty = { rows: [], total: 0, page: safePage, pageSize: safeSize };
+  // Same shape as a real page (including the count contract) so an unknown or
+  // unsupported collection cannot produce a different payload than the JSON
+  // runtime — that difference would leak into callers as a missing field.
+  const empty = { rows: [], total: count === false ? null : 0, totalExact: count !== false, page: safePage, pageSize: safeSize };
   const f = filters && typeof filters === 'object' ? filters : {};
 
   // Delegated collections with dedicated optimised listers.
@@ -283,7 +293,7 @@ export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, q
       dateFrom: f.dateFrom || '', dateTo: f.dateTo || '',
       registeredFrom: f.registeredFrom || '', registeredTo: f.registeredTo || '',
       hasPhone: Boolean(f.hasPhone), toothStatus: f.toothStatus || '', tag: f.tag || '',
-      includeAggregates: Boolean(f.includeAggregates)
+      includeAggregates: Boolean(f.includeAggregates), count
     });
     return { ...result, page: safePage, pageSize: safeSize };
   }
@@ -292,12 +302,12 @@ export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, q
       query, page: safePage, pageSize: safeSize, sort: sort || 'name',
       category: f.category || '', supplierId: f.supplierId || '',
       lowStock: Boolean(f.lowStock), lowStockThreshold: Number(f.lowStockThreshold || 0),
-      expiringBefore: f.expiringBefore || '', archived: f.archived || 'exclude'
+      expiringBefore: f.expiringBefore || '', archived: f.archived || 'exclude', count
     });
     return { ...result, page: safePage, pageSize: safeSize };
   }
   if (collection === 'audit') {
-    return repo.listAudit({ query, page: safePage, pageSize: safeSize, entity: f.entity || '', entityId: f.entityId || '', userId: f.userId || '', from: f.from || '', to: f.to || '' });
+    return repo.listAudit({ query, page: safePage, pageSize: safeSize, entity: f.entity || '', entityId: f.entityId || '', userId: f.userId || '', from: f.from || '', to: f.to || '', count });
   }
   if (collection === 'users') {
     const all = repo.usersList();
@@ -309,7 +319,12 @@ export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, q
       if (q && !`${user.name} ${user.role}`.toLowerCase().includes(q)) return false;
       return true;
     });
-    return { rows: filtered.slice((safePage - 1) * safeSize, safePage * safeSize), total: filtered.length, page: safePage, pageSize: safeSize };
+    return {
+      rows: filtered.slice((safePage - 1) * safeSize, safePage * safeSize),
+      total: count === false ? null : filtered.length,
+      totalExact: count !== false,
+      page: safePage, pageSize: safeSize
+    };
   }
 
   const spec = SPECS[collection];
@@ -332,10 +347,21 @@ export function listCollectionSql(repo, collection, { page = 1, pageSize = 25, q
   const order = spec.sorts[sort] || spec.defaultOrder;
   const orderSql = order ? `ORDER BY ${order}` : '';
 
-  const total = Number(repo.ws.queryOne(`SELECT COUNT(*) AS total FROM ${from} ${whereSql}`, params)?.total ?? 0);
+  // Two queries on purpose: COUNT(*) can be answered from an index (or an
+  // index-only scan) and the page query can then stop at LIMIT using the sort
+  // index. Folding both into COUNT(*) OVER () reads better but forces SQLite to
+  // materialise and sort the whole filtered set before LIMIT — measured 6x
+  // slower on an unfiltered 25k-row list, so the paired queries stay.
+  // `count: false` skips the total for callers that only need rows (the command
+  // palette): with a text filter that count is a second full scan, and the
+  // palette never displays it. `totalExact` says so explicitly.
+  const withTotal = count !== false;
+  const total = withTotal
+    ? Number(repo.ws.queryOne(`SELECT COUNT(*) AS total FROM ${from} ${whereSql}`, params)?.total ?? 0)
+    : null;
   const rows = repo.ws.query(`SELECT t.* FROM ${from} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`, [...params, safeSize, (safePage - 1) * safeSize])
     .map(rowToRecord).filter(Boolean);
-  return { rows, total, page: safePage, pageSize: safeSize };
+  return { rows, total, totalExact: withTotal, page: safePage, pageSize: safeSize };
 }
 
 // ---- report statistics (SQL aggregates; scalars + grouped rows) -------------
@@ -350,6 +376,9 @@ const dateBound = (from, to, column = 'date') => {
 };
 
 export function reportStatsSql(repo, kind, from = '', to = '') {
+  // Every "now"-relative figure is anchored on the clinic's calendar day, the
+  // same day the JSON runtime and the renderer use.
+  const today = clinicToday(repo);
   const range = dateBound(from, to);
   const rangeAnd = range.sql ? `${range.sql} AND` : 'WHERE';
   switch (kind) {
@@ -373,7 +402,7 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
         registered: count(repo, `SELECT COUNT(*) AS total FROM patients ${reg.sql ? `${reg.sql} AND` : 'WHERE'} archived = 0`, reg.params),
         totalActive: count(repo, 'SELECT COUNT(*) AS total FROM patients WHERE archived = 0'),
         withPhone: count(repo, `SELECT COUNT(*) AS total FROM patients ${reg.sql ? `${reg.sql} AND` : 'WHERE'} archived = 0 AND phone <> ''`, reg.params),
-        upcoming: count(repo, "SELECT COUNT(*) AS total FROM patients WHERE archived = 0 AND next_visit <> '' AND next_visit >= date('now')")
+        upcoming: count(repo, "SELECT COUNT(*) AS total FROM patients WHERE archived = 0 AND next_visit <> '' AND next_visit >= ?", [today])
       };
     }
     case 'visits':
@@ -405,7 +434,7 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
       return {
         itemsTracked: count(repo, 'SELECT COUNT(*) AS total FROM inventory WHERE archived = 0'),
         lowStock: count(repo, 'SELECT COUNT(*) AS total FROM inventory WHERE archived = 0 AND current_stock <= MAX(minimum_stock, reorder_threshold)'),
-        expired: count(repo, "SELECT COUNT(*) AS total FROM inventory WHERE archived = 0 AND expiry_date <> '' AND expiry_date < date('now')"),
+        expired: count(repo, "SELECT COUNT(*) AS total FROM inventory WHERE archived = 0 AND expiry_date <> '' AND expiry_date < ?", [today]),
         unitsOnHand: count(repo, 'SELECT COALESCE(SUM(current_stock),0) AS total FROM inventory WHERE archived = 0'),
         stockValueCents: money(repo, 'SELECT COALESCE(SUM(current_stock * purchase_price_cents),0) AS cents FROM inventory WHERE archived = 0')
       };
@@ -422,22 +451,36 @@ export function reportStatsSql(repo, kind, from = '', to = '') {
       const collectedCents = money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled')`, range.params);
       const expensesCents = money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM expenses ${range.sql}`, range.params);
       const methods = repo.ws.query(`SELECT method AS label, COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS total FROM payments ${range.sql ? `${range.sql} AND` : 'WHERE'} status NOT IN ('Voided','Cancelled') GROUP BY method ORDER BY cents DESC`, range.params);
+      const refundedCents = money(repo, `SELECT COALESCE(SUM(refunded_cents),0) AS cents FROM payments ${range.sql}`, range.params);
       return {
         billedCents: money(repo, `SELECT COALESCE(SUM(total_cents),0) AS cents FROM invoices ${range.sql ? `${range.sql} AND` : 'WHERE'} status <> 'Cancelled'`, range.params),
         collectedCents, expensesCents,
         adjustedCents: money(repo, `SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payment_adjustments ${range.sql ? `${range.sql} AND` : 'WHERE'} type = 'Adjustment'`, range.params),
-        refundedCents: money(repo, `SELECT COALESCE(SUM(refunded_cents),0) AS cents FROM payments ${range.sql}`, range.params),
-        netOperatingCents: collectedCents - expensesCents,
+        refundedCents,
+        // V2-07: refunds reduce the NET operating KPI once; `collectedCents`
+        // stays the gross figure the clinic actually received.
+        netOperatingCents: collectedCents - refundedCents - expensesCents,
         receivablesCents: money(repo, "SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled')"),
         byMethod: methods.map((row) => ({ label: row.label || 'Other', cents: Number(row.cents || 0), count: Number(row.total || 0) }))
       };
     }
     case 'aging': {
-      const bucket = (label, lo, hi) => ({
-        label,
-        cents: money(repo, `SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled') AND due_cents > 0 AND (julianday('now') - julianday(date)) ${lo === null ? '<=' : '>='} ${lo === null ? hi : lo}${hi === null ? '' : ` AND (julianday('now') - julianday(date)) <= ${hi}`}`),
-        count: count(repo, `SELECT COUNT(*) AS total FROM invoices WHERE status NOT IN ('Paid','Cancelled') AND due_cents > 0 AND (julianday('now') - julianday(date)) ${lo === null ? '<=' : '>='} ${lo === null ? hi : lo}${hi === null ? '' : ` AND (julianday('now') - julianday(date)) <= ${hi}`}`)
-      });
+      // Aging is measured in whole calendar days from the clinic's today
+      // (julianday('now') would drift by the time of day and by the UTC offset,
+      // pushing a 30-day-old invoice into the 31–60 bucket after 00:00 UTC).
+      const bucket = (label, lo, hi) => {
+        const bound = 'CAST(julianday(?) - julianday(date) AS INTEGER)';
+        const parts = [];
+        const params = [];
+        if (lo !== null) { parts.push(`${bound} >= ${lo}`); params.push(today); }
+        if (hi !== null) { parts.push(`${bound} <= ${hi}`); params.push(today); }
+        const clause = `status NOT IN ('Paid','Cancelled') AND due_cents > 0${parts.length ? ` AND ${parts.join(' AND ')}` : ''}`;
+        return {
+          label,
+          cents: money(repo, `SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE ${clause}`, params),
+          count: count(repo, `SELECT COUNT(*) AS total FROM invoices WHERE ${clause}`, params)
+        };
+      };
       return { rows: [bucket('Current (0–30 days)', null, 30), bucket('31–60 days', 31, 60), bucket('61–90 days', 61, 90), bucket('Over 90 days', 91, null)] };
     }
     case 'expenseCategories':

@@ -9,20 +9,24 @@
  */
 
 import { APP_VERSION } from './migrate-state.js';
-import { CURRENT_SCHEMA_VERSION } from './core.js';
+import { CURRENT_SCHEMA_VERSION, clinicDate, timeZoneOf, DEFAULT_TIMEZONE } from './core.js';
 import { statementEntries, periodBounds } from './domain.js';
 import { normalizeNotificationRules } from './notifications.js';
 
 const DAY = 86400000;
 const iso = (value) => (value instanceof Date ? value.toISOString() : new Date(value).toISOString());
 const isoDate = (value) => iso(value).slice(0, 10);
+/* `today` always means the clinic's calendar day (settings.timezone). */
+const todayFor = (repo, value = new Date()) => clinicDate(value, timeZoneOf(repo));
 const clampPage = (value, fallback = 1) => Math.max(1, Number(value) || fallback);
 const clampPageSize = (value, fallback = 25) => Math.min(500, Math.max(1, Number(value) || fallback));
 const num = (value) => Number(value || 0);
 
 /* ── range resolution (ports v1.3.0 dateRange) ── */
-export function resolveRange(rangeKey, from, to, now = new Date()) {
-  const todayStr = isoDate(now);
+export function resolveRange(rangeKey, from, to, now = new Date(), timeZone = DEFAULT_TIMEZONE) {
+  // Ranges are anchored on the clinic's day (settings.timezone), the same day
+  // the renderer and the SQLite runtime use.
+  const todayStr = clinicDate(now, timeZone || DEFAULT_TIMEZONE);
   const endStr = rangeKey === 'custom' && to ? String(to).slice(0, 10) : todayStr;
   const end = new Date(`${endStr}T00:00:00Z`);
   let start = null;
@@ -50,7 +54,9 @@ export const COLLECTION_PERMISSION = {
 export const QUERY_PERMISSION = {
   bootstrap: null, list: null, settings: null, users: 'settings.view', workspace: null, directory: null, record: null,
   patientAggregate: 'patients.view', patientStatement: 'patients.view', patientDuplicates: 'patients.view',
+  patientTimeline: 'patients.view',
   patientLedgerQuery: 'billing.view', patientFinancialSummary: 'billing.view', patientLedgerRollups: 'billing.view', visitBilling: 'patients.view',
+  patientLookup: 'patients.view',
   dentalHistory: 'patients.view', invoiceDetail: 'billing.view', appointmentDay: 'appointments.view',
   appointmentsBetween: 'appointments.view', dashboard: null, analytics: 'reports.view',
   report: 'reports.view', accountingSummary: 'accounting.view', inventoryAnalytics: 'inventory.view',
@@ -239,10 +245,10 @@ export const QUERIES = {
   async patientFinancialSummary(repo, params = {}) {
     const patientId = String(params.patientId || '');
     if (typeof repo.patientFinancialSummary !== 'function') {
-      // Browser/demo adapters have no SQL engine: a zero summary is the
-      // honest answer for a patient with no ledger there (v1.6.1 D6). The
-      // desktop app always ships the on-disk engine and never hits this.
-      return { ok: true, source: 'fallback', billedCents: 0, paidCents: 0, netPaidCents: 0, dueCents: 0, refundedCents: 0, adjustedCents: 0, discountCents: 0 };
+      // Both shipping runtimes implement this accessor (LocalRepo and SqlRepo),
+      // so this branch exists only for an adapter that has no ledger at all —
+      // there a zero summary is the honest answer rather than an error.
+      return { ok: true, source: 'no-ledger', billedCents: 0, paidCents: 0, netPaidCents: 0, dueCents: 0, refundedCents: 0, adjustedCents: 0, discountCents: 0 };
     }
     return repo.patientFinancialSummary(patientId);
   },
@@ -291,7 +297,7 @@ export const QUERIES = {
   },
 
   async appointmentDay(repo, params = {}) {
-    const date = String(params.date || isoDate(new Date()));
+    const date = String(params.date || todayFor(repo));
     const appointments = await repo.appointmentsOnDate(date);
     return { date, appointments };
   },
@@ -303,8 +309,8 @@ export const QUERIES = {
 
   async dashboard(repo, params = {}, ctx) {
     const settings = await repo.getSettings();
-    const today = isoDate(new Date());
-    const range = resolveRange(params.range || 'month');
+    const today = todayFor(repo);
+    const range = resolveRange(params.range || 'month', undefined, undefined, new Date(), timeZoneOf(repo));
     const permissions = (ctx && ctx.permissions) || [];
     const can = (permission) => permissions.includes(permission);
     const [appointments, tasks, aggregates, counts] = await Promise.all([
@@ -330,7 +336,7 @@ export const QUERIES = {
   /* Analytics — SQL-side aggregates when available (desktop), JS otherwise. */
   async analytics(repo, params = {}, ctx) {
     const settings = await repo.getSettings();
-    const range = resolveRange(params.rangeKey || 'month', params.from, params.to);
+    const range = resolveRange(params.rangeKey || 'month', params.from, params.to, new Date(), timeZoneOf(repo));
     if (range.invalid) return { ok: false, error: 'Invalid custom range' };
     const stats = await repo.reportStats('analytics', range.from, range.to);
     const topServices = await repo.reportStats('services', range.from, range.to);
@@ -342,7 +348,7 @@ export const QUERIES = {
    * even 'all records' stays paginated. */
   async report(repo, params = {}) {
     const type = ['revenue', 'patients', 'visits', 'appointments', 'outstanding', 'inventory', 'expenses'].includes(params.type) ? params.type : 'revenue';
-    const range = resolveRange(params.rangeKey || 'month', params.from, params.to);
+    const range = resolveRange(params.rangeKey || 'month', params.from, params.to, new Date(), timeZoneOf(repo));
     if (range.invalid) return { ok: false, error: 'Invalid custom range' };
     const page = clampPage(params.page);
     const size = clampPageSize(params.pageSize, 25);
@@ -360,7 +366,7 @@ export const QUERIES = {
   },
 
   async accountingSummary(repo, params = {}) {
-    const range = resolveRange(params.rangeKey || 'month', params.from, params.to);
+    const range = resolveRange(params.rangeKey || 'month', params.from, params.to, new Date(), timeZoneOf(repo));
     if (range.invalid) return { ok: false, error: 'Invalid custom range' };
     const [summary, aging, expenseCategories] = await Promise.all([
       repo.reportStats('accounting', range.from, range.to),
@@ -374,7 +380,7 @@ export const QUERIES = {
     const settings = await repo.getSettings();
     const [lowStock, expiring, movements, value] = await Promise.all([
       repo.listCollection('inventory', { page: 1, pageSize: 25, filters: { lowStock: true, lowStockThreshold: settings.lowStockThreshold } }),
-      repo.listCollection('inventory', { page: 1, pageSize: 25, filters: { expiringBefore: isoDate(new Date(Date.now() + 60 * DAY)) } }),
+      repo.listCollection('inventory', { page: 1, pageSize: 25, filters: { expiringBefore: clinicDate(new Date(Date.now() + 60 * DAY), timeZoneOf(repo)) } }),
       repo.reportStats('movements', '', ''),
       repo.reportStats('inventoryValue', '', ''),
     ]);
@@ -420,25 +426,54 @@ export const QUERIES = {
     };
   },
 
+  /* Uncapped server-side patient lookup for the combobox picker (V2-08).
+   * The picker used to be filled from a capped client directory, so in a
+   * lifetime practice every patient past the cap was unselectable — and the
+   * query the v2.0.0 picker calls had no implementation at all. This searches
+   * the workspace itself: `total` is the true number of matches, page/pageSize
+   * are honoured up to the same 500-row ceiling every other list uses, and
+   * archived patients are returned (flagged) so historical documents can still
+   * resolve the name on an old invoice. Works identically on both engines. */
+  async patientLookup(repo, params = {}) {
+    const query = String(params.query || '').trim();
+    const page = clampPage(params.page);
+    const size = clampPageSize(params.pageSize, 20);
+    const result = await repo.listCollection('patients', {
+      page, pageSize: size, query, sort: 'name', filters: { status: 'all' }
+    });
+    return {
+      ok: true,
+      rows: (result.rows || []).map((patient) => ({
+        id: patient.id,
+        fullName: patient.fullName || '',
+        patientCode: patient.patientCode || '',
+        phone: patient.phone || '',
+        archived: Boolean(patient.archived),
+        balanceCents: Number(patient.balanceCents || 0)
+      })),
+      total: result.total || 0,
+      page,
+      pageSize: size
+    };
+  },
+
   async globalSearch(repo, params = {}) {
     const query = String(params.query || '').trim();
     if (query.length < 2) return { query, results: {} };
     const limit = clampPageSize(params.limit, 8);
-    const scoped = (collection) => repo.listCollection(collection, { page: 1, pageSize: limit, query });
+    // `count: false`: the palette renders the first few rows per group and never
+    // shows a total, so paying for an exact COUNT per group (a second full scan
+    // each) would double the cost of every keystroke search.
+    const scoped = (collection) => repo.listCollection(collection, { page: 1, pageSize: limit, query, count: false });
     const results = {};
-    const plans = [
-      ['patients', scoped('patients')],
-      ['appointments', scoped('appointments')],
-      ['invoices', scoped('invoices')],
-      ['payments', scoped('payments')],
-      ['visits', scoped('visits')],
-      ['prescriptions', scoped('prescriptions')],
-      ['inventory', scoped('inventory')],
-      ['staff', scoped('staff')],
-    ];
-    for (const [name, promise] of plans) {
-      try { const found = await promise; if (found.total) results[name] = found; } catch { /* scoped out */ }
-    }
+    // Only the groups the command palette actually renders are searched: the
+    // palette has no inventory/staff sections, so querying them was pure
+    // latency on a keystroke path.
+    const groups = ['patients', 'appointments', 'invoices', 'payments', 'visits', 'prescriptions'];
+    const found = await Promise.all(groups.map(async (name) => {
+      try { return [name, await scoped(name)]; } catch { return [name, null]; }
+    }));
+    for (const [name, result] of found) if (result && result.rows.length) results[name] = result;
     return { query, results };
   },
 
@@ -464,6 +499,56 @@ export const QUERIES = {
   },
 };
 
+/* ---- patient display names on every query payload -----------------------
+ * Lists, agendas, dashboards and search results all reference patients by id.
+ * Resolving those ids from a client-side cache only works while the practice
+ * is small (the directory snapshot is paged like every other list), so a
+ * lifetime database would render "Unassigned patient" for most rows. Instead
+ * every query payload is enriched here with the patient's display name/code
+ * through one batched primary-key lookup — identical for both runtimes. */
+function collectPatientIds(value, ids, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 12) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectPatientIds(item, ids, depth + 1);
+    return;
+  }
+  if (typeof value.patientId === 'string' && value.patientId && !value.patientName) ids.add(value.patientId);
+  for (const child of Object.values(value)) {
+    if (child && typeof child === 'object') collectPatientIds(child, ids, depth + 1);
+  }
+}
+
+function attachPatientNames(value, names, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 12) return;
+  if (Array.isArray(value)) {
+    for (const item of value) attachPatientNames(item, names, depth + 1);
+    return;
+  }
+  if (typeof value.patientId === 'string' && names.has(value.patientId)) {
+    const patient = names.get(value.patientId);
+    if (!value.patientName) value.patientName = patient.fullName || '';
+    if (!value.patientCode) value.patientCode = patient.patientCode || '';
+  }
+  for (const child of Object.values(value)) {
+    if (child && typeof child === 'object') attachPatientNames(child, names, depth + 1);
+  }
+}
+
+function enrichPatientNames(repo, payload) {
+  try {
+    const ids = new Set();
+    collectPatientIds(payload, ids);
+    if (!ids.size) return payload;
+    const names = new Map();
+    for (const patient of repo.byIds('patients', [...ids]) || []) {
+      if (patient && patient.id) names.set(patient.id, patient);
+    }
+    if (!names.size) return payload;
+    attachPatientNames(payload, names);
+  } catch { /* enrichment is best-effort; ids in the payload stay authoritative */ }
+  return payload;
+}
+
 export async function runQuery(repo, name, params, ctx) {
   const handler = QUERIES[name];
   if (!handler) return { ok: false, error: 'Unknown query', code: 'query-unknown' };
@@ -471,7 +556,8 @@ export async function runQuery(repo, name, params, ctx) {
   if (!authorized.ok) return authorized;
   try {
     const result = await handler(repo, params || {}, ctx || null);
-    return result && result.ok === false ? result : { ok: true, ...(result && typeof result === 'object' ? result : { value: result }) };
+    if (result && result.ok === false) return result;
+    return enrichPatientNames(repo, { ok: true, ...(result && typeof result === 'object' ? result : { value: result }) });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error), code: 'query-failed' };
   }

@@ -1,12 +1,33 @@
 # Dentiva Pro
 
-**Premium offline-first dental practice management for Windows · v1.6.1**
+**Premium offline-first dental practice management for Windows · v2.0.0**
 
-Dentiva Pro is a local, relational dental-practice workspace for clinics in Bangladesh. v1.6.1 (polish + document-verification pass on the v1.6.0 flagship line) ships the screen-audit defect fixes D1–D8 and the installed-app document-workflow verification.: a paginated, sortable, filterable patient list; a federated global search across seven collections; a patient profile with visits, clickable timeline and professional statement; a structured prescription builder with medication rows and clinician-authored templates; live protocol/street-address discovery; online-payments-first checkout with refund lifecycle; saved patient views; and community street suggestions — built on top of v1.5.2, which builds on the v1.4.0 **relational SQLite engine** (Node's built-in `node:sqlite`, zero native dependencies), a **shared service layer** with server-side validation, RBAC and audit, and a rebuilt **async, paginated renderer** on a light-only Design System 2.0.
+Dentiva Pro is a local, relational dental-practice workspace for clinics in Bangladesh. It runs entirely on the clinic's own machine: a **relational SQLite engine** (Node's built-in `node:sqlite`, zero native dependencies), a **shared service layer** with server-side validation, RBAC and audit, and an **async, paginated renderer** on a light-only design system. This machine is the only copy of the data — there is no cloud, no telemetry and no network code.
+
+v2.0.0 is the final audit and hardening cycle. It fixes every defect found by a full-surface forensic pass over both runtimes (see the findings table in [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELEASE_AUDIT.md)), including several that no previous audit had caught:
+
+- **the patient picker now exists at all** — the searchable picker called a query that was never implemented, so no patient-selecting form could work (`V2-08`);
+- **the desktop `directory` query no longer fails**, which is what had been emptying every picker and rendering "Unassigned patient" (`V2-01`);
+- **goodwill adjustments are treated as credits** everywhere, so a patient's balance is never inflated by twice the adjustment (`V2-09`);
+- **"today" is the clinic's calendar day**, not UTC's — invoices, payments, the queue, aging buckets and report windows no longer slip a day in the early-morning hours (`V2-10`);
+- **refunds reduce the net operating KPI** exactly once, while gross collections stay gross (`V2-07`);
+- **the product UI is English-only** — the bilingual layer and its Bengali dictionary are gone (`V2-05`);
+- **list ordering is identical in both runtimes** (the same list can no longer come back in a different order in desktop vs browser mode) (`V2-11`), and every query payload carries its patient's name and code, so a lifetime practice never shows "Unassigned patient" (`V2-12`).
 
 The repository starts with an empty store by design. There are no sample patients, demo transactions, fake dashboard numbers or placeholder records — every record visible in the UI is created by the clinic.
 
-## What changed in v1.4.0
+## Verification status for v2.0.0
+
+| Gate | Result |
+|---|---|
+| `npm test` (unit + integration, both runtimes) | 142 tests — 140 pass, 0 fail, 2 skipped |
+| `node scripts/v2-audit/differential-probe.mjs` (SQL vs JSON engine) | 0 findings |
+| `node scripts/v2-audit/surface-sweep.mjs` (every op, query, collection, sort key) | 0 failures |
+| Scale (1k → 100k patients) | measured to 100,000 patients / 945,086 records / 394 MB |
+
+Performance and its honest limits, plus the defects fixed in this cycle, are documented in [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELEASE_AUDIT.md) and [`docs/V2_FINAL_ENGINEERING_CHECKPOINT.md`](docs/V2_FINAL_ENGINEERING_CHECKPOINT.md).
+
+## Earlier architecture (introduced in v1.4.0)
 
 **Storage (Phase 2)**
 - Relational schema layout v1 on `node:sqlite`: 26 collection tables, typed money columns (`INTEGER` cents), enforced foreign keys (RESTRICT), ~40 indexes, WAL journaling, append-only audit table.
@@ -22,14 +43,14 @@ The repository starts with an empty store by design. There are no sample patient
 
 **Renderer (Phases 4–8)**
 - Rebuilt as a pure presentation client over `src/api.js` (`DesktopApi` over the validated IPC bridge, `LocalApi` over `LocalRepo` in browser dev mode). Every page is async and **server-side paginated** — the renderer never holds a full collection and never renders unbounded row sets.
-- Light-only Design System 2.0: design tokens, premium shell, dashboard 3.0 with configurable widgets, ⌘K command palette, queue 2.0, dental chart 2.0 with preserved tooth history, patient timeline, statements, accounting with receivables aging, analytics with monthly trends, diagnostics, notifications 2.0, full EN/BN localization (449-entry Bengali dictionary, bn-BD formatters).
+- Light-only design system: design tokens, premium shell, configurable dashboard widgets, ⌘K command palette (debounced; searches patients, appointments, invoices, payments, visits and prescriptions), queue, dental chart with preserved tooth history, patient timeline, statements, accounting with receivables aging, analytics with monthly trends, diagnostics and notifications. The product interface is English-only; patient names and clinical text accept any Unicode script.
 - Printing/PDF through an isolated, script-disabled window; PDF active content is never embedded.
 - Security boundary: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`, allowlisted IPC channels (one `invoke` in the preload, re-validated in main), CSP with `frame-ancestors 'none'`, navigation and webview guards, zero runtime npm dependencies, no network code of any kind.
 
 ## Flagship modules
 
 - Dashboard command center: metric strip, today's schedule, queue ring, follow-ups due, operational signals; widget visibility/order persisted per workspace
-- Patients: search (Latin + Bengali), filters (status, balance), saved views, duplicate warning, profile workspace with 14 tabs, merge with confirm, CSV import/export, 5,000-row export page
+- Patients: search by name, code, phone, email or address (any Unicode script), filters (status, balance), saved views, duplicate warning, profile workspace with 14 tabs, merge with confirm, CSV import/export, 5,000-row export page
 - Appointments: day/week/agenda, overlap detection with explicit confirm, queue serials, check-in/lifecycle, print queue
 - Clinical: visits with follow-up automation, dental chart (adult + primary dentition, superseded history preserved), prescriptions with medication catalog, treatment plans with staged progress and explicit visit conversion, referrals with responses, follow-up tasks
 - Finance: invoices with reprice lock, payments with receipts, partial refunds, balance adjustments, patient statements, billing/queue/print workflows
@@ -39,36 +60,45 @@ The repository starts with an empty store by design. There are no sample patient
 
 ## Requirements & performance
 
-Verified on the real relational store (`scripts/dataset-benchmark.mjs`):
+Measured medians (median of 3 runs) on the real relational store with
+`node scripts/dataset-benchmark.mjs 1000,10000,25000,50000,100000`:
 
-| Size | Records | List page 1 | Search (BN) | Revenue report | Backup |
-|---|---|---|---|---|---|
-| 1,000 patients | 9.5k | 2 ms | 3 ms | 3 ms | 42 ms |
-| 10,000 patients | 94.6k | 2–18 ms | 23 ms | 15–32 ms | 171 ms |
-| 25,000 patients | 236k | 5–38 ms | 55 ms | 33–67 ms | 410 ms |
-| **100,000 patients** | **945k** | **18 ms** | **221 ms** | **138 ms** | **1.6 s (412 MB)** |
+| Size | Records | DB size | Patient list p1 | Patient search | Revenue report | Backup |
+|---|---|---|---|---|---|---|
+| 1,000 patients | 9.5k | 4.4 MB | 0.7 ms | 2.6 ms | 2.6 ms | 29 ms |
+| 10,000 patients | 94.6k | 39 MB | 1.4 ms | 23 ms | 13 ms | 168 ms |
+| 25,000 patients | 236k | 98 MB | 4.0 ms | 55 ms | 57 ms | 388 ms |
+| 50,000 patients | 473k | 196 MB | 5.8 ms | 94 ms | 74 ms | 984 ms |
+| **100,000 patients** | **945k** | **394 MB** | **15.8 ms** | **203 ms** | **142 ms** | **2.3 s** |
 
-Integrity check passes at every size; patient statement stays under 1 ms.
+Integrity check passes at every size; a patient statement stays under 1 ms.
+Pages are paginated end to end — the renderer never hydrates a full collection.
+
+**Known limit, stated plainly:** text search is a case-insensitive substring scan
+across the searched columns, so its cost grows with the record count. A patient
+search is ~200 ms and a command-palette search is ~800 ms on a 100,000-patient
+database (945k records, ~400 MB). The palette is debounced so typing stays
+smooth, results are never truncated, and an FTS index is the planned v2.1
+improvement. Full numbers: [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELEASE_AUDIT.md).
 
 ## Development
 
 ```bash
 npm install
 npm run dev            # Vite dev server (browser mode on LocalRepo)
-npm test               # node:test suite (55 tests)
+npm test               # node:test suite (142 tests)
 npm run benchmark:datasets
 npm run start:desktop  # build + Electron (desktop mode on SqlRepo)
 ```
 
-Windows packaging and release: see [`docs/BUILD.md`](docs/BUILD.md). The Windows CI pipeline runs tests, build, Chromium viewport checks, portable/NSIS packaging, PE inspection, the portable launch/restart persistence smoke and checksum verification, then publishes the four release artifacts.
+Windows packaging and release: see [`docs/BUILD.md`](docs/BUILD.md). The Windows CI pipeline (`windows-latest`) runs the test suite, the renderer build, the Chromium viewport checks, portable/NSIS/ZIP packaging, ASAR runtime-closure verification, PE inspection, a portable-launch + silent-install + uninstall smoke, and checksum verification, then publishes the four release artifacts (portable `.exe`, NSIS `Setup.exe`, ZIP, `checksums.txt`).
 
 ## Documentation
 
-- [`docs/FINAL_AUDIT_REPORT_1.4.0.md`](docs/FINAL_AUDIT_REPORT_1.4.0.md) — audit and release report
-- [`docs/V1.4.0_BASELINE_AUDIT.md`](docs/V1.4.0_BASELINE_AUDIT.md) — per-capability classification of v1.3.0 before the transformation
-- [`docs/V1.4.0_REQUIREMENTS_MATRIX.md`](docs/V1.4.0_REQUIREMENTS_MATRIX.md) — requirement → evidence matrix
-- [`docs/V1.4.0_EXECUTION_STATE.md`](docs/V1.4.0_EXECUTION_STATE.md) — execution checkpoint
-- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) · [`docs/BUILD.md`](docs/BUILD.md) · [`docs/CHANGELOG.md`](docs/CHANGELOG.md) · [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md)
+- [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELEASE_AUDIT.md) — **v2.0.0 release audit**: every defect found and fixed, the evidence for each fix, measured performance and honest limitations
+- [`docs/V2_FINAL_ENGINEERING_CHECKPOINT.md`](docs/V2_FINAL_ENGINEERING_CHECKPOINT.md) — durable engineering checkpoint for the v2.0.0 cycle
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) · [`docs/BUILD.md`](docs/BUILD.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md)
+- Historical audits (kept as a record of earlier releases): [`docs/FINAL_AUDIT_REPORT_1.4.0.md`](docs/FINAL_AUDIT_REPORT_1.4.0.md), [`docs/V1.4.0_BASELINE_AUDIT.md`](docs/V1.4.0_BASELINE_AUDIT.md), [`docs/V1.4.0_REQUIREMENTS_MATRIX.md`](docs/V1.4.0_REQUIREMENTS_MATRIX.md), [`docs/V1.4.0_EXECUTION_STATE.md`](docs/V1.4.0_EXECUTION_STATE.md)
 
 ## Privacy & safety
 

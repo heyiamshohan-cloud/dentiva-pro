@@ -68,7 +68,7 @@ Keep a verified backup in a trusted location. The Node/storage tests cover corru
 
 Print actions open a clean print preview. Select a Windows printer, paper size and copies in the system dialog, or choose **Save as PDF**. Invoice, payment receipt, prescription, patient summary, queue, chart and report layouts include the current clinic identity when it has been configured.
 
-A4, A5, Letter and 80 mm Receipt profiles exist. Settings can control the document footer and whether the clinic logo/contact appears in generated documents. Bengali rendering, native copy review and Windows printer/PDF acceptance remain explicit human review items until checked on the packaged app.
+A4, A5, Letter, Legal and 80 mm receipt profiles exist. Settings control the print page size, the document footer and whether the clinic logo/contact appears in generated documents. The interface and documents are English-only; patient names and clinical text accept any Unicode script. Physical Windows printer/PDF acceptance remains a human review item until checked on the packaged app.
 
 ## Financial records
 

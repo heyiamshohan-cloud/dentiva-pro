@@ -47,7 +47,7 @@ test('buildDocument assembles rx end-to-end with page rules + signature', () => 
 });
 
 test('receipt size rules + no signature area on Receipt80', () => {
-  const { html, pageSize } = buildDocument({ kind: 'invoice', settings, title: 'RECEIPT', pageSize: 'Receipt80', body: totalsSection({ pairs: [['Total', '৳600']] , total: ['Paid', '৳600'] }) });
+  const { html, pageSize } = buildDocument({ kind: 'invoice', settings, title: 'RECEIPT', pageSize: 'Receipt80', body: totalsSection({ pairs: [['Total', 'Tk 600']] , total: ['Paid', 'Tk 600'] }) });
   assert.equal(pageSize, 'Receipt80');
   assert.ok(html.includes('80mm 200mm'), 'thermal page rule');
   assert.ok(!html.includes('<div class="doc-sign-box">'), 'signature element suppressed on receipts (CSS rule remains but no box rendered)');
@@ -57,7 +57,7 @@ test('statementTable keeps running balance and foot summary', () => {
   const html = statementTable({
     rows: [{ date: '12 Jan', reference: 'INV-0001', type: 'Invoice', note: '2 item(s)', debitCents: 180000, creditCents: 0, balanceCents: 180000 },
            { date: '12 Jan', reference: 'RCP-0001', type: 'Payment', note: 'Cash', debitCents: 0, creditCents: 150000, balanceCents: 30000 }],
-    summary: [['Lifetime billed', '৳1,800.00'], ['Lifetime due', '৳300.00']]
+    summary: [['Lifetime billed', 'Tk 1,800.00'], ['Lifetime due', 'Tk 300.00']]
   });
   for (const must of ['INV-0001', 'RCP-0001', 'Lifetime billed', 'Lifetime due', 'Debit', 'Credit', 'Balance']) assert.ok(html.includes(must), `missing: ${must}`);
 });

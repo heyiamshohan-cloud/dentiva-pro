@@ -41,7 +41,7 @@ function makeV4Db(directory) {
   }
   const records = [
     ['patients', 'p1', { id: 'p1', patientCode: 'PT-0001', fullName: 'Amina Rahman', phone: '01700000000', registrationDate: '2026-01-05', status: 'Active' }],
-    ['patients', 'p2', { id: 'p2', patientCode: 'PT-0002', fullName: 'করিম উদ্দিন', phone: '01800000000', registrationDate: '2026-02-11', status: 'Active' }],
+    ['patients', 'p2', { id: 'p2', patientCode: 'PT-0002', fullName: 'करीम उद्दीन', phone: '01800000000', registrationDate: '2026-02-11', status: 'Active' }],
     ['visits', 'v1', { id: 'v1', visitCode: 'V-0001', patientId: 'p1', date: '2026-03-01', reason: 'Checkup', diagnosis: 'Review' }],
     ['invoices', 'inv1', { id: 'inv1', invoiceNumber: 'INV-0001', patientId: 'p1', date: '2026-03-01', total: 1400, paid: 800, due: 600, status: 'Partially Paid', items: [{ name: 'Filling', quantity: 1, unitPrice: 1400, total: 1400 }] }],
     ['payments', 'pay1', { id: 'pay1', receiptNumber: 'R-0001', invoiceId: 'inv1', patientId: 'p1', amount: 800, refundedAmount: 0, date: '2026-03-01', method: 'Cash', status: 'Recorded' }],
@@ -98,8 +98,8 @@ test('v4 sql.js database migrates to the relational layout with exact money and 
     assert.equal(invoice.dueCents, 60000);
     const patient = repo.get('patients', 'p1');
     assert.equal(patient.balanceCents, 60000);
-    const bengali = repo.listPatients({ page: 1, pageSize: 10, query: 'করিম' });
-    assert.equal(bengali.total, 1, 'Bengali full-text search must survive migration');
+    const unicodeSearch = repo.listPatients({ page: 1, pageSize: 10, query: 'करीम' });
+    assert.equal(unicodeSearch.total, 1, 'non-Latin full-text search must survive migration');
     const attachmentRow = repo.ws.queryOne('SELECT file_path FROM attachments WHERE id = ?', ['att1']);
     assert.ok(attachmentRow && attachmentRow.file_path.includes('att1.bin'));
     const user = repo.userGet('u1');

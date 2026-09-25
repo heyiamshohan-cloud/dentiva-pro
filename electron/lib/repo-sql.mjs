@@ -6,6 +6,7 @@
 import { COLLECTION_TABLES } from './schema.mjs';
 import { rowToRecord, phoneNorm } from './records.mjs';
 import { DEFAULT_SETTINGS } from '../../src/migrate-state.js';
+import { clinicDate, clinicToday, timeZoneOf } from '../../src/core.js';
 import { listCollectionSql, reportStatsSql, patientRecordCountsSql } from './list-sql.mjs';
 import { patientLedgerSql, patientFinancialSummarySql, patientLedgerRollupsSql, visitBillingForSql } from './ledger-sql.mjs';
 
@@ -61,7 +62,7 @@ export class SqlRepo {
 
   // ---- patients -------------------------------------------------------------
 
-  listPatients({ query = '', status = 'all', balance = 'all', dateFrom = '', dateTo = '', registeredFrom = '', registeredTo = '', hasPhone = false, toothStatus = '', tag = '', page = 1, pageSize = 50, sort = 'name', includeAggregates = false } = {}) {
+  listPatients({ query = '', status = 'all', balance = 'all', dateFrom = '', dateTo = '', registeredFrom = '', registeredTo = '', hasPhone = false, toothStatus = '', tag = '', page = 1, pageSize = 50, sort = 'name', includeAggregates = false, count = true } = {}) {
     const where = [];
     const params = [];
     if (status === 'active') { where.push('archived = 0'); } else if (status === 'archived') { where.push('archived = 1'); }
@@ -100,7 +101,9 @@ export class SqlRepo {
       billed: 'billed_cents ASC, full_name COLLATE NOCASE ASC',
       paid: 'paid_cents ASC, full_name COLLATE NOCASE ASC'
     }[sort] || 'full_name COLLATE NOCASE ASC';
-    const total = this.ws.countRecords('patients', { where: where.join(' AND '), params });
+    // `count: false` skips the total for callers that only need rows (the
+    // command palette) — with a text filter that count is a second full scan.
+    const total = count === false ? null : this.ws.countRecords('patients', { where: where.join(' AND '), params });
     let rows;
     if (needsAggregates) {
       rows = this.ws.query(`SELECT patients.*,
@@ -120,7 +123,7 @@ export class SqlRepo {
     } else {
       rows = this.ws.listRecords('patients', { where: where.join(' AND '), params, order: orderSql, limit: pageSize, offset: (Math.max(1, page) - 1) * pageSize });
     }
-    return { rows, total, page: Math.max(1, page), pageSize };
+    return { rows, total, totalExact: count !== false, page: Math.max(1, page), pageSize };
   }
 
   patientByCode(code) {
@@ -297,7 +300,7 @@ export class SqlRepo {
 
   // ---- inventory -------------------------------------------------------------------
 
-  listInventory({ query = '', category = '', supplierId = '', lowStock = false, lowStockThreshold = 0, expiringBefore = '', archived = 'exclude', page = 1, pageSize = 50, sort = 'name' } = {}) {
+  listInventory({ query = '', category = '', supplierId = '', lowStock = false, lowStockThreshold = 0, expiringBefore = '', archived = 'exclude', page = 1, pageSize = 50, sort = 'name', count = true } = {}) {
     const where = []; const params = [];
     if (archived === 'exclude') where.push('archived = 0');
     if (archived === 'only') where.push('archived = 1');
@@ -323,9 +326,9 @@ export class SqlRepo {
       'value-desc': 'current_stock * purchase_price_cents DESC',
       recent: 'created_at DESC'
     }[sort] || 'name COLLATE NOCASE ASC';
-    const total = this.ws.countRecords('inventory', { where: whereSql, params });
+    const total = count === false ? null : this.ws.countRecords('inventory', { where: whereSql, params });
     const rows = this.ws.listRecords('inventory', { where: whereSql, params, order: orderSql, limit: pageSize, offset: (Math.max(1, page) - 1) * pageSize });
-    return { rows, total, page: Math.max(1, page), pageSize };
+    return { rows, total, totalExact: count !== false, page: Math.max(1, page), pageSize };
   }
 
   movementsByItem(itemId, limit = 200) {
@@ -402,7 +405,7 @@ export class SqlRepo {
     this.ws.upsertRecord('audit', entry);
   }
 
-  listAudit({ query = '', page = 1, pageSize = 50, entity = '', entityId = '', userId = '', from = '', to = '' } = {}) {
+  listAudit({ query = '', page = 1, pageSize = 50, entity = '', entityId = '', userId = '', from = '', to = '', count = true } = {}) {
     const where = []; const params = [];
     if (query) {
       const like = `%${escapeLike(query.toLowerCase())}%`;
@@ -415,9 +418,9 @@ export class SqlRepo {
     if (from) { where.push('created_at >= ?'); params.push(from); }
     if (to) { where.push('created_at <= ?'); params.push(`${to}T23:59:59.999Z`); }
     const whereSql = where.join(' AND ');
-    const total = this.ws.countRecords('audit', { where: whereSql, params });
+    const total = count === false ? null : this.ws.countRecords('audit', { where: whereSql, params });
     const rows = this.ws.listRecords('audit', { where: whereSql, params, order: 'seq DESC', limit: pageSize, offset: (Math.max(1, page) - 1) * pageSize });
-    return { rows, total, page: Math.max(1, page), pageSize };
+    return { rows, total, totalExact: count !== false, page: Math.max(1, page), pageSize };
   }
 
   // ---- aggregate scans (indexed range queries, bounded) ----------------------------------
@@ -461,9 +464,10 @@ export class SqlRepo {
         invoicesOutstandingCents: money("SELECT COALESCE(SUM(due_cents),0) AS cents FROM invoices WHERE status NOT IN ('Paid','Cancelled')"),
         stockValueCents: money('SELECT COALESCE(SUM(current_stock * purchase_price_cents),0) AS cents FROM inventory WHERE archived = 0'),
         lowStockItems: Number(this.ws.queryOne('SELECT COUNT(*) AS total FROM inventory WHERE archived = 0 AND current_stock <= MAX(minimum_stock, reorder_threshold)')?.total ?? 0),
-        expiringItems: Number(this.ws.queryOne("SELECT COUNT(*) AS total FROM inventory WHERE archived = 0 AND expiry_date <> '' AND expiry_date <= date('now', '+30 day')")?.total ?? 0),
+        // "now" is the clinic's calendar day, computed once for this snapshot.
+        expiringItems: Number(this.ws.queryOne("SELECT COUNT(*) AS total FROM inventory WHERE archived = 0 AND expiry_date <> '' AND expiry_date <= ?", [clinicDate(new Date(Date.now() + 30 * 86400000), timeZoneOf(this))])?.total ?? 0),
         openFollowups: Number(this.ws.queryOne("SELECT COUNT(*) AS total FROM follow_up_tasks WHERE status IN ('Open','Contacted','Scheduled')")?.total ?? 0),
-        overdueFollowups: Number(this.ws.queryOne("SELECT COUNT(*) AS total FROM follow_up_tasks WHERE status = 'Open' AND due_date <> '' AND due_date < date('now')")?.total ?? 0)
+        overdueFollowups: Number(this.ws.queryOne("SELECT COUNT(*) AS total FROM follow_up_tasks WHERE status = 'Open' AND due_date <> '' AND due_date < ?", [clinicToday(this)])?.total ?? 0)
       }
     };
   }
@@ -473,7 +477,7 @@ export class SqlRepo {
   listCollection(collection, opts = {}) { return listCollectionSql(this, collection, opts); }
   patientLedger(patientId, opts = {}) { return patientLedgerSql(this.ws, patientId, opts); }
   patientFinancialSummary(patientId) { return patientFinancialSummarySql(this.ws, patientId); }
-  patientLedgerRollups(patientId, months, years) { return patientLedgerRollupsSql(this.ws, patientId, months, years); }
+  patientLedgerRollups(patientId, months, years) { return patientLedgerRollupsSql(this.ws, patientId, months, years, clinicToday(this)); }
   visitBillingFor(visitIds) { return visitBillingForSql(this.ws, visitIds); }
 
   reportStats(kind, from = '', to = '') { return reportStatsSql(this, kind, from, to); }

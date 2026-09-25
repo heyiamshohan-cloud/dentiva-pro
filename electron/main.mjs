@@ -196,7 +196,6 @@ function smokeCreate() {
       field('address', '1 Test Road, Dhaka');
       await submit('form[data-form="setup"]');
       field('currency', 'BDT');
-      field('language', 'English');
       field('adminPin', '2468');
       field('adminPinConfirm', '2468');
       await submit('form[data-form="setup"]');
@@ -292,7 +291,7 @@ function smokeDocs() {
     // renderer directory cache — a raw-ops seed would leave the Rx modal's
     // patient select unable to bind; CI smoke error "prescription missing
     // 'DP-…'" surfaced exactly that).
-    const longName = 'ডেন্টিভা স্মোক রোগী আব্দুল্লাহ আল মামুন পাটোয়ারী স্পেশাল ডকুমেন্ট টেস্ট';
+    const longName = 'Smoke Test Patient Abdulah Al Mamun Patowary Special Document Rendering Test';
     document.querySelector('[data-action="navigate"][data-page="patients"]')?.click();
     if (!(await waitFor(() => document.querySelector('[data-action="open-patient"]')))) throw new Error('docs-flow: patients page did not render');
     await clickEl(document.querySelector('[data-action="open-patient"]'), 'open-patient');
@@ -300,7 +299,7 @@ function smokeDocs() {
     const pForm = document.querySelector('form[data-form="patient"]');
     setField(pForm, 'fullName', longName);
     setField(pForm, 'phone', '01900000000');
-    setField(pForm, 'address', '৫/ক টেস্ট রোড, ধানমন্ডি, ঢাকা — a very long address line to stress the document header wrapping across lines');
+    setField(pForm, 'address', '5A Test Road, Dhanmondi, Dhaka 1209 — a very long address line to stress the document header wrapping across several lines');
     await clickEl(pForm.querySelector('button[type="submit"]'), 'patient-submit');
     if (!(await waitFor(() => document.querySelector('.patient-sub'), 15000))) throw new Error('docs-flow: patient 360 did not open after create');
     const codeMatch = (document.querySelector('.patient-sub')?.textContent || '').match(/DP-\d+/);
@@ -311,8 +310,8 @@ function smokeDocs() {
     mark('docs-patient', patient.patientCode);
     const visit = await op('visit.create', { patientId: patient.id, date: '2026-09-24', reason: 'Doc flow', chiefComplaint: 'Pain On', diagnosis: 'Pulpitis 46' });
     if (!visit?.ok) throw new Error('docs-flow visit.create failed');
-    const invoiceItems = Array.from({ length: 18 }, (_, i) => ({ name: `${i % 2 ? 'কনসালট' : 'RCT'} item ${i + 1}`, quantity: 1 + (i % 3), unitPrice: 500 + i * 25 }));
-    const invoice = await op('invoice.create', { patientId: patient.id, date: '2026-09-24', items: invoiceItems, discount: 100, notes: 'Doc-flow invoice — বাংলা নোট' });
+    const invoiceItems = Array.from({ length: 18 }, (_, i) => ({ name: `${i % 2 ? 'Consultation' : 'RCT'} item ${i + 1}`, quantity: 1 + (i % 3), unitPrice: 500 + i * 25 }));
+    const invoice = await op('invoice.create', { patientId: patient.id, date: '2026-09-24', items: invoiceItems, discount: 100, notes: 'Doc-flow invoice — wide-glyph probe Ω≈≠' });
     if (!invoice?.ok) throw new Error(`docs-flow invoice.create: ${invoice?.error}`);
     // Anchor the invoice by its CREATE response id directly — re-querying the
     // list here is fragile (sort/filter drift) and cost us "receipt missing
@@ -331,12 +330,12 @@ function smokeDocs() {
     if (!rxForm) throw new Error('prescription builder did not open');
     setField(rxForm, 'patientId', patient.id);
     setField(rxForm, 'requiredExamination', 'IOPA X-ray 46');
-    setField(rxForm, 'diagnosis', 'Irreversible pulpitis 46 — ডায়াগনোসিস');
-    setField(rxForm, 'advice', 'Warm saline rinse তিন বার দৈনিক. Follow instructions carefully.');
+    setField(rxForm, 'diagnosis', 'Irreversible pulpitis 46 — wide-glyph probe Ω≈≠');
+    setField(rxForm, 'advice', 'Warm saline rinse three times daily. Follow instructions carefully.');
     rxForm.querySelector('[data-action="rx-opt-toggle"][data-opt="Pain On"]')?.click();
     rxForm.querySelector('[data-action="rx-opt-toggle"][data-opt="G. Carries"]')?.click();
     rxForm.querySelector('[data-action="rx-opt-toggle"][data-opt="Perio Dontitis"]')?.click();
-    setField(rxForm, 'medications[0][medicine]', 'Amoxicillin ট্যাবলেট Very-Long-Brand-Name');
+    setField(rxForm, 'medications[0][medicine]', 'Amoxicillin Tablet Very-Long-Brand-Name');
     setField(rxForm, 'medications[0][form]', 'Tablet');
     setField(rxForm, 'medications[0][strength]', '500mg');
     setField(rxForm, 'medications[0][dosage]', '1');
@@ -345,20 +344,20 @@ function smokeDocs() {
     setField(rxForm, 'medications[0][durationUnit]', 'days');
     setField(rxForm, 'medications[0][foodRelation]', 'After food');
     setField(rxForm, 'medications[0][quantity]', '15');
-    setField(rxForm, 'medications[0][instructions]', 'প্রতিদিন খাবারের পরে — with plenty of water');
+    setField(rxForm, 'medications[0][instructions]', 'After every meal — with plenty of water');
     document.querySelector('[data-action="rx-row-add"]')?.click();
     await wait(150);
-    setField(rxForm, 'medications[1][medicine]', 'Mefenamic Acid ক্যাপসুল');
+    setField(rxForm, 'medications[1][medicine]', 'Mefenamic Acid Capsule');
     setField(rxForm, 'medications[1][frequency]', 'SOS');
     setField(rxForm, 'medications[1][foodRelation]', 'With food');
     mark('docs-rx-filled');
     await clickEl(document.querySelector('[data-action="rx-preview"]'), 'rx-preview');
     if (!(await waitFor(() => previewHtml().length > 500))) throw new Error('prescription preview did not render');
     const rxHtml = previewHtml();
-    const rxNeeds = ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'G. Carries', 'Perio Dontitis', 'Windows Smoke Dental', 'Dr. Smoke Test', patient.patientCode, 'Long-Brand-Name', 'ট্যাবলেট', 'ক্যাপসুল', 'প্রতিদিন'];
+    const rxNeeds = ['C/C', 'O/E', 'R/E', 'Advice', 'Pain On', 'G. Carries', 'Perio Dontitis', 'Windows Smoke Dental', 'Dr. Smoke Test', patient.patientCode, 'Long-Brand-Name', 'Tablet', 'Capsule', 'After every meal'];
     for (const token of rxNeeds) if (!rxHtml.includes(token)) throw new Error(`prescription missing '${token}'`);
     const rxContent = rxHtml.slice(rxHtml.indexOf('</style>'));
-    for (const bad of ['৳', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment method', 'Grand total', 'Unit price', 'doc-totals']) {
+    for (const bad of ['BDT', 'Paid', 'Due', 'Total', 'Tax', 'Discount', 'Payment method', 'Grand total', 'Unit price', 'doc-totals']) {
       if (rxContent.includes(bad)) throw new Error(`prescription leaked financial token '${bad}'`);
     }
     mark('docs-rx-content-ok');
@@ -368,7 +367,7 @@ function smokeDocs() {
     mark('docs-rx-pdf-a5');
     await closePreview();
 
-    // ── 2. INVOICE preview + PDF (18 rows, Bengali, discount) ─────────────
+    // ── 2. INVOICE preview + PDF (18 rows, long item names, discount) ─────
     const invRec = await query('record', { collection: 'invoices', id: invId });
     const inv = invRec.record;
     if (!inv) throw new Error('invoice not found for preview');
@@ -377,7 +376,7 @@ function smokeDocs() {
     await clickEl(document.querySelector(`[data-action="print-invoice"][data-id="${invId}"]`), 'print-invoice');
     if (!(await waitFor(() => previewHtml().length > 500))) throw new Error('invoice preview did not render');
     const invHtml = previewHtml();
-    for (const token of [inv.invoiceNumber, patient.patientCode, 'কনসালট', 'Subtotal', 'Discount', 'Total']) {
+    for (const token of [inv.invoiceNumber, patient.patientCode, 'Consultation', 'Subtotal', 'Discount', 'Total']) {
       if (!invHtml.includes(token)) throw new Error(`invoice missing '${token}'`);
     }
     mark('docs-invoice-content-ok');
@@ -396,8 +395,8 @@ function smokeDocs() {
     for (const token of [payment.record.receiptNumber, patient.patientCode, 'bKash', 'TX9AB12XYZ34']) {
       if (!rcHtml.includes(token)) throw new Error(`receipt missing '${token}'`);
     }
-    // 'Remaining due' is localized at print-time (clinic language); accept Bangla too
-    if (!(rcHtml.includes('Remaining due') || rcHtml.includes('বাকি টাকা'))) throw new Error(`receipt missing remaining-due row (en/bn)`);
+    // 'Remaining due' is a fixed English string in the English-only build
+    if (!rcHtml.includes('Remaining due')) throw new Error('receipt missing remaining-due row');
     mark('docs-receipt-content-ok');
     await pdfFor('docs-receipt-80mm', 'Receipt80');
     await pdfFor('docs-receipt-A5', 'A5');

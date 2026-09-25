@@ -48,7 +48,7 @@ Continue product-wide audit sweep modules 1→4 (Dashboard/Appointments/Queue/Tr
 
 **Delivered locally (all pushed until token expiry):**
 1. Installed-app DOCUMENT WORKFLOW verification: `smokeDocs()` phase in electron/main.mjs (DENTIVA_SMOKE_PHASE=docs) drives the REAL UI (PIN sign-in → ops seed patient/visit/18-line invoice/bKash payment → rx builder → preview → `print:html` PDF) and produces 7 PDFs (rx A4+A5, invoice A4+Letter, receipt 80mm+A5, statement A4) with smoke-only tmpdir bypass at main.mjs:384. windows-smoke.ps1 wires it after installed-verify, prints `DOCS-PDF <name> <bytes>` and uploads PDFs to the `windows-smoke-evidence` artifact.
-2. Prescription money-leak regression test strengthened (content-scoped forbidden tokens incl. ৳ / doc-totals / Payment method / Money receipt) + positive identity asserts.
+2. Prescription money-leak regression test strengthened (content-scoped forbidden tokens incl. the Taka sign / doc-totals / Payment method / Money receipt) + positive identity asserts.
 3. Playwright screen-audit suite (4 tests × 6 viewports): patients list, command palette, Patient 360, prescription builder.
 4. Version 1.6.1 (package.json, migrate-state, README) + CHANGELOG entry.
 

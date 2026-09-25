@@ -18,7 +18,8 @@
 import {
   calculateInvoice, paymentStatusFor, validatePayment, validateMoney, appointmentsOverlap,
   moneyToCents, centsToMoney, toNumber, hasPermission, sanitizeFilename, validateAttachmentFile,
-  MOVEMENT_TYPES, FOLLOWUP_STATUSES, REFERRAL_STATUSES, INVOICE_STATUSES, APPOINTMENT_STATUSES
+  MOVEMENT_TYPES, FOLLOWUP_STATUSES, REFERRAL_STATUSES, INVOICE_STATUSES, APPOINTMENT_STATUSES,
+  clinicToday
 } from './core.js';
 import { deriveNotifications, reconcileNotifications, normalizeNotificationRules } from './notifications.js';
 import { normalizeCustomFields } from './migrate-state.js';
@@ -348,16 +349,17 @@ export const OPS = {
       const current = repo.getSettings();
       const allowed = [
         'clinicName', 'chamberName', 'dentistName', 'professionalTitle', 'phone', 'secondaryPhone',
-        'email', 'address', 'city', 'district', 'country', 'logo', 'language', 'currency', 'timezone',
+        'email', 'address', 'city', 'district', 'country', 'logo', 'currency', 'timezone',
         'dentistRegistration', 'clinicWebsite',
         'dateFormat', 'timeFormat', 'patientPrefix', 'invoicePrefix', 'appointmentPrefix', 'serialPrefix',
         'receiptPrefix', 'visitPrefix', 'staffPrefix', 'itemPrefix', 'defaultDuration', 'taxEnabled', 'taxRate', 'notificationRules',
         'autoLockMinutes', 'sessionTimeoutMinutes', 'notifications', 'paymentMethods', 'expenseCategories',
         'inventoryCategories', 'chairs', 'rooms', 'backupEnabled', 'backupIntervalHours', 'backupRetention',
         'backupDirectory', 'lowStockThreshold', 'attachmentMaxMb', 'accent', 'density', 'printPageSize', 'documentFooter',
-        'paperProfile', 'customPatientFields', 'medicationTemplates', 'documentTemplate'
+        'customPatientFields', 'medicationTemplates', 'documentTemplate'
       ];
       const next = { ...current };
+      delete next.language; // English-only product (V2-05)
       const changed = [];
       for (const key of allowed) {
         if (payload[key] === undefined) continue;
@@ -393,7 +395,7 @@ export const OPS = {
     run(repo, payload) {
       const current = repo.getSettings();
       const identity = {};
-      for (const key of ['clinicName', 'dentistName', 'professionalTitle', 'phone', 'email', 'address', 'city', 'chamberName', 'language', 'currency', 'timezone', 'dentistRegistration', 'clinicWebsite']) {
+      for (const key of ['clinicName', 'dentistName', 'professionalTitle', 'phone', 'email', 'address', 'city', 'chamberName', 'currency', 'timezone', 'dentistRegistration', 'clinicWebsite']) {
         if (payload[key] !== undefined) identity[key] = str(payload[key]);
       }
       repo.setMeta('settings', { ...current, ...identity });
@@ -774,9 +776,19 @@ export const OPS = {
     permission: 'prescriptions.edit',
     run(repo, payload, ctx) {
       const settings = repo.getSettings();
-      const templates = normalizeMedicationTemplates([...(settings.medicationTemplates || []), { name: payload.name, medications: payload.medications, advice: payload.advice, followUp: payload.followUp }]);
+      const existing = settings.medicationTemplates || [];
+      // A template is only meaningful with a name AND at least one usable
+      // medicine row — validate before mutating so an invalid submission can
+      // never corrupt the saved list or return an unrelated record.
+      const candidate = normalizeMedicationTemplates([{ name: payload.name, medications: payload.medications, advice: payload.advice, followUp: payload.followUp }])[0];
+      if (!candidate) {
+        if (!str(payload.name)) return { ok: false, error: 'Give the template a name.' };
+        return { ok: false, error: 'Add at least one medicine row before saving a template.' };
+      }
+      if (existing.length >= 60) return { ok: false, error: 'The template library is full (60 templates). Delete one to save another.' };
+      const templates = [...existing, candidate];
       repo.setMeta('settings', { ...settings, medicationTemplates: templates });
-      return { ok: true, record: templates[templates.length - 1], audit: [{ action: 'Prescription template saved', entity: 'Settings', entityId: 'medicationTemplates', summary: `${templates[templates.length - 1].name} · ${templates[templates.length - 1].medications.length} medicine(s)` }] };
+      return { ok: true, record: candidate, audit: [{ action: 'Prescription template saved', entity: 'Settings', entityId: 'medicationTemplates', summary: `${candidate.name} · ${candidate.medications.length} medicine(s)` }] };
     }
   },
 
@@ -1832,7 +1844,19 @@ export function runOp(repo, name, payload = {}, ctx = {}) {
   if (!op) return { ok: false, error: `Unknown operation: ${name}` };
   const authorization = authorizeOp(name, payload, ctx);
   if (!authorization.ok) return authorization;
-  return op.run(repo, payload, { now: () => new Date().toISOString(), today: () => new Date().toISOString().slice(0, 10), ...ctx });
+  // `today` is the clinic's calendar day (settings.timezone), derived from the
+  // caller's clock when one is supplied so tests stay deterministic. An
+  // explicit ctx.today still wins.
+  const clock = () => {
+    try {
+      if (typeof ctx.now === 'function') {
+        const parsed = new Date(ctx.now());
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+      }
+    } catch { /* fall back to the system clock */ }
+    return new Date();
+  };
+  return op.run(repo, payload, { now: () => new Date().toISOString(), today: () => clinicToday(repo, clock()), ...ctx });
 }
 
 export { normaliseTags };

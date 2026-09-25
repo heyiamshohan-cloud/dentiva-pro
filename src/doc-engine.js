@@ -4,9 +4,9 @@
  * One document definition drives preview, print AND PDF — never three
  * drifting builders. String-only, renderer-agnostic: tables, headers,
  * patient blocks, totals and signatures are pure functions of a spec.
- * Numbers/dates arrive PRE-FORMATTED by the renderer (locale-aware
- * currency()/date()/age()), so this module never formats money or dates
- * itself; Bengali font chain is already baked into the page CSS.
+ * Numbers/dates arrive PRE-FORMATTED by the renderer (currency()/date()/age()),
+ * so this module never formats money or dates itself; the print font stack is
+ * English-only and defined once, below.
  */
 
 import { PRINT_PAGE_SIZES } from '../electron/lib/print.mjs';
@@ -186,7 +186,7 @@ export function buildDocument({ kind = 'document', settings = {}, labels = {}, t
   const receipt = size === 'Receipt80';
   const patient = patientPairs.length ? patientBlock({ pairs: patientPairs, labels }) : '';
   const clinical = clinicalSections.filter(Boolean).map(({ label, text, compact }) => clinicalSection(label, text, { compact })).join('');
-  const fontChain = "'SolaimanLipi','Noto Sans Bengali','Nirmala UI','Hind Siliguri',Arial,Helvetica,sans-serif";
+  const fontChain = "'Segoe UI',Arial,Helvetica,'Segoe UI Symbol',sans-serif";
   const html = `<!doctype html><html lang="${esc(lang)}"><head><meta charset="utf-8">
 <title>${esc(title || kind)}</title><style>
 :root{ --ink:#142b2e; --muted:#5c6f6f; --accent:#0c6b70; --line:#d8e3e3; --fill:#f4f8f8; --hair:#e6eeee; }

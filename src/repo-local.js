@@ -8,7 +8,7 @@
 // runtime. The persisted shape is the classic Dentiva state object under the
 // v2 storage key, which the desktop migration engine also understands.
 
-import { ARRAY_COLLECTIONS, moneyToCents, centsToMoney, paymentStatusFor, toNumber, hasPermission, permissionsForRole, validateRelationships } from './core.js';
+import { ARRAY_COLLECTIONS, moneyToCents, centsToMoney, paymentStatusFor, toNumber, hasPermission, permissionsForRole, validateRelationships, clinicDate, timeZoneOf, daysBetween } from './core.js';
 import { migrateState, defaultState, APP_VERSION, META_KEYS, DEFAULT_SETTINGS } from './migrate-state.js';
 
 export const LOCAL_STORAGE_KEY = 'dentiva-pro.store.v2';
@@ -89,29 +89,35 @@ const base64Decode = (encoded) => {
 };
 
 /* List specifications — mirror electron/lib/list-sql.mjs (camelCase fields). */
+/* Default sort per collection — MUST mirror `defaultOrder` in
+ * electron/lib/list-sql.mjs. A list opened without an explicit sort (which is
+ * what the pickers and several tabs do) must come back in the same order on
+ * both engines; before v2.0.0 the JSON runtime defaulted everything to
+ * "recent", so treatment catalogs and dental history disagreed between the
+ * desktop build and the browser runtime. */
 const LIST_SPECS = {
-  appointments: { text: ['reason', 'treatment', 'appointmentCode', 'serial'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'recent'] },
-  visits: { text: ['visitCode', 'reason', 'chiefComplaint', 'diagnosis', 'treatmentPerformed', 'findings'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'recent'] },
-  invoices: { text: ['invoiceNumber', 'notes'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'total-desc', 'due-desc', 'recent'] },
-  payments: { text: ['receiptNumber', 'reference', 'transactionId', 'notes'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'amount-desc'] },
-  paymentAdjustments: { text: ['reason'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'recent'] },
-  expenses: { text: ['description', 'reference', 'notes'], date: 'date', sorts: ['date', 'date-desc', 'amount-desc', 'recent'] },
-  stockMovements: { text: ['reason', 'notes'], date: 'date', sorts: ['date', 'date-desc', 'recent'] },
-  suppliers: { text: ['name', 'code', 'contactPerson', 'phone', 'email'], sorts: ['name', 'name-desc', 'recent'] },
-  staff: { text: ['name', 'staffCode', 'role', 'specialization', 'phone', 'email'], sorts: ['name', 'name-desc', 'recent'] },
-  referrals: { text: ['referralTo', 'specialty', 'reason', 'response'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'recent'] },
-  attachments: { text: ['name', 'notes'], joinPatient: true, sorts: ['recent', 'name', 'size-desc'] },
-  followUpTasks: { text: ['title', 'reason', 'notes'], joinPatient: true, date: 'dueDate', sorts: ['due', 'due-desc', 'recent'] },
-  treatmentPlans: { text: ['title', 'goal', 'notes'], joinPatient: true, sorts: ['recent', 'start', 'total-desc'] },
-  prescriptions: { text: ['prescriptionCode', 'doctor', 'notes'], joinPatient: true, date: 'date', sorts: ['date', 'date-desc', 'recent'] },
-  dentalRecords: { text: ['note', 'procedure', 'tooth'], joinPatient: true, sorts: ['recent', 'tooth'] },
-  treatments: { text: ['name', 'code', 'category', 'description'], sorts: ['name', 'price-desc', 'recent'] },
-  notifications: { text: ['title', 'message'], sorts: ['recent'] },
-  medicationCatalog: { text: ['name', 'strength', 'dosage', 'frequency'], sorts: ['name'] },
-  rooms: { text: ['name'], sorts: ['name'] },
-  savedFilters: { text: ['name', 'query'], sorts: ['recent', 'name'] },
-  savedReports: { text: ['name'], sorts: ['name'] },
-  notificationRules: { text: ['kind'], sorts: [] }
+  appointments: { text: ['reason', 'treatment', 'appointmentCode', 'serial'], joinPatient: true, date: 'date', defaultSort: 'date', sorts: ['date', 'date-desc', 'recent'] },
+  visits: { text: ['visitCode', 'reason', 'chiefComplaint', 'diagnosis', 'treatmentPerformed', 'findings'], joinPatient: true, date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'recent'] },
+  invoices: { text: ['invoiceNumber', 'notes'], joinPatient: true, date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'total-desc', 'due-desc', 'recent'] },
+  payments: { text: ['receiptNumber', 'reference', 'transactionId', 'notes'], joinPatient: true, date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'amount-desc'] },
+  paymentAdjustments: { text: ['reason'], joinPatient: true, date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'recent'] },
+  expenses: { text: ['description', 'reference', 'notes'], date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'amount-desc', 'recent'] },
+  stockMovements: { text: ['reason', 'notes'], date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'recent'] },
+  suppliers: { text: ['name', 'code', 'contactPerson', 'phone', 'email'], defaultSort: 'name', sorts: ['name', 'name-desc', 'recent'] },
+  staff: { text: ['name', 'staffCode', 'role', 'specialization', 'phone', 'email'], defaultSort: 'name', sorts: ['name', 'name-desc', 'recent'] },
+  referrals: { text: ['referralTo', 'specialty', 'reason', 'response'], joinPatient: true, date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'recent'] },
+  attachments: { text: ['name', 'notes'], joinPatient: true, defaultSort: 'recent', sorts: ['recent', 'name', 'size-desc'] },
+  followUpTasks: { text: ['title', 'reason', 'notes'], joinPatient: true, date: 'dueDate', defaultSort: 'due', sorts: ['due', 'due-desc', 'recent'] },
+  treatmentPlans: { text: ['title', 'goal', 'notes'], joinPatient: true, defaultSort: 'recent', sorts: ['recent', 'start', 'total-desc'] },
+  prescriptions: { text: ['prescriptionCode', 'doctor', 'notes'], joinPatient: true, date: 'date', defaultSort: 'date-desc', sorts: ['date', 'date-desc', 'recent'] },
+  dentalRecords: { text: ['note', 'procedure', 'tooth'], joinPatient: true, defaultSort: 'recent', sorts: ['recent', 'tooth'] },
+  treatments: { text: ['name', 'code', 'category', 'description'], defaultSort: 'name', sorts: ['name', 'price-desc', 'recent'] },
+  notifications: { text: ['title', 'message'], date: 'date', defaultSort: 'date-desc', sorts: ['recent', 'date', 'date-desc'] },
+  medicationCatalog: { text: ['name', 'strength', 'dosage', 'frequency'], defaultSort: 'name', sorts: ['name'] },
+  rooms: { text: ['name'], defaultSort: 'name', sorts: ['name'] },
+  savedFilters: { text: ['name', 'query'], defaultSort: 'recent', sorts: ['recent', 'name'] },
+  savedReports: { text: ['name'], defaultSort: '', sorts: ['name'] },
+  notificationRules: { text: ['kind'], defaultSort: '', sorts: [] }
 };
 
 /* Read-time hydration: mirrors the desktop rowToRecord enrichment so every
@@ -659,7 +665,12 @@ export class LocalRepo {
       if (collection === 'invoices' && f.outstanding) {
         if (['Paid', 'Cancelled'].includes(record.status) || fieldCents(record, 'dueCents', 'due') <= 0) return false;
       }
-      if (collection === 'treatments' && f.archived !== 'include' && record.archived) return false;
+      // Treatments use `active` (they have no `archived` flag) — kept in step
+      // with the SQL list spec so both runtimes filter identically.
+      if (collection === 'treatments') {
+        if ((f.active === true || f.active === 'only') && record.active === false) return false;
+        if ((f.active === false || f.active === 'exclude') && record.active !== false) return false;
+      }
       return true;
     });
   }
@@ -667,7 +678,7 @@ export class LocalRepo {
   #sortRecords(records, collection, sort) {
     const byString = (key) => (a, b) => String(a[key] ?? '').localeCompare(String(b[key] ?? ''));
     const byCentsDesc = (camel, decimal) => (a, b) => fieldCents(b, camel, decimal) - fieldCents(a, camel, decimal);
-    const today = isoDate();
+    const today = this.#today();
     const comparators = {
       name: byString('name'),
       'name-desc': (a, b) => String(b.name ?? '').localeCompare(String(a.name ?? '')),
@@ -685,6 +696,15 @@ export class LocalRepo {
       'stock-asc': (a, b) => toNumber(a.currentStock) - toNumber(b.currentStock),
       'stock-desc': (a, b) => toNumber(b.currentStock) - toNumber(a.currentStock),
       balance: (a, b) => fieldCents(b, 'balanceCents', null) - fieldCents(a, 'balanceCents', null),
+      // Lifetime aggregate sorts — the same keys the SQL list builds with
+      // aggregate sub-selects; without these the browser runtime fell back to
+      // name order and silently disagreed with the desktop engine.
+      visits: (a, b) => Number(a.visitsCount || 0) - Number(b.visitsCount || 0) || byString('fullName')(a, b),
+      'visits-desc': (a, b) => Number(b.visitsCount || 0) - Number(a.visitsCount || 0) || byString('fullName')(a, b),
+      billed: (a, b) => Number(a.billedCents || 0) - Number(b.billedCents || 0) || byString('fullName')(a, b),
+      'billed-desc': (a, b) => Number(b.billedCents || 0) - Number(a.billedCents || 0) || byString('fullName')(a, b),
+      paid: (a, b) => Number(a.paidCents || 0) - Number(b.paidCents || 0) || byString('fullName')(a, b),
+      'paid-desc': (a, b) => Number(b.paidCents || 0) - Number(a.paidCents || 0) || byString('fullName')(a, b),
       due: (a, b) => String(a.dueDate ?? '9999').localeCompare(String(b.dueDate ?? '9999')),
       'due-desc': (a, b) => String(b.dueDate ?? '0000').localeCompare(String(a.dueDate ?? '0000')),
       tooth: (a, b) => ((a.dentition || 'adult') === (b.dentition || 'adult') ? a.tooth - b.tooth : (a.dentition || 'adult').localeCompare(b.dentition || 'adult')),
@@ -695,11 +715,19 @@ export class LocalRepo {
         return ae.localeCompare(be);
       }
     };
-    const comparator = comparators[sort] || (collection === 'patients' ? comparators.name : (comparators.recent || comparators.date || comparators.name));
+    let comparator = comparators[sort] || (collection === 'patients' ? comparators.name : (comparators.recent || comparators.date || comparators.name));
+    if (collection === 'dentalRecords' && sort === 'recent') {
+      // Two rows for the same tooth usually share a millisecond timestamp;
+      // without a tie-break the CI/insertion order leaked into the chart and
+      // disagreed with the SQL engine. Current (superseded = false) first, then tooth.
+      comparator = (a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+        || Number(Boolean(a.superseded)) - Number(Boolean(b.superseded))
+        || Number(a.tooth || 0) - Number(b.tooth || 0);
+    }
     return [...records].sort(comparator);
   }
 
-  listPatients({ query = '', status = 'all', balance = 'all', dateFrom = '', dateTo = '', registeredFrom = '', registeredTo = '', hasPhone = false, toothStatus = '', tag = '', page = 1, pageSize = 50, sort = 'name', includeAggregates = false } = {}) {
+  listPatients({ query = '', status = 'all', balance = 'all', dateFrom = '', dateTo = '', registeredFrom = '', registeredTo = '', hasPhone = false, toothStatus = '', tag = '', page = 1, pageSize = 50, sort = 'name', includeAggregates = false, count = true } = {}) {
     let records = this.#collection('patients');
     if (status === 'active') records = records.filter((record) => record && !record.archived);
     if (status === 'archived') records = records.filter((record) => record && record.archived === true);
@@ -739,10 +767,15 @@ export class LocalRepo {
     const sorted = this.#sortRecords(hydrated, 'patients', sort);
     const safePage = Math.max(1, Number(page) || 1);
     const safeSize = Math.max(1, Math.min(500, Number(pageSize) || 50));
-    return { rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize), total: sorted.length, page: safePage, pageSize: safeSize };
+    return {
+      rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize),
+      total: count === false ? null : sorted.length,
+      totalExact: count !== false,
+      page: safePage, pageSize: safeSize
+    };
   }
 
-  listInventory({ query = '', category = '', supplierId = '', lowStock = false, lowStockThreshold = 0, expiringBefore = '', archived = 'exclude', page = 1, pageSize = 50, sort = 'name' } = {}) {
+  listInventory({ query = '', category = '', supplierId = '', lowStock = false, lowStockThreshold = 0, expiringBefore = '', archived = 'exclude', page = 1, pageSize = 50, sort = 'name', count = true } = {}) {
     let records = this.#collection('inventory');
     if (archived === 'exclude') records = records.filter((record) => record && !record.archived);
     if (archived === 'only') records = records.filter((record) => record && record.archived);
@@ -758,10 +791,15 @@ export class LocalRepo {
     const sorted = this.#sortRecords(records, 'inventory', sort);
     const safePage = Math.max(1, Number(page) || 1);
     const safeSize = Math.max(1, Math.min(500, Number(pageSize) || 50));
-    return { rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize).map((record) => hydrate(record, 'inventory')), total: sorted.length, page: safePage, pageSize: safeSize };
+    return {
+      rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize).map((record) => hydrate(record, 'inventory')),
+      total: count === false ? null : sorted.length,
+      totalExact: count !== false,
+      page: safePage, pageSize: safeSize
+    };
   }
 
-  listAudit({ query = '', page = 1, pageSize = 50, entity = '', userId = '', from = '', to = '' } = {}) {
+  listAudit({ query = '', page = 1, pageSize = 50, entity = '', userId = '', from = '', to = '', count = true } = {}) {
     let records = this.#collection('audit');
     if (entity) records = records.filter((record) => record && record.entity === entity);
     if (userId) records = records.filter((record) => record && record.userId === userId);
@@ -774,16 +812,21 @@ export class LocalRepo {
     const sorted = [...records].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
     const safePage = Math.max(1, Number(page) || 1);
     const safeSize = Math.max(1, Math.min(500, Number(pageSize) || 50));
-    return { rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize), total: sorted.length, page: safePage, pageSize: safeSize };
+    return {
+      rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize),
+      total: count === false ? null : sorted.length,
+      totalExact: count !== false,
+      page: safePage, pageSize: safeSize
+    };
   }
 
-  listCollection(collection, { page = 1, pageSize = 25, query = '', sort = '', filters = {} } = {}) {
+  listCollection(collection, { page = 1, pageSize = 25, query = '', sort = '', filters = {}, count = true } = {}) {
     const safePage = Math.max(1, Number(page) || 1);
     const safeSize = Math.max(1, Math.min(500, Number(pageSize) || 25));
     const f = filters && typeof filters === 'object' ? filters : {};
-    if (collection === 'patients') return this.listPatients({ query, page: safePage, pageSize: safeSize, sort: sort || 'name', ...f });
-    if (collection === 'inventory') return this.listInventory({ query, page: safePage, pageSize: safeSize, sort: sort || 'name', ...f });
-    if (collection === 'audit') return this.listAudit({ query, page: safePage, pageSize: safeSize, ...f });
+    if (collection === 'patients') return this.listPatients({ query, page: safePage, pageSize: safeSize, sort: sort || 'name', count, ...f });
+    if (collection === 'inventory') return this.listInventory({ query, page: safePage, pageSize: safeSize, sort: sort || 'name', count, ...f });
+    if (collection === 'audit') return this.listAudit({ query, page: safePage, pageSize: safeSize, count, ...f });
     if (collection === 'users') {
       let records = this.usersList();
       if (query) {
@@ -791,17 +834,34 @@ export class LocalRepo {
         records = records.filter((record) => [record.name, record.role, record.staffId].some((value) => value && String(value).toLowerCase().includes(wanted)));
       }
       const sorted = this.#sortRecords(records, 'staff', sort || 'name');
-      return { rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize), total: sorted.length, page: safePage, pageSize: safeSize };
+      return {
+        rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize),
+        total: count === false ? null : sorted.length,
+        totalExact: count !== false,
+        page: safePage, pageSize: safeSize
+      };
     }
+    const withTotal = count !== false;
     const spec = LIST_SPECS[collection] || { text: [], sorts: [] };
     let records = this.#collection(collection);
     if (query) records = records.filter((record) => this.#matchesQuery(record, spec, query));
     records = this.#applyFilters(records, collection, f);
-    const sorted = this.#sortRecords(records, collection, sort || (spec.date ? 'date-desc' : 'recent'));
-    return { rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize).map((record) => hydrate(record, collection)), total: sorted.length, page: safePage, pageSize: safeSize };
+    const defaultSort = spec.defaultSort !== undefined ? spec.defaultSort : (spec.date ? 'date-desc' : 'recent');
+    const sorted = defaultSort ? this.#sortRecords(records, collection, sort || defaultSort) : records;
+    return {
+      rows: sorted.slice((safePage - 1) * safeSize, safePage * safeSize).map((record) => hydrate(record, collection)),
+      total: withTotal ? sorted.length : null,
+      totalExact: withTotal,
+      page: safePage, pageSize: safeSize
+    };
   }
 
   // ---- report stats (mirrors reportStatsSql semantics) ----------------------------
+
+  /** The clinic's calendar day for this workspace (settings.timezone). */
+  #today(date = new Date()) {
+    return clinicDate(date, timeZoneOf(this));
+  }
 
   #inRange(record, from, to, dateField = 'date') {
     const value = record[dateField] || record.date;
@@ -847,7 +907,7 @@ export class LocalRepo {
           registered: registered.length,
           totalActive: patients.filter((record) => record && !record.archived).length,
           withPhone: registered.filter((record) => record.phone).length,
-          upcoming: patients.filter((record) => record && !record.archived && record.nextVisit && record.nextVisit >= isoDate()).length
+          upcoming: patients.filter((record) => record && !record.archived && record.nextVisit && record.nextVisit >= this.#today()).length
         };
       }
       case 'visits': {
@@ -884,7 +944,7 @@ export class LocalRepo {
       }
       case 'inventory': {
         const active = inventory.filter((record) => record && !record.archived);
-        const now = isoDate();
+        const now = this.#today();
         return {
           itemsTracked: active.length,
           lowStock: active.filter((record) => toNumber(record.currentStock) <= Math.max(toNumber(record.minimumStock) || 0, toNumber(record.reorderThreshold) || 0)).length,
@@ -907,6 +967,9 @@ export class LocalRepo {
         const active = activePayments(payments.filter(inRange));
         const collected = money(active, 'amountCents', 'amount');
         const spent = expenses.filter(inRange);
+        // V2-07: gross `collected` stays gross (a refunded payment was still
+        // collected), so refunds are subtracted once, from the NET KPI only.
+        const refundedCents = payments.filter(inRange).reduce((sum, record) => sum + moneyToCents(record.refundedAmount), 0);
         const methods = new Map();
         for (const record of active) {
           const entry = methods.get(record.method || 'Other') || { label: record.method || 'Other', cents: 0, count: 0 };
@@ -919,15 +982,17 @@ export class LocalRepo {
           collectedCents: collected,
           expensesCents: money(spent, 'amountCents', 'amount'),
           adjustedCents: money(adjustments.filter((record) => record && record.type === 'Adjustment' && inRange(record)), 'amountCents', 'amount'),
-          refundedCents: payments.filter(inRange).reduce((sum, record) => sum + moneyToCents(record.refundedAmount), 0),
-          netOperatingCents: collected - money(spent, 'amountCents', 'amount'),
+          refundedCents,
+          netOperatingCents: collected - refundedCents - money(spent, 'amountCents', 'amount'),
           receivablesCents: money(invoices.filter((record) => record && !['Paid', 'Cancelled'].includes(record.status)), 'dueCents', 'due'),
           byMethod: [...methods.values()].sort((a, b) => b.cents - a.cents)
         };
       }
       case 'aging': {
-        const now = Date.now();
-        const days = (record) => Math.floor((now - new Date(record.date || record.createdAt).getTime()) / 86400000);
+        // Whole calendar days from the clinic's today — identical to the SQL
+        // engine, and stable across the time of day.
+        const today = this.#today();
+        const days = (record) => daysBetween(String(record.date || record.createdAt || '').slice(0, 10), today);
         const open = invoices.filter((record) => record && !['Paid', 'Cancelled'].includes(record.status) && fieldCents(record, 'dueCents', 'due') > 0);
         const bucket = (label, lo, hi) => {
           const members = open.filter((record) => days(record) >= lo && (hi === null || days(record) <= hi));
@@ -1032,8 +1097,8 @@ export class LocalRepo {
     const invoices = this.#collection('invoices');
     const inventory = this.#collection('inventory');
     const followups = this.#collection('followUpTasks');
-    const now = isoDate();
-    const soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const now = this.#today();
+    const soon = clinicDate(new Date(Date.now() + 30 * 86400000), timeZoneOf(this));
     const active = inventory.filter((record) => record && !record.archived);
     return {
       totals: {
@@ -1088,6 +1153,174 @@ export class LocalRepo {
       foreignKeyViolations: violations.slice(0, 50),
       foreignKeyViolationCount: violations.length
     };
+  }
+
+  /* ── patient financial ledger (v2.0.0 dual-runtime parity) ─────────────
+   * The SQL engine implements these three accessors natively
+   * (electron/lib/ledger-sql.mjs). Implementing them here with IDENTICAL
+   * semantics removes the last honest-but-wrong answer from the browser /
+   * fallback runtime: before v2.0.0 `patientFinancialSummary` returned zeros
+   * for a patient who had real invoices, and `patientLedgerQuery` failed
+   * outright, so the same patient showed different money depending on which
+   * engine loaded the workspace. One ledger, one arithmetic, two storages. */
+
+  /** Union of all ledger events for one patient — mirrors LEDGER_EVENTS_SQL. */
+  #ledgerEvents(patientId) {
+    const id = String(patientId || '');
+    const events = [];
+    for (const invoice of this.#collection('invoices')) {
+      if (!invoice || invoice.patientId !== id || invoice.status === 'Cancelled') continue;
+      events.push({
+        date: invoice.date || '',
+        reference: invoice.invoiceNumber || invoice.id,
+        type: 'Invoice',
+        debitCents: fieldCents(invoice, 'totalCents', 'total'),
+        creditCents: 0,
+        note: `${Array.isArray(invoice.items) ? invoice.items.length : 0} item(s)`,
+        recordId: invoice.id
+      });
+    }
+    const livePayments = new Map();
+    for (const payment of this.#collection('payments')) {
+      if (!payment || payment.patientId !== id || ['Voided', 'Cancelled'].includes(payment.status)) continue;
+      livePayments.set(payment.id, payment);
+      events.push({
+        date: payment.date || '',
+        reference: payment.receiptNumber || payment.id,
+        type: 'Payment',
+        debitCents: 0,
+        creditCents: fieldCents(payment, 'amountCents', 'amount'),
+        note: payment.method || 'Payment',
+        recordId: payment.id
+      });
+    }
+    for (const adjustment of this.#collection('paymentAdjustments')) {
+      if (!adjustment || adjustment.patientId !== id) continue;
+      if (adjustment.paymentId && !livePayments.has(adjustment.paymentId)) continue;
+      const date = adjustment.date || String(adjustment.createdAt || '').slice(0, 10);
+      const amountCents = fieldCents(adjustment, 'amountCents', 'amount');
+      if (adjustment.type === 'Refund') {
+        const receipt = livePayments.get(adjustment.paymentId)?.receiptNumber || '—';
+        events.push({
+          date, reference: adjustment.id, type: 'Refund', debitCents: amountCents, creditCents: 0,
+          note: `${adjustment.reason || 'Refund / reversal'} · ${receipt}`, recordId: adjustment.id
+        });
+      } else if (adjustment.type === 'Adjustment') {
+        events.push({
+          date, reference: adjustment.id, type: 'Adjustment', debitCents: 0, creditCents: amountCents,
+          note: adjustment.reason || 'Balance adjustment', recordId: adjustment.id
+        });
+      }
+    }
+    // Window events sort by (date, reference) — replicated 1:1 from the SQL engine.
+    return events.sort((a, b) => `${a.date}|${a.reference}`.localeCompare(`${b.date}|${b.reference}`));
+  }
+
+  /** Paginated running-balance statement — mirrors patientLedgerSql. */
+  patientLedger(patientId, { page = 1, pageSize = 50, from = '', to = '' } = {}) {
+    const id = String(patientId || '');
+    if (!id) return { ok: false, error: 'Patient id required', rows: [], total: 0 };
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeSize = Math.max(1, Math.min(500, Number(pageSize) || 50));
+    const events = this.#ledgerEvents(id);
+    const windowed = events.filter((event) => (!from || event.date >= from) && (!to || event.date <= to));
+    const opening = from
+      ? events.filter((event) => event.date < from).reduce((sum, event) => sum + event.debitCents - event.creditCents, 0)
+      : 0;
+    let running = opening;
+    const withBalance = windowed.map((event) => {
+      running += event.debitCents - event.creditCents;
+      return { ...event, balanceCents: Math.max(0, running) };
+    });
+    const rows = withBalance.slice((safePage - 1) * safeSize, safePage * safeSize);
+    return {
+      ok: true, rows, total: withBalance.length, page: safePage, pageSize: safeSize,
+      openingBalanceCents: Math.max(0, opening),
+      pageTotalCents: rows.reduce((sum, row) => sum + row.debitCents - row.creditCents, 0)
+    };
+  }
+
+  /** Lifetime financial summary — mirrors patientFinancialSummarySql. */
+  patientFinancialSummary(patientId) {
+    const id = String(patientId || '');
+    if (!id) return { ok: false, error: 'Patient id required' };
+    let billed = 0; let discounts = 0; let tax = 0; let outstanding = 0; let invoiceCount = 0;
+    for (const invoice of this.#collection('invoices')) {
+      if (!invoice || invoice.patientId !== id) continue;
+      invoiceCount += 1;
+      if (invoice.status === 'Cancelled') continue;
+      billed += fieldCents(invoice, 'totalCents', 'total');
+      // Decimals are authoritative in the JSON ledger (cents are a derived cache
+      // refreshed on read), so fieldCents — which prefers the decimal field —
+      // is the only safe accessor here. Mirrors the SQL column mapping exactly.
+      discounts += fieldCents(invoice, 'discountCents', 'discount');
+      tax += fieldCents(invoice, 'taxCents', 'tax');
+      if (!['Cancelled', 'Paid'].includes(invoice.status)) outstanding += fieldCents(invoice, 'dueCents', 'due');
+    }
+    let paid = 0; let refunded = 0; let paymentCount = 0; let lastPayment = null;
+    for (const payment of this.#collection('payments')) {
+      if (!payment || payment.patientId !== id || ['Voided', 'Cancelled'].includes(payment.status)) continue;
+      paymentCount += 1;
+      paid += fieldCents(payment, 'amountCents', 'amount');
+      refunded += fieldCents(payment, 'refundedCents', 'refundedAmount');
+      const key = `${payment.date || ''}|${payment.createdAt || ''}`;
+      if (!lastPayment || key > lastPayment.key) lastPayment = { key, payment };
+    }
+    let refundCount = 0; let adjustmentCount = 0; let adjusted = 0;
+    for (const adjustment of this.#collection('paymentAdjustments')) {
+      if (!adjustment || adjustment.patientId !== id) continue;
+      if (adjustment.type === 'Refund') refundCount += 1;
+      if (adjustment.type === 'Adjustment') { adjustmentCount += 1; adjusted += fieldCents(adjustment, 'amountCents', 'amount'); }
+    }
+    const visitCount = this.#collection('visits').filter((visit) => visit && visit.patientId === id).length;
+    // billed − write-offs − net paid. Adjustments are credits, exactly as the
+    // ledger books them and as updatePatientBalance computes them (V2-09).
+    const formula = Math.max(0, billed - adjusted - paid + refunded);
+    const trusted = Math.max(0, outstanding);
+    return {
+      ok: true,
+      billedCents: billed, paidCents: paid, refundedCents: refunded, adjustedCents: adjusted,
+      discountCents: discounts, taxCents: tax,
+      netPaidCents: Math.max(0, paid - refunded),
+      // Trust the invoice due_cents denormalisation when it agrees with the
+      // ledger formula; otherwise the formula wins (the SQL engine does the same).
+      dueCents: trusted === formula ? trusted : formula,
+      invoiceCount, paymentCount, refundCount, adjustmentCount, visitCount,
+      lastPayment: lastPayment ? {
+        date: lastPayment.payment.date || '', receiptNumber: lastPayment.payment.receiptNumber || '',
+        amountCents: fieldCents(lastPayment.payment, 'amountCents', 'amount'), method: lastPayment.payment.method || ''
+      } : null
+    };
+  }
+
+  /** Monthly + yearly nets — mirrors patientLedgerRollupsSql. */
+  patientLedgerRollups(patientId, months = 12, years = 5) {
+    const id = String(patientId || '');
+    if (!id) return { monthly: [], yearly: [] };
+    // Rollups start at the clinic-date month — the same window the SQL engine
+    // derives with date('now','start of month','-11 months').
+    const anchor = new Date(`${this.#today().slice(0, 7)}-01T00:00:00Z`);
+    anchor.setUTCMonth(anchor.getUTCMonth() - 11);
+    const startKey = `${anchor.getUTCFullYear()}-${String(anchor.getUTCMonth() + 1).padStart(2, '0')}`;
+    const monthly = new Map();
+    const yearly = new Map();
+    const add = (map, bucket, event) => {
+      const entry = map.get(bucket) || { billed: 0, received: 0 };
+      entry.billed += event.debitCents;
+      entry.received += event.creditCents;
+      map.set(bucket, entry);
+    };
+    for (const event of this.#ledgerEvents(id)) {
+      const month = String(event.date || '').slice(0, 7);
+      if (month && month >= startKey) add(monthly, month, event);
+      const year = String(event.date || '').slice(0, 4);
+      if (year) add(yearly, year, event);
+    }
+    const shape = (map, limit) => [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, Math.max(1, Number(limit) || 1))
+      .map(([bucket, value]) => ({ bucket, billedCents: value.billed, receivedCents: value.received, netCents: value.billed - value.received }));
+    return { monthly: shape(monthly, months), yearly: shape(yearly, years) };
   }
 
   /** v1.3.0 parity: relationship report over the whole state. */

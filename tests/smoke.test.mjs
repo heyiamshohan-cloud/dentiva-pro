@@ -68,9 +68,7 @@ test('safety and offline guardrails exist', () => {
   assert.match(source, /applicationLock|lock-workspace/);
   assert.match(source, /PBKDF2/);
   assert.match(source, /data-form="unlock"/);
-  assert.match(source, /translateDom/);
-  assert.match(source, /Intl\.DateTimeFormat\(locale, \{ day: 'numeric', month: 'short', year: 'numeric'/);
-  assert.match(source, /Professional dental practice management for Bangladesh/);
+  assert.match(source, /Intl\.DateTimeFormat\('en-GB', \{ day: 'numeric', month: 'short', year: 'numeric'/);
   assert.match(source, /data-form="user-login"/);
   assert.match(source, /users\.manage/);
   assert.match(source, /function requirePermission/);
@@ -95,19 +93,19 @@ test('safety and offline guardrails exist', () => {
   assert.doesNotMatch(source, /sample patients|demo records|lorem ipsum/i);
 });
 
-test('Bengali locale covers release-critical surfaces and the date formatter is locale-aware', () => {
-  for (const label of [
-    'Dashboard', 'Patients', 'Appointments', "Today's Queue", 'Clinical Records',
-    'Dental chart', 'Treatment plan', 'Prescriptions', 'Billing', 'Payments', 'Inventory', 'Suppliers',
-    'Staff', 'Accounting', 'Reports', 'Backup & Restore', 'Settings', 'Security', 'Notifications',
-    'Saved views', 'Save view', 'Patient views', 'Save this patient view', 'View name', 'No saved searches', 'Load', 'Done',
-    'Day', 'Week', 'Month', 'Agenda', 'Upcoming agenda', 'Saved medication', 'Choose a saved medicine...',
-    'Save current medicine to catalog', 'Financial statement', 'Print statement', 'Export PDF',
-    'No matching records', 'No notifications', 'Validate and restore selection',
-    'Create a secure user account', 'Effective permissions'
-  ]) assert.match(source, new RegExp(`['\\"]${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\\"]\\s*:`), `Bengali translation missing: ${label}`);
-  const coreCheck = source.includes("'bn-BD'");
-  assert.ok(coreCheck, 'bn-BD locale must be referenced for Bengali formatting');
+test('English-only renderer and locale-fixed date formatter (v2.0.0 Phase 11)', () => {
+  // The renderer must not carry any Bengali codepoint, dictionary, DOM
+  // translation pass or language selector — the product ships in one language.
+  assert.equal(source.match(/[\u0980-\u09FF]/), null, 'renderer must contain no Bengali codepoints');
+  assert.doesNotMatch(source, /BENGALI_DICT|translateDom|localized\(|'bn-BD'/);
+  assert.doesNotMatch(source, /name="language"/);
+  // English UI strings the localization layer used to provide are still present.
+  for (const label of ['Dashboard', 'Patients', 'Appointments', 'Clinical Records', 'Dental Chart',
+    'Prescriptions', 'Billing', 'Payments', 'Accounting', 'Reports', 'Backup & Restore', 'Settings']) {
+    assert.ok(source.includes(label), `English UI label missing: ${label}`);
+  }
+  // Dates render through a single, locale-fixed helper.
+  assert.match(source, /Intl\.DateTimeFormat\('en-GB'/);
 });
 
 test('unsupported-schema protection and restore module groups', () => {

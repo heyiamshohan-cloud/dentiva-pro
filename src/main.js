@@ -19,14 +19,14 @@ window.addEventListener('unhandledrejection', (event) => { window.__bootError = 
 
 import './styles.css';
 import { createApi } from './api.js';
-import { hasPermission, validateAttachmentFile, buildRestorePlan, calculateInvoice, moneyToCents, centsToMoney } from './core.js';
+import { hasPermission, validateAttachmentFile, buildRestorePlan, calculateInvoice, moneyToCents, centsToMoney, clinicDate, DEFAULT_TIMEZONE } from './core.js';
 import { periodBounds } from './domain.js';
 import { APP_VERSION } from './migrate-state.js';
 
 const api = createApi();
 const app = document.querySelector('#app');
 
-const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const today = () => clinicDate(new Date(), appState.settings?.timezone || DEFAULT_TIMEZONE);
 const now = () => new Date().toISOString();
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
 const attr = esc;
@@ -100,91 +100,6 @@ const ICONS = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
 }
 
-const BENGALI_DICT = {
-
-  'Dashboard': 'ড্যাশবোর্ড', 'Patients': 'রোগী', 'Appointments': 'অ্যাপয়েন্টমেন্ট', "Today's Queue": 'আজকের সিরিয়াল',
-  'Clinical Records': 'ক্লিনিক্যাল রেকর্ড', 'Prescriptions': 'প্রেসক্রিপশন', 'Dental Chart': 'ডেন্টাল চার্ট', 'Treatment Catalog': 'চিকিৎসা তালিকা', 'Accounting': 'হিসাবরক্ষণ',
-  'Billing': 'বিলিং', 'Payments': 'পরিশোধ', 'Inventory': 'ইনভেন্টরি', 'Suppliers': 'সরবরাহকারী', 'Staff': 'স্টাফ',
-  'Reports': 'রিপোর্ট', 'Analytics': 'বিশ্লেষণ', 'Diagnostics': 'ডায়াগনস্টিকস', 'Notifications': 'নোটিফিকেশন', 'Backup & Restore': 'ব্যাকআপ ও পুনরুদ্ধার', 'Settings': 'সেটিংস', 'Help': 'সহায়তা', 'About': 'পরিচিতি',
-  'Workspace': 'ওয়ার্কস্পেস', 'Clinical': 'ক্লিনিক্যাল', 'Finance': 'আর্থিক', 'Operations': 'পরিচালনা', 'Insights': 'বিশ্লেষণ', 'System': 'সিস্টেম',
-  'New patient': 'নতুন রোগী', 'New appointment': 'নতুন অ্যাপয়েন্টমেন্ট', 'New visit': 'নতুন ভিজিট', 'New invoice': 'নতুন ইনভয়েস', 'Saved medication': 'সংরক্ষিত ওষুধ', 'Choose a saved medicine...': 'সংরক্ষিত ওষুধ বেছে নিন...', 'Save current medicine to catalog': 'বর্তমান ওষুধ ক্যাটালগে সংরক্ষণ',
-  'Record payment': 'পরিশোধ রেকর্ড', 'Add stock': 'স্টক যোগ করুন', 'Complete setup': 'সেটআপ সম্পূর্ণ করুন', 'Open appointments': 'অ্যাপয়েন্টমেন্ট খুলুন',
-  'View queue': 'সিরিয়াল দেখুন', 'Clinical records': 'ক্লিনিক্যাল রেকর্ড', 'Create prescription': 'প্রেসক্রিপশন তৈরি করুন',
-  'Export CSV': 'CSV এক্সপোর্ট', 'Activity log': 'কার্যকলাপ লগ', 'Signal categories': 'সিগন্যাল বিভাগ', 'Every protected action, attributed to the account that performed it': 'প্রতিটি সুরক্ষিত কাজ, যে অ্যাকাউন্ট করেছে তার সহিত', 'Print queue': 'সিরিয়াল প্রিন্ট', 'Print statement': 'স্টেটমেন্ট প্রিন্ট', 'Stock movement': 'স্টক মুভমেন্ট',
-  'Export full backup': 'সম্পূর্ণ ব্যাকআপ এক্সপোর্ট', 'Import backup': 'ব্যাকআপ ইমপোর্ট', 'Save settings': 'সেটিংস সংরক্ষণ',
-  'Cancel': 'বাতিল', 'Save changes': 'পরিবর্তন সংরক্ষণ', 'Save record': 'রেকর্ড সংরক্ষণ', 'Search anything': 'যেকোনো কিছু খুঁজুন',
-  'Today': 'আজ', 'Last 7 days': 'গত ৭ দিন', 'Last 1 month': 'গত ১ মাস', 'Last 3 months': 'গত ৩ মাস', 'Last 6 months': 'গত ৬ মাস', 'Last 1 year': 'গত ১ বছর', 'Custom range': 'কাস্টম সময়সীমা',
-  'Active': 'সক্রিয়', 'Inactive': 'নিষ্ক্রিয়', 'Scheduled': 'নির্ধারিত', 'Checked In': 'চেক-ইন', 'Waiting': 'অপেক্ষমাণ',
-  'In Treatment': 'চিকিৎসাধীন', 'Completed': 'সম্পন্ন', 'Cancelled': 'বাতিল', 'No Show': 'অনুপস্থিত', 'Paid': 'পরিশোধিত',
-  'Partially Paid': 'আংশিক পরিশোধ', 'Unpaid': 'অপরিশোধিত', 'Low stock': 'স্টক কম', 'In stock': 'স্টকে আছে', 'Expired': 'মেয়াদোত্তীর্ণ',
-  'No records in this range': 'এই সময়সীমায় কোনো রেকর্ড নেই', 'No patients found': 'কোনো রোগী পাওয়া যায়নি', 'No notifications': 'কোনো নোটিফিকেশন নেই', 'Queue wait': 'সিরিয়ালে অপেক্ষা', 'Clinical follow-ups': 'ক্লিনিক্যাল ফলো-আপ', 'Stock and expiry': 'স্টক ও মেয়াদ', 'Outstanding balances': 'বকেয়া ব্যালান্স', 'Backup reminders': 'ব্যাকআপ অনুস্মারক', 'Notification categories': 'নোটিফিকেশনের বিভাগ', 'Document footer': 'ডকুমেন্ট ফুটার', 'Show clinic logo in documents': 'ডকুমেন্টে ক্লিনিকের লোগো দেখান', 'Show clinic contact in documents': 'ডকুমেন্টে ক্লিনিকের যোগাযোগ দেখান', 'Print preview': 'প্রিন্ট প্রিভিউ', 'Send to printer': 'প্রিন্টারে পাঠান', 'Save as PDF': 'পিডিএফ হিসেবে সংরক্ষণ করুন', 'Paper size': 'কাগজের মাপ', '80 mm receipt': '৮০ মিমি রসিদ', 'Print cancelled': 'প্রিন্ট বাতিল হয়েছে', 'Document sent to the printer.': 'ডকুমেন্ট প্রিন্টারে পাঠানো হয়েছে।', 'Nothing prints silently.': 'নীরবে কিছুই প্রিন্ট হয় না।', 'Preview the document, choose the paper size, then print or save as PDF.': 'ডকুমেন্টটি দেখুন, কাগজের মাপ বেছে নিন, তারপর প্রিন্ট বা পিডিএফ সংরক্ষণ করুন।', 'Appointment slip': 'অ্যাপয়েন্টমেন্ট স্লিপ', 'Treatment estimate': 'চিকিৎসার আনুমানিক খরচ', 'Print slip': 'স্লিপ প্রিন্ট', 'Print estimate': 'অনুমান প্রিন্ট',
-  'Professional Dental Practice': 'পেশাদার ডেন্টাল প্র্যাকটিস', 'Practice workspace': 'প্র্যাকটিস ওয়ার্কস্পেস', 'Setup required': 'সেটআপ প্রয়োজন',
-  'General': 'সাধারণ', 'Clinic & doctor': 'ক্লিনিক ও ডাক্তার', 'Appointments': 'অ্যাপয়েন্টমেন্ট', 'Billing & payments': 'বিলিং ও পরিশোধ', 'Printing': 'প্রিন্টিং', 'Security': 'নিরাপত্তা', 'Notifications': 'নোটিফিকেশন',
-  'Good morning': 'সুপ্রভাত', 'Good afternoon': 'শুভ অপরাহ্ণ', 'Good evening': 'শুভ সন্ধ্যা', 'A clear view of your practice, without the noise.': 'অপ্রয়োজনীয় জটিলতা ছাড়া আপনার প্র্যাকটিসের পরিষ্কার চিত্র।',
-  'Today’s appointments': 'আজকের অ্যাপয়েন্টমেন্ট', 'Patients today': 'আজকের রোগী', 'Waiting queue': 'অপেক্ষমাণ সিরিয়াল', 'Collected today': 'আজকের আদায়', 'Your schedule is clear': 'আজকের সময়সূচি খালি', 'No patients added yet': 'এখনও কোনো রোগী যোগ করা হয়নি', 'No one is waiting': 'কেউ অপেক্ষায় নেই', 'No payments recorded': 'কোনো পরিশোধ রেকর্ড নেই',
-  'Today’s schedule': 'আজকের সময়সূচি', 'Today’s queue': 'আজকের সিরিয়াল', 'Follow-ups due': 'প্রয়োজনীয় ফলো-আপ', 'Operational signals': 'পরিচালনাগত সংকেত', 'Move work forward': 'কাজ এগিয়ে নিন', 'Common actions, one click away.': 'প্রয়োজনীয় কাজ এক ক্লিক দূরে।',
-  'Nothing booked today': 'আজ কোনো অ্যাপয়েন্টমেন্ট নেই', 'Create an appointment to build your schedule.': 'সময়সূচি তৈরি করতে একটি অ্যাপয়েন্টমেন্ট যোগ করুন।', 'Your queue is ready': 'আপনার সিরিয়াল প্রস্তুত', 'No follow-ups due': 'কোনো ফলো-আপ বাকি নেই', 'No outstanding balances': 'কোনো বকেয়া নেই', 'Inventory is in good shape': 'ইনভেন্টরি স্বাভাবিক আছে', 'Backup not configured': 'ব্যাকআপ সেট করা হয়নি',
-  'Patient record': 'রোগীর রেকর্ড', 'New patient': 'নতুন রোগী', 'Register a patient': 'রোগী নিবন্ধন করুন', 'Edit patient details': 'রোগীর তথ্য সম্পাদনা', 'Full name': 'পূর্ণ নাম', 'Preferred name': 'পছন্দের নাম', 'Alternative phone': 'বিকল্প ফোন', 'Date of birth': 'জন্মতারিখ', 'Gender': 'লিঙ্গ', 'Blood group': 'রক্তের গ্রুপ', 'Occupation': 'পেশা', 'Allergies': 'অ্যালার্জি', 'Chronic conditions': 'দীর্ঘমেয়াদি রোগ', 'Current medications': 'চলমান ওষুধ', 'Previous dental history': 'পূর্ববর্তী ডেন্টাল ইতিহাস', 'Referral source': 'রেফারেলের উৎস', 'Patient status': 'রোগীর অবস্থা',
-  'Patient details': 'রোগীর তথ্য', 'Clinical context': 'ক্লিনিক্যাল প্রেক্ষাপট', 'Recent activity': 'সাম্প্রতিক কার্যক্রম', 'Clinical visits': 'ক্লিনিক্যাল ভিজিট', 'No visits recorded': 'কোনো ভিজিট রেকর্ড নেই', 'Patient timeline': 'রোগীর টাইমলাইন', 'Timeline is empty': 'টাইমলাইন খালি', 'Attachments': 'সংযুক্তি', 'No attachments yet': 'এখনও কোনো সংযুক্তি নেই', 'Referral history': 'রেফারেল ইতিহাস', 'No referrals recorded': 'কোনো রেফারেল রেকর্ড নেই',
-  'Calendar': 'ক্যালেন্ডার', 'Upcoming appointments': 'আসন্ন অ্যাপয়েন্টমেন্ট', 'No upcoming appointments': 'কোনো আসন্ন অ্যাপয়েন্টমেন্ট নেই', 'Plan the day, protect chair time and keep patients informed.': 'দিনের পরিকল্পনা করুন, চেয়ার সময় সুরক্ষিত রাখুন এবং রোগীকে অবহিত রাখুন।',
-  // v1.6.0 flagship surfaces — prescriptions, receipts, statement, patient 360, chart, palette.
-  'Prescriber': 'প্রেসক্রাইবার', 'Prescription preview': 'প্রেসক্রিপশন প্রিভিউ', 'C/C': 'সি/সি', 'O/E': 'ও/ই', 'R/E': 'আর/ই',
-  'Medicine catalog': 'ওষুধের ক্যাটালগ', 'Medication template': 'ঔষধ টেমপ্লেট', 'Templates pre-fill the form for your review — never a recommendation.': 'টেমপ্লেট শুধু ফর্ম পূরণ করে — এটি সুপারিশ নয়।',
-  'MONEY RECEIPT': 'মানি রসিদ', 'Money receipt': 'মানি রসিদ', 'Received': 'গৃহীত', 'Amount received': 'গৃহীত পরিমাণ',
-  'Net received': 'নিট গৃহীত', 'Refunded / reversed': 'ফেরত / বাতিলকৃত', 'Financial statement': 'আর্থিক বিবরণী',
-  'Opening balance': 'প্রারম্ভিক ব্যালেন্স', 'Closing balance': 'সমাপনী ব্যালেন্স', 'Statement period': 'বিবরণীর সময়কাল',
-  'Lifetime billed': 'সার্বিক বিল', 'Multi': 'একাধিক', 'Tooth history': 'দাঁতের ইতিহাস', 'Chart note': 'চার্ট নোট',
-  'Dentist registration (BMDC no.)': 'ডেন্টিস্ট রেজিস্ট্রেশন (বিএমডিসি নং)', 'Website': 'ওয়েবসাইট',
-  'Actions': 'অ্যাকশন', 'Prescription updated': 'প্রেসক্রিপশন হালনাগাদ', 'Rx': 'আরএক্স',
-  'Apply template': 'টেমপ্লেট প্রয়োগ', 'Save as template': 'টেমপ্লেট সংরক্ষণ', 'Duplicate': 'কপি করুন', 'Instructions': 'নির্দেশনা',
-  'Duration': 'মেয়াদ', 'Before food': 'খাবারের আগে', 'After food': 'খাবারের পরে', 'With food': 'খাবারের সাথে',
-  'Custom / other complaints — added after the selected ones': 'নির্বাচিতগুলির পরে কাস্টম / অন্যান্য অভিযোগ যোগ হবে',
-  'Custom / other findings — e.g. tenderness, tooth number details': 'কাস্টম / অন্যান্য পর্যবেক্ষণ — যেমন টেন্ডারনেস, দাঁতের নম্বর',
-  'multi-select': 'মাল্টি-সিলেক্ট', 'Received by': 'গ্রহণকারী', 'Remaining due': 'বাকি টাকা',
-
-  'Clinical records': 'ক্লিনিক্যাল রেকর্ড', 'Record a visit': 'ভিজিট রেকর্ড করুন', 'Record a visit after recording a patient visit.': 'রোগীর ভিজিটের তথ্য সংরক্ষণ করুন।', 'Symptoms': 'উপসর্গ', 'Clinical findings': 'ক্লিনিক্যাল পর্যবেক্ষণ', 'Diagnosis': 'রোগ নির্ণয়', 'Treatment plan': 'চিকিৎসা পরিকল্পনা', 'Treatment performed': 'সম্পাদিত চিকিৎসা', 'Follow-up date': 'ফলো-আপের তারিখ', 'Doctor / additional notes': 'ডাক্তারের অতিরিক্ত নোট',
-  'Treatment catalog': 'চিকিৎসা তালিকা', 'Add a treatment': 'চিকিৎসা যোগ করুন', 'Treatment catalog is empty': 'চিকিৎসা তালিকা খালি', 'Treatment name': 'চিকিৎসার নাম', 'Default price': 'ডিফল্ট মূল্য', 'Tooth required': 'দাঁত প্রয়োজন', 'Active': 'সক্রিয়', 'Inactive': 'নিষ্ক্রিয়',
-  'Dental chart': 'ডেন্টাল চার্ট', 'Choose a patient to open the chart': 'চার্ট খুলতে একজন রোগী নির্বাচন করুন', 'Select a tooth': 'একটি দাঁত নির্বাচন করুন', 'Tooth record': 'দাঁতের রেকর্ড', 'Clinical note': 'ক্লিনিক্যাল নোট', 'Save tooth record': 'দাঁতের রেকর্ড সংরক্ষণ', 'Remove record': 'রেকর্ড মুছুন', 'Adult dentition': 'স্থায়ী দাঁত', 'Primary dentition': 'দুধ দাঁত',
-  'Create a prescription': 'প্রেসক্রিপশন তৈরি করুন', 'New prescription': 'নতুন প্রেসক্রিপশন', 'Medicine': 'ওষুধ', 'Strength': 'শক্তি', 'Dosage': 'মাত্রা', 'Frequency': 'বারম্বারতা', 'Duration': 'সময়কাল', 'Route': 'প্রয়োগের পথ', 'Instructions': 'নির্দেশনা', 'Prescription notes': 'প্রেসক্রিপশন নোট',
-  'Billing': 'বিলিং', 'Billing statement': 'বিলিং স্টেটমেন্ট', 'Total billed': 'মোট বিল', 'Collected': 'আদায়', 'Outstanding': 'বকেয়া', 'Paid rate': 'পরিশোধের হার', 'No invoices created': 'কোনো ইনভয়েস তৈরি হয়নি', 'Create an invoice': 'ইনভয়েস তৈরি করুন', 'New invoice': 'নতুন ইনভয়েস', 'Invoice date': 'ইনভয়েসের তারিখ', 'Item / treatment': 'আইটেম / চিকিৎসা', 'Quantity': 'পরিমাণ', 'Unit price': 'একক মূল্য', 'Discount': 'ছাড়', 'Tax rate (%)': 'কর হার (%)', 'Calculated total': 'হিসাব করা মোট',
-  'Payments': 'পরিশোধ', 'No payments recorded': 'কোনো পরিশোধ রেকর্ড নেই', 'Record a payment': 'পরিশোধ রেকর্ড করুন', 'Payment date': 'পরিশোধের তারিখ', 'Method': 'পদ্ধতি', 'Reference / transaction ID': 'রেফারেন্স / লেনদেন আইডি', 'Cash': 'নগদ', 'Bank': 'ব্যাংক', 'Card': 'কার্ড', 'Other': 'অন্যান্য',
-  'Inventory': 'ইনভেন্টরি', 'No inventory items': 'কোনো ইনভেন্টরি আইটেম নেই', 'Add stock item': 'স্টক আইটেম যোগ করুন', 'Item name': 'আইটেমের নাম', 'Item code': 'আইটেম কোড', 'Category': 'ক্যাটাগরি', 'Brand': 'ব্র্যান্ড', 'Unit': 'একক', 'Current stock': 'বর্তমান স্টক', 'Minimum / reorder level': 'ন্যূনতম / পুনঃঅর্ডার স্তর', 'Expiry date': 'মেয়াদ শেষের তারিখ', 'Batch / lot': 'ব্যাচ / লট',
-  'Suppliers': 'সরবরাহকারী', 'No suppliers added': 'কোনো সরবরাহকারী যোগ করা হয়নি', 'Supplier name': 'সরবরাহকারীর নাম', 'Contact person': 'যোগাযোগের ব্যক্তি', 'Staff': 'স্টাফ', 'No staff members yet': 'এখনও কোনো স্টাফ নেই', 'Staff member': 'স্টাফ সদস্য', 'Role': 'ভূমিকা', 'Joining date': 'যোগদানের তারিখ', 'Salary': 'বেতন', 'Status': 'অবস্থা',
-  'Accounting & finance': 'হিসাবরক্ষণ ও অর্থ', 'Accounting': 'হিসাবরক্ষণ', 'Add expense': 'খরচ যোগ করুন', 'Operating expenses': 'পরিচালন খরচ', 'Net operating result': 'নিট পরিচালন ফলাফল', 'Expense categories': 'খরচের ক্যাটাগরি', 'No expenses recorded': 'কোনো খরচ রেকর্ড নেই', 'Description': 'বিবরণ',
-  'Reports': 'রিপোর্ট', 'Revenue & collections': 'আয় ও আদায়', 'Patient register': 'রোগী তালিকা', 'Visit activity': 'ভিজিট কার্যক্রম', 'Appointment activity': 'অ্যাপয়েন্টমেন্ট কার্যক্রম', 'Outstanding balances': 'বকেয়া হিসাব', 'Inventory status': 'ইনভেন্টরি অবস্থা', 'Expense report': 'খরচের রিপোর্ট', 'Date range': 'তারিখের পরিসীমা', 'Report notes': 'রিপোর্ট নোট', 'No records in this range': 'এই সময়সীমায় কোনো রেকর্ড নেই',
-  'Backup & restore': 'ব্যাকআপ ও পুনরুদ্ধার', 'Create a backup': 'ব্যাকআপ তৈরি করুন', 'Restore or import': 'পুনরুদ্ধার বা ইমপোর্ট', 'Export full backup': 'সম্পূর্ণ ব্যাকআপ এক্সপোর্ট', 'Import backup': 'ব্যাকআপ ইমপোর্ট', 'Choose a backup file': 'ব্যাকআপ ফাইল নির্বাচন করুন', 'Import preview': 'ইমপোর্ট প্রিভিউ', 'records detected': 'রেকর্ড পাওয়া গেছে', 'possible conflicts': 'সম্ভাব্য দ্বন্দ্ব', 'validation errors': 'ভ্যালিডেশন ত্রুটি', 'Keep Existing': 'বিদ্যমানটি রাখুন', 'Skip': 'এড়িয়ে যান', 'Replace': 'প্রতিস্থাপন করুন', 'Create New Copy': 'নতুন কপি তৈরি করুন',
-  'Settings': 'সেটিংস', 'Save settings': 'সেটিংস সংরক্ষণ', 'Clinic identity': 'ক্লিনিক পরিচয়', 'Localization': 'লোকালাইজেশন', 'Numbering & control': 'নম্বরিং ও নিয়ন্ত্রণ', 'Privacy & security': 'গোপনীয়তা ও নিরাপত্তা', 'Clinic / practice name': 'ক্লিনিক / প্র্যাকটিসের নাম', 'Chamber / branch': 'চেম্বার / শাখা', 'Dentist name': 'ডেন্টিস্টের নাম', 'Professional title': 'পেশাগত উপাধি', 'Default language': 'ডিফল্ট ভাষা', 'Timezone': 'টাইমজোন', 'Date format': 'তারিখের ফরম্যাট', 'Time format': 'সময়ের ফরম্যাট', 'Patient code prefix': 'রোগী কোডের প্রিফিক্স', 'Invoice prefix': 'ইনভয়েস প্রিফিক্স', 'Appointment prefix': 'অ্যাপয়েন্টমেন্ট প্রিফিক্স', 'Queue serial prefix': 'সিরিয়াল প্রিফিক্স', 'Application lock': 'অ্যাপ্লিকেশন লক', 'Set application PIN': 'অ্যাপ্লিকেশন পিন সেট করুন', 'Change PIN': 'পিন পরিবর্তন করুন', 'Disable': 'বন্ধ করুন', 'Lock workspace': 'ওয়ার্কস্পেস লক করুন', 'Workspace locked': 'ওয়ার্কস্পেস লক করা হয়েছে', 'WORKSPACE LOCKED': 'ওয়ার্কস্পেস লক করা হয়েছে', 'Enter your application PIN': 'আপনার অ্যাপ্লিকেশন পিন দিন', 'This local workspace is protected. Your records remain on this device.': 'এই স্থানীয় ওয়ার্কস্পেস সুরক্ষিত। আপনার রেকর্ড এই ডিভাইসেই থাকে।', 'Application PIN': 'অ্যাপ্লিকেশন পিন', 'Unlock workspace': 'ওয়ার্কস্পেস আনলক করুন', 'Forgotten PINs cannot be recovered by Dentiva Pro. Use a verified backup according to your clinic policy.': 'ভুলে যাওয়া পিন Dentiva Pro থেকে পুনরুদ্ধার করা যায় না। আপনার ক্লিনিকের নীতি অনুযায়ী যাচাইকৃত ব্যাকআপ ব্যবহার করুন।', 'New PIN': 'নতুন পিন', 'Confirm PIN': 'পিন নিশ্চিত করুন', 'Change application PIN': 'অ্যাপ্লিকেশন পিন পরিবর্তন করুন', 'Enable application lock': 'অ্যাপ্লিকেশন লক চালু করুন', 'Update PIN': 'পিন আপডেট করুন',
-  'Help centre': 'সহায়তা কেন্দ্র', 'About Dentiva Pro': 'Dentiva Pro পরিচিতি', 'Professional dental practice management for Bangladesh.': 'বাংলাদেশের জন্য পেশাদার ডেন্টাল প্র্যাকটিস ম্যানেজমেন্ট।', 'Privacy': 'গোপনীয়তা', 'Local data promise': 'স্থানীয় ডেটার প্রতিশ্রুতি', 'Your practice data stays yours.': 'আপনার প্র্যাকটিসের ডেটা আপনারই থাকে।', 'Creator': 'নির্মাতা', 'Offline-first': 'অফলাইন-প্রথম', 'Light mode': 'লাইট মোড', 'Local privacy': 'স্থানীয় গোপনীয়তা',
-  'Sign in to Dentiva Pro': 'Dentiva Pro-তে সাইন ইন করুন', 'LOCAL ACCOUNT SIGN-IN': 'স্থানীয় অ্যাকাউন্টে সাইন ইন', 'User': 'ব্যবহারকারী', 'PIN': 'পিন', 'Enter your local PIN': 'আপনার স্থানীয় পিন দিন', 'Sign in': 'সাইন ইন', 'Contact an Administrator if your account is disabled or your PIN is forgotten.': 'অ্যাকাউন্ট নিষ্ক্রিয় হলে বা পিন ভুলে গেলে অ্যাডমিনিস্ট্রেটরের সঙ্গে যোগাযোগ করুন।', 'User accounts': 'ব্যবহারকারী অ্যাকাউন্ট', 'Access control': 'অ্যাক্সেস নিয়ন্ত্রণ', 'Add user account': 'ব্যবহারকারী অ্যাকাউন্ট যোগ করুন', 'Create a secure user account': 'নিরাপদ ব্যবহারকারী অ্যাকাউন্ট তৈরি করুন', 'Edit account access': 'অ্যাকাউন্ট অ্যাক্সেস সম্পাদনা', 'Full name': 'পূর্ণ নাম', 'Role template': 'রোল টেমপ্লেট', 'Associated staff member': 'সংযুক্ত স্টাফ সদস্য', 'Account status': 'অ্যাকাউন্টের অবস্থা', 'New PIN (leave blank to keep current)': 'নতুন পিন (বর্তমান রাখতে খালি রাখুন)', 'Effective permissions': 'কার্যকর অনুমতি', 'Create account': 'অ্যাকাউন্ট তৈরি করুন', 'Save account': 'অ্যাকাউন্ট সংরক্ষণ', 'Treatment plan': 'চিকিৎসা পরিকল্পনা', 'Treatment plan is clinician-authored': 'চিকিৎসা পরিকল্পনা চিকিৎসকের তৈরি', 'New treatment plan': 'নতুন চিকিৎসা পরিকল্পনা', 'Edit treatment plan': 'চিকিৎসা পরিকল্পনা সম্পাদনা', 'Create a treatment plan': 'চিকিৎসা পরিকল্পনা তৈরি করুন', 'Plan title': 'পরিকল্পনার শিরোনাম', 'Clinical goal': 'ক্লিনিক্যাল লক্ষ্য', 'Plan status': 'পরিকল্পনার অবস্থা', 'Start date': 'শুরুর তারিখ', 'Review date': 'পর্যালোচনার তারিখ', 'Stages': 'ধাপসমূহ', 'Financial statement': 'আর্থিক বিবরণী', 'Print statement': 'বিবরণী প্রিন্ট', 'Total charges': 'মোট চার্জ', 'No financial activity': 'কোনো আর্থিক কার্যক্রম নেই', 'Running balance': 'চলমান ব্যালান্স', 'Stage name': 'ধাপের নাম',
-  'Add patient': 'রোগী যোগ করুন', 'Add staff member': 'স্টাফ সদস্য যোগ করুন', 'Add supplier': 'সরবরাহকারী যোগ করুন', 'Add treatment': 'চিকিৎসা যোগ করুন', 'Adjust stock': 'স্টক সমন্বয় করুন', 'Attach file': 'ফাইল সংযুক্ত করুন', 'Book appointment': 'অ্যাপয়েন্টমেন্ট বুক করুন', 'Check in patient': 'রোগী চেক-ইন করুন', 'Download original': 'মূল ফাইল ডাউনলোড', 'Edit': 'সম্পাদনা', 'Edit supplier': 'সরবরাহকারী সম্পাদনা', 'Export PDF': 'PDF এক্সপোর্ট', 'Export patients CSV': 'রোগীর CSV এক্সপোর্ট', 'Export preserved data': 'সংরক্ষিত ডেটা এক্সপোর্ট', 'Export verified backup': 'যাচাইকৃত ব্যাকআপ এক্সপোর্ট', 'Filters': 'ফিল্টার', 'Saved views': 'সংরক্ষিত ভিউ', 'Save view': 'ভিউ সংরক্ষণ', 'Patient views': 'রোগী ভিউ', 'Save this patient view': 'এই রোগী ভিউ সংরক্ষণ করুন', 'Keep the current search and patient filters available for the next visit.': 'বর্তমান সার্চ ও রোগী ফিল্টার পরের ভিজিটের জন্য সংরক্ষণ করুন।', 'View name': 'ভিউয়ের নাম', 'No saved searches': 'কোনো সংরক্ষিত সার্চ নেই', 'Save a patient search to reuse it here.': 'এখানে পুনরায় ব্যবহার করতে একটি রোগী সার্চ সংরক্ষণ করুন।', 'Load': 'লোড', 'Done': 'সম্পন্ন', 'Reset layout': 'লেআউট রিসেট', 'Use the arrows to reorder enabled cards.': 'তীর চিহ্ন ব্যবহার করে সক্রিয় কার্ড সাজান।', 'Full timeline': 'সম্পূর্ণ টাইমলাইন', 'Import CSV': 'CSV ইমপোর্ট', 'Inventory is empty': 'ইনভেন্টরি খালি', 'Manage user accounts': 'ব্যবহারকারী অ্যাকাউন্ট পরিচালনা', 'New referral': 'নতুন রেফারেল', 'No activity yet': 'এখনও কোনো কার্যক্রম নেই', 'No appointments in today’s queue': 'আজকের সিরিয়ালে কোনো অ্যাপয়েন্টমেন্ট নেই', 'No audit events match': 'কোনো অডিট ইভেন্ট মেলেনি', 'No invoices yet': 'এখনও কোনো ইনভয়েস নেই', 'No matching records': 'কোনো মিলযুক্ত রেকর্ড নেই', 'No prescriptions yet': 'এখনও কোনো প্রেসক্রিপশন নেই', 'No treatment plans yet': 'এখনও কোনো চিকিৎসা পরিকল্পনা নেই', 'No user accounts yet': 'এখনও কোনো ব্যবহারকারী অ্যাকাউন্ট নেই', 'Open data management': 'ডেটা ব্যবস্থাপনা খুলুন', 'Open full chart': 'সম্পূর্ণ চার্ট খুলুন', 'Open payments': 'পেমেন্ট খুলুন', 'Restore backup': 'ব্যাকআপ পুনরুদ্ধার', 'Open quick search': 'দ্রুত সার্চ খুলুন', 'Open settings': 'সেটিংস খুলুন', 'Print': 'প্রিন্ট', 'Print chart': 'চার্ট প্রিন্ট', 'Print report': 'রিপোর্ট প্রিন্ট', 'Record visit': 'ভিজিট রেকর্ড', 'Refund': 'রিফান্ড', 'Remove logo': 'লোগো সরান', 'Reset this workspace': 'এই ওয়ার্কস্পেস রিসেট করুন', 'Save chart note': 'চার্ট নোট সংরক্ষণ', 'Today’s Queue': 'আজকের সিরিয়াল', 'Day': 'দিন', 'Week': 'সপ্তাহ', 'Month': 'মাস', 'Agenda': 'এজেন্ডা', 'Upcoming agenda': 'আসন্ন এজেন্ডা', 'Upload clinic logo': 'ক্লিনিক লোগো আপলোড', 'Validate and restore selection': 'নির্বাচন যাচাই ও পুনরুদ্ধার', 'View audit trail': 'অডিট ট্রেইল দেখুন'
-,
-
-  Analytics: 'বিশ্লেষণ', Notifications: 'নোটিফিকেশন', Diagnostics: 'ডায়াগনস্টিকস', 'Command centre': 'কমান্ড সেন্টার', 'Search your workspace': 'ওয়ার্কস্পেসে খুঁজুন', Commands: 'কমান্ড', Command: 'কমান্ড', 'Open analytics': 'বিশ্লেষণ খুলুন', 'Open reports': 'রিপোর্ট খুলুন', 'Run integrity check': 'ইন্টিগ্রিটি চেক চালান', 'Workspace health': 'ওয়ার্কস্পেসের স্বাস্থ্য', Healthy: 'স্বাস্থ্যকর', 'Needs attention': 'মনোযোগ প্রয়োজন', 'Database health': 'ডেটাবেসের স্বাস্থ্য', 'Access health': 'অ্যাক্সেসের স্বাস্থ্য', 'Integrity results': 'ইন্টিগ্রিটি ফলাফল', 'No current integrity issues': 'বর্তমানে কোনো ইন্টিগ্রিটি সমস্যা নেই', 'Revenue and visit trend': 'আয় ও ভিজিটের প্রবণতা', 'Payment mix': 'পরিশোধের ধরন', 'Clinical activity': 'ক্লিনিক্যাল কার্যক্রম', 'Commercial review': 'বাণিজ্যিক পর্যালোচনা', 'Patient alert': 'রোগীর সতর্কতা', 'Important alert': 'গুরুত্বপূর্ণ সতর্কতা', 'Preferred contact method': 'পছন্দের যোগাযোগ মাধ্যম', Tags: 'ট্যাগ', Procedures: 'প্রক্রিয়াসমূহ', 'Tooth number(s)': 'দাঁতের নম্বর', 'Estimated duration (minutes)': 'আনুমানিক সময় (মিনিট)', 'Estimated cost': 'আনুমানিক খরচ', Discount: 'ছাড়', 'Estimated total': 'আনুমানিক মোট', 'Additional medicines': 'অতিরিক্ত ওষুধ', 'Mark all read': 'সব পড়া হিসেবে চিহ্নিত করুন', Open: 'খুলুন', Dismiss: 'সরান', 'No payment data': 'কোনো পরিশোধের তথ্য নেই', 'No matching records': 'কোনো মিলযুক্ত রেকর্ড নেই', 'Review': 'পর্যালোচনা', 'Low stock': 'স্টক কম', 'Expiry review': 'মেয়াদ পর্যালোচনা', 'Queue attention': 'সিরিয়ালে মনোযোগ প্রয়োজন', 'Backup recommended': 'ব্যাকআপ নেওয়া উচিত', 'Edit patient': 'রোগী সম্পাদনা', 'Death Review': 'মৃত্যু পর্যালোচনা', 'Follow-up': 'ফলো-আপ', 'Name': 'নাম', 'Quantity': 'পরিমাণ', 'Category': 'বিভাগ', 'Unit': 'একক', 'Status': 'অবস্থা', 'Stock movement': 'স্টক মুভমেন্ট', 'Custom patient fields': 'কাস্টম রোগী ফিল্ড', 'Movement ledger': 'মুভমেন্ট খাতা', 'Invoice': 'ইনভয়েস', 'Receipt': 'রসিদ', 'Prescription': 'প্রেসক্রিপশন', 'Treatment plan': 'চিকিৎসা পরিকল্পনা', 'Waitlist': 'ওয়েটলিস্ট', 'Queue': 'সিরিয়াল', 'Ledger': 'খাতা', 'Record type': 'রেকর্ডের ধরন', 'Recorded snapshot': 'রেকর্ডকৃত স্ন্যাপশট', 'Export audit log': 'অডিট লগ এক্সপোর্ট', 'Audit trail': 'অডিট ট্রেইল', 'Snapshot keys': 'স্ন্যাপশট কী', 'Text': 'টেক্সট', 'Number': 'সংখ্যা', 'Backup interval (hours)': 'ব্যাকআপ ব্যবধান (ঘণ্টা)', 'Every 12 hours': 'প্রতি ১২ ঘণ্টা', 'Daily': 'প্রতিদিন', 'Weekly': 'সাপ্তাহিক', 'Session timeout (minutes)': 'সেশন মেয়াদ (মিনিট)', 'Auto lock (minutes)': 'অটো লক (মিনিট)', 'Clinic logo': 'ক্লিনিকের লোগো', 'Show logo on documents': 'নথিতে লোগো দেখান', 'Notification preferences': 'নোটিফিকেশন পছন্দসমূহ', 'Categories': 'বিভাগসমূহ', 'Portal theme': 'পোর্টাল থিম', 'Patient': 'রোগী', 'Phone': 'ফোন', 'Email': 'ইমেইল', 'Address': 'ঠিকানা', 'City': 'শহর', 'District': 'জেলা', 'Country': 'দেশ', 'Date': 'তারিখ', 'Time': 'সময়', 'Amount': 'পরিমাণ', 'Notes': 'নোট', 'Reason': 'কারণ', 'Reference': 'রেফারেন্স', 'Supplier': 'সরবরাহকারী', 'Chair': 'চেয়ার', 'Room': 'কক্ষ', 'Dentist': 'দন্ত চিকিৎসক', 'Doctor': 'ডাক্তার', 'Specialty': 'বিশেষত্ব', 'Specialization': 'বিশেষজ্ঞতা', 'Title': 'শিরোনাম', 'Code': 'কোড', 'View': 'দেখুন', 'Close': 'বন্ধ করুন', 'Delete': 'মুছুন', 'Remove': 'সরান', 'Restore': 'পুনরুদ্ধার', 'Retry': 'পুনরায় চেষ্টা', 'Complete': 'সম্পন্ন করুন', 'Void': 'বাতিল', 'Details': 'বিস্তারিত', 'Patient': 'রোগী',
-  'Findings': 'লক্ষণ ও ফলাফল', 'Chief complaint': 'প্রধান অভিযোগ', 'Medical history': 'চিকিৎসাগত ইতিহাস', 'Communication notes': 'যোগাযোগের নোট', 'Emergency contact name': 'জরুরি যোগাযোগের নাম', 'Emergency contact phone': 'জরুরি যোগাযোগের ফোন', 'Important alerts': 'গুরুত্বপূর্ণ সতর্কতা', 'Marital status': 'বৈবাহিক অবস্থা', 'Secondary phone': 'বিকল্প ফোন', 'Tags (comma separated)': 'ট্যাগ (কমা দিয়ে আলাদা)', 'Procedures': 'প্রক্রিয়াসমূহ', 'Procedures (comma separated)': 'প্রক্রিয়াসমূহ (কমা দিয়ে আলাদা)', 'Planned treatment': 'পরিকল্পিত চিকিৎসা', 'Convert to visit': 'ভিজিটে রূপান্তর', 'Schedule follow-up': 'ফলো-আপ নির্ধারণ করুন', 'Due date': 'প্রদেয় তারিখ', 'Referral date': 'রেফারেলের তারিখ', 'Referred to': 'যাকে রেফার করা হয়েছে', 'Response / report': 'প্রতিক্রিয়া / রিপোর্ট', 'Referral date': 'রেফারেলের তারিখ',
-  'Movement type': 'মুভমেন্টের ধরন', 'Reason / note': 'কারণ / নোট', 'Correction direction': 'সংশোধনের দিক', 'Purchase price': 'ক্রয় মূল্য', 'Sale price': 'বিক্রয় মূল্য', 'Minimum stock': 'ন্যূনতম স্টক', 'Opening stock': 'প্রারম্ভিক স্টক', 'Duplicate patient to merge': 'একত্র করার জন্য সদৃশ রোগী', 'Merge duplicate…': 'সদৃশ একত্র করুন…', 'Back to patients': 'রোগীদের কাছে ফিরুন', 'Edit patient details': 'রোগীর তথ্য সম্পাদনা', 'Currency': 'মুদ্রা', 'Receipt prefix': 'রসিদ উপসর্গ', 'Visit prefix': 'ভিজিট উপসর্গ', 'Default appointment duration (minutes)': 'ডিফল্ট অ্যাপয়েন্টমেন্ট সময়কাল (মিনিট)', 'Low stock threshold': 'নিম্ন স্টকের সীমা', 'Print page size': 'প্রিন্ট পৃষ্ঠার আকার', 'Automatic backup frequency': 'স্বয়ংক্রিয় ব্যাকআপ সময়সূচি', 'Backups to keep (retention)': 'কতটি ব্যাকআপ রাখবেন', 'Enable tax on invoices': 'ইনভয়েসে ট্যাক্স প্রযোজ্য', 'Apply tax': 'ট্যাক্স প্রয়োগ করুন', 'Tax rate (%)': 'ট্যাক্সের হার (%)', 'Invoice (optional)': 'ইনভয়েস (ঐচ্ছিক)', 'Attachment name': 'সংযুক্তির নাম', 'Administrator PIN': 'প্রশাসকের পিন',
-  'Print summary': 'সারসংক্ষেপ প্রিন্ট', 'Print receipt': 'রসিদ প্রিন্ট', 'Print visit': 'ভিজিট প্রিন্ট', 'Print billing': 'বিলিং প্রিন্ট', 'Create secure backup': 'নিরাপদ ব্যাকআপ তৈরি করুন', 'Restore now': 'এখনই পুনরুদ্ধার করুন', 'Cancel restore': 'পুনরুদ্ধার বাতিল', 'Choose backup folder…': 'ব্যাকআপ ফোল্ডার বেছে নিন…', 'Import JSON backup…': 'JSON ব্যাকআপ ইমপোর্ট করুন…', 'Customize dashboard': 'ড্যাশবোর্ড কাস্টমাইজ করুন', 'Record expense': 'খরচ লিপিবদ্ধ করুন', 'Move stock': 'স্টক সরান', 'Clear record': 'রেকর্ড মুছুন', 'Location': 'অবস্থান', 'Document footer': 'নথির ফুটার', 'User Accounts': 'ব্যবহারকারী অ্যাকাউন্ট',
-  'No visits yet': 'কোন ভিজিট নেই এখনো', 'No visit data': 'কোন ভিজিট তথ্য নেই', 'No payments yet': 'কোন পেমেন্ট নেই এখনো', 'No expenses yet': 'কোন খরচ নেই এখনো', 'No suppliers yet': 'কোন সরবরাহকারী নেই এখনো', 'No staff yet': 'কোন স্টাফ নেই এখনো', 'No treatments yet': 'কোন চিকিৎসা নেই এখনো', 'No follow-ups scheduled': 'কোন ফলো-আপ নির্ধারিত নেই', 'No referrals yet': 'কোন রেফারেল নেই এখনো', 'No backups yet': 'কোন ব্যাকআপ নেই এখনো', 'No audit entries match': 'কোন অডিট এন্ট্রি মিলেনি', 'No notifications right now': 'এই মুহূর্তে কোন নোটিফিকেশন নেই', 'No appointments this week': 'এ সপ্তাহে কোন অ্যাপয়েন্টমেন্ট নেই', 'Upcoming agenda is empty': 'আসন্ন কর্মসূচি খালি', 'Nothing booked': 'কিছুই বুক করা নেই', 'Nothing here yet': 'এখানে এখনো কিছু নেই', 'Nothing outstanding': 'কোন বকেয়া নেই', 'No alerts recorded': 'কোন সতর্কতা রেকর্ড করা নেই', 'Open from a patient': 'একজন রোগী থেকে খুলুন', 'Clinical safety reminders': 'ক্লিনিক্যাল সুরক্ষা স্মৃতির', 'Low stock list': 'নিম্ন স্টকের তালিকা',
-};
-
-function localized(value) { return appState.settings.language === 'Bengali' ? (BENGALI_DICT[value] || value) : value; }
-function translateDom() {
-  if (appState.settings.language !== 'Bengali' || !app) return;
-  const entries = Object.entries(BENGALI_DICT).sort((a, b) => b[0].length - a[0].length);
-  const translate = (value) => entries.reduce((result, [english, bengali]) => result.includes(english) ? result.split(english).join(bengali) : result, String(value || ''));
-  const walker = document.createTreeWalker(app, 4);
-  let node;
-  while ((node = walker.nextNode())) {
-    const rawText = node.nodeValue || '';
-    if (rawText.trim()) node.nodeValue = translate(rawText);
-  }
-  app.querySelectorAll('[placeholder], [title], [aria-label]').forEach((element) => {
-    ['placeholder', 'title', 'aria-label'].forEach((attribute) => {
-      const value = element.getAttribute(attribute);
-      if (value) element.setAttribute(attribute, translate(value));
-    });
-  });
-}
-
 const NAV_GROUPS = [
   { label: 'Workspace', items: [['dashboard', 'Dashboard', 'grid'], ['patients', 'Patients', 'users'], ['appointments', 'Appointments', 'calendar'], ['queue', "Today's Queue", 'clipboard']] },
   { label: 'Clinical', items: [['clinical', 'Clinical Records', 'activity'], ['prescriptions', 'Prescriptions', 'file'], ['dental', 'Dental Chart', 'tooth'], ['treatments', 'Treatment Catalog', 'layers']] },
@@ -214,7 +129,8 @@ const appState = {
   migrationError: '',
   storage: null,
   counts: {},
-  directory: { patients: [], staff: [], treatments: [] },
+  directory: { patients: [], staff: [], treatments: [], medicationCatalog: [] },
+  patientLabels: {},
   notifications: [],
   sessionTimeoutMinutes: 30,
   lastActivity: Date.now()
@@ -230,7 +146,19 @@ function requirePermission(permission, message = 'Your account is not allowed to
   return false;
 }
 
-const q = (name, params = {}) => api.runQuery(name, params);
+/* Every query payload carries the display name of each patient it mentions
+ * (see enrichPatientNames). Harvesting it here keeps arrow labels, printed
+ * documents and dialogs correct no matter how large the patient register is. */
+function rememberRowPatients(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 12) return;
+  if (Array.isArray(value)) { for (const item of value) rememberRowPatients(item, depth + 1); return; }
+  if (typeof value.patientId === 'string' && value.patientName) rememberPatient({ id: value.patientId, fullName: value.patientName, patientCode: value.patientCode });
+  for (const child of Object.values(value)) if (child && typeof child === 'object') rememberRowPatients(child, depth + 1);
+}
+const q = (name, params = {}) => api.runQuery(name, params).then((result) => {
+  if (result && result.ok !== false) rememberRowPatients(result);
+  return result;
+});
 async function op(name, payload = {}) {
   const result = await api.runOp(name, payload);
   if (!result || result.ok === false) {
@@ -246,26 +174,23 @@ async function op(name, payload = {}) {
 /* ------------------------------------------------------------------ */
 function currency(value = 0) {
   const settings = appState.settings;
-  const symbol = { BDT: '৳', USD: '$', EUR: '€', INR: '₹' }[settings.currency] || `${settings.currency || 'BDT'} `;
-  const amount = new Intl.NumberFormat(appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD', { maximumFractionDigits: 2 }).format(Number(value) || 0);
+  const symbol = { BDT: 'Tk ', USD: '$', EUR: '€', INR: '₹' }[settings.currency] || `${settings.currency || 'BDT'} `;
+  const amount = new Intl.NumberFormat('en-BD', { maximumFractionDigits: 2 }).format(Number(value) || 0);
   return `${symbol}${amount}`;
 }
-function number(value = 0) { return new Intl.NumberFormat(appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-BD').format(Number(value) || 0); }
+function number(value = 0) { return new Intl.NumberFormat('en-BD').format(Number(value) || 0); }
 function date(value, opts = {}) {
   if (!value) return '—';
-  const bengali = appState.settings.language === 'Bengali';
   const numericDmy = appState.settings.dateFormat === 'dmy' || /dmy|DD\/MM\/YYYY/i.test(String(appState.settings.dateFormat || ''));
   if (numericDmy) {
     const parts = String(value).slice(0, 10).split('-');
-    if (parts.length === 3 && parts[2]) return bengali ? `${parts[2]}/${parts[1]}/${parts[0]}` : new Intl.DateTimeFormat('en-GB').format(new Date(`${String(value).slice(0, 10)}T00:00:00`));
+    if (parts.length === 3 && parts[2]) return `${parts[2]}/${parts[1]}/${parts[0]}`;
   }
-  const locale = bengali ? 'bn-BD' : 'en-GB';
-  try { return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', ...opts }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`)); } catch { return String(value); }
+  try { return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC', ...opts }).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`)); } catch { return String(value); }
 }
 function dateFull(value) {
   if (!value) return '—';
-  const locale = appState.settings.language === 'Bengali' ? 'bn-BD' : 'en-GB';
-  try { return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`)); } catch { return String(value); }
+  try { return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`)); } catch { return String(value); }
 }
 function time(value) {
   if (!value) return '—';
@@ -277,7 +202,7 @@ function time(value) {
 }
 function relativeDate(value) {
   if (!value) return '—';
-  const diff = Math.round((new Date(`${value}T00:00:00`).getTime() - new Date(`${today()}T00:00:00`).getTime()) / 86400000);
+  const diff = Math.round((Date.parse(`${String(value).slice(0, 10)}T00:00:00Z`) - Date.parse(`${today()}T00:00:00Z`)) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
@@ -296,11 +221,15 @@ function ageFromDate(value) {
   return years >= 0 && years < 130 ? years : null;
 }
 function initials(value = '') { return String(value).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'DP'; }
+function cachedPatient(id) {
+  if (!id) return null;
+  return appState.patientLabels[id] || appState.directory.patients.find((patient) => patient.id === id) || null;
+}
 function patientNameWithCode(id) {
-  const p = appState.directory.patients.find((patient) => patient.id === id);
+  const p = cachedPatient(id);
   return p ? `${p.fullName} (${p.patientCode || '—'})` : patientName(id);
 }
-function patientName(id) { return appState.directory.patients.find((p) => p.id === id)?.fullName || 'Unassigned patient'; }
+function patientName(id) { return cachedPatient(id)?.fullName || 'Unassigned patient'; }
 function staffName(id) { return appState.directory.staff.find((p) => p.id === id)?.name || appState.settings.dentistName || 'Primary dentist'; }
 function formatBytes(bytes) { if (!bytes) return '0 B'; const units = ['B', 'KB', 'MB', 'GB', 'TB']; const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`; }
 function numeric(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
@@ -320,7 +249,7 @@ function statusTone(status = '') {
   return 'neutral';
 }
 function statusBadge(status) { return badge(status || 'Not set', statusTone(status)); }
-function badge(label, tone = 'neutral') { return `<span class="badge badge-${tone}"><i></i>${esc(localized(label))}</span>`; }
+function badge(label, tone = 'neutral') { return `<span class="badge badge-${tone}"><i></i>${esc(label)}</span>`; }
 
 /* ------------------------------------------------------------------ */
 /* UI state                                                            */
@@ -331,6 +260,8 @@ let ui = {
   locked: false,
   page: 'dashboard',
   range: 'today',
+  searchTimer: null,
+  searchToken: 0,
   rangeFrom: '',
   rangeTo: '',
   analyticsRange: 'month',
@@ -483,7 +414,7 @@ function sidebar() {
   return `<aside class="sidebar${ui.mobileNav ? ' open' : ''}" aria-label="Primary navigation">
     <div class="sidebar-brand">${icon('tooth', 22)}<div><strong>DENTIVA<span>PRO</span></strong><small>${esc(appState.settings.clinicName || 'Offline-first practice OS')}</small></div></div>
     <nav class="sidebar-nav">
-      ${NAV_GROUPS.map((group) => `<div class="nav-group"><span class="nav-group-label">${esc(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item${active(id)}" data-action="navigate" data-page="${id}">${icon(iconName, 17)}<span>${esc(localized(label))}</span>${id === 'notifications' && unreadCount() ? `<em class="nav-count">${unreadCount()}</em>` : ''}</button>`).join('')}</div>`).join('')}
+      ${NAV_GROUPS.map((group) => `<div class="nav-group"><span class="nav-group-label">${esc(group.label)}</span>${group.items.map(([id, label, iconName]) => `<button class="nav-item${active(id)}" data-action="navigate" data-page="${id}">${icon(iconName, 17)}<span>${esc(label)}</span>${id === 'notifications' && unreadCount() ? `<em class="nav-count">${unreadCount()}</em>` : ''}</button>`).join('')}</div>`).join('')}
     </nav>
     <div class="sidebar-foot">${appState.session ? `<div class="session-chip" title="${esc(appState.session.role)}">${icon('shield', 15)}<div><strong>${esc(appState.session.userName)}</strong><small>${esc(appState.session.role)}</small></div></div><button class="link-button" data-action="logout">${esc('Sign out')}</button>` : `<div class="session-chip">${icon('shield', 15)}<div><strong>Setup</strong><small>First run</small></div></div>`}</div>
   </aside>`;
@@ -509,13 +440,13 @@ function shell() {
 }
 
 function pageHeader(title, subtitle, action = '') {
-  return `<div class="page-header"><div><div class="eyebrow">${esc(appState.settings.clinicName || 'Dentiva Pro')}</div><h1>${esc(localized(title))}</h1><p>${esc(localized(subtitle))}</p></div>${action ? `<div class="page-actions">${action}</div>` : ''}</div>`;
+  return `<div class="page-header"><div><div class="eyebrow">${esc(appState.settings.clinicName || 'Dentiva Pro')}</div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action ? `<div class="page-actions">${action}</div>` : ''}</div>`;
 }
 function button(label, action, iconName = '', style = 'secondary', extra = '') {
-  return `<button class="btn btn-${style}" data-action="${action}" ${extra}>${iconName ? icon(iconName, 16) : ''}<span>${esc(localized(label))}</span></button>`;
+  return `<button class="btn btn-${style}" data-action="${action}" ${extra}>${iconName ? icon(iconName, 16) : ''}<span>${esc(label)}</span></button>`;
 }
-function emptyState(iconName, title, text, action = '') { return `<div class="empty-state"><span class="empty-icon-wrap">${icon(iconName, 27, 'empty-icon')}</span><h3>${esc(localized(title))}</h3><p>${esc(localized(text))}</p>${action}</div>`; }
-function cardTitle(iconName, title, action = '') { return `<div class="card-title"><div class="card-title-text">${icon(iconName, 17)}<h2>${esc(localized(title))}</h2></div>${action}</div>`; }
+function emptyState(iconName, title, text, action = '') { return `<div class="empty-state"><span class="empty-icon-wrap">${icon(iconName, 27, 'empty-icon')}</span><h3>${esc(title)}</h3><p>${esc(text)}</p>${action}</div>`; }
+function cardTitle(iconName, title, action = '') { return `<div class="card-title"><div class="card-title-text">${icon(iconName, 17)}<h2>${esc(title)}</h2></div>${action}</div>`; }
 function toolbar(filters = '', actions = '') { return `<div class="toolbar"><div class="toolbar-left">${filters}</div><div class="toolbar-right">${actions}</div></div>`; }
 function dataTable(headers, body, empty = '') { return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body || `<tr><td colspan="${headers.length}">${empty}</td></tr>`}</tbody></table></div>`; }
 function tablePager(total, page, collection) {
@@ -574,7 +505,7 @@ function unsupportedSchemaScreen() {
 const PAGE_PERMISSIONS = { patients: 'patients.view', appointments: 'appointments.view', queue: 'appointments.queue', clinical: 'clinical.view', prescriptions: 'prescriptions.view', dental: 'clinical.view', treatments: 'clinical.view', billing: 'billing.view', payments: 'payments.view', accounting: 'accounting.view', inventory: 'inventory.view', suppliers: 'inventory.view', staff: 'staff.view', reports: 'reports.view', analytics: 'reports.analytics', notifications: null, audit: 'audit.view', backup: 'backup.create', diagnostics: 'diagnostics.view', settings: 'settings.view', users: 'users.manage' };
 
 function permissionDeniedPage(title) {
-  return `<div class="page"><div class="empty-state" style="padding:64px 0"><span class="empty-icon-wrap">${icon('shield', 27, 'empty-icon')}</span><h3>${esc(localized(title))}</h3><p>Your current account does not have permission to open this area. Ask an Administrator to adjust access.</p></div></div>`;
+  return `<div class="page"><div class="empty-state" style="padding:64px 0"><span class="empty-icon-wrap">${icon('shield', 27, 'empty-icon')}</span><h3>${esc(title)}</h3><p>Your current account does not have permission to open this area. Ask an Administrator to adjust access.</p></div></div>`;
 }
 
 async function renderPage() {
@@ -602,7 +533,7 @@ function periodPicker(key, current, extraClasses = '') {
   return `<div class="period-picker ${extraClasses}"><span>${icon('calendar', 15)}</span><select data-change="${key}">${options.map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${icon('down', 14)}</div>${current === 'custom' ? `<div class="period-picker period-picker-dates"><input type="date" value="${attr(ui.rangeFrom)}" data-change="${key}-from" aria-label="Range from"><span>to</span><input type="date" value="${attr(ui.rangeTo)}" data-change="${key}-to" aria-label="Range to"></div>` : ''}`;
 }
 function rangeFor(key, current, customFrom, customTo) {
-  const bounds = periodBounds(current || 'month', new Date(), customFrom, customTo);
+  const bounds = periodBounds(current || 'month', new Date(), customFrom, customTo, appState.settings?.timezone || DEFAULT_TIMEZONE);
   return { bounds, label: { today: 'Today’s', '7d': '7-day', month: 'Monthly', quarter: 'Quarterly', '6m': '6-month', year: 'Yearly', custom: 'Custom', all: 'All-time' }[current] || 'Monthly' };
 }
 
@@ -773,7 +704,7 @@ const PATIENT_TAB_PERMISSIONS = { visits: 'clinical.view', appointments: 'appoin
 
 /* Quick actions row (Patient 360): one click to the patient-scoped creation flows. */
 function patientQuickActions(p) {
-  if (p.archived) return `<span class="muted">${esc(localized('Archived record'))} — ${esc(localized('view only'))}</span>`;
+  if (p.archived) return `<span class="muted">${esc('Archived record')} — ${esc('view only')}</span>`;
   const buttons = [];
   if (can('patients.view')) buttons.push(button('New visit', 'open-visit', 'clipboard', 'primary', `data-id="${attr(p.id)}"`));
   if (can('appointments.create')) buttons.push(button('New appointment', 'open-appointment', 'calendar', 'secondary', `data-patient="${attr(p.id)}"`));
@@ -812,7 +743,7 @@ async function renderPatientProfile() {
       <div class="patient-head-actions">${button('Edit patient', 'open-patient', 'edit', 'secondary', `data-id="${attr(p.id)}"`)}${button('Print summary', 'print-patient', 'printer', 'secondary', `data-id="${attr(p.id)}"`)}${button('Merge duplicate…', 'open-patient-merge', 'link', 'link', `data-id="${attr(p.id)}"`)}</div>
     <div class="patient-quick-actions" role="toolbar" aria-label="Patient quick actions">${patientQuickActions(p)}</div>
     </div>
-    <div class="tab-strip" role="tablist">${tabs.map(([id, label, iconName]) => `<button class="tab-button ${tab === id ? 'active' : ''}" data-action="patient-tab" data-tab="${id}" role="tab" aria-selected="${tab === id}">${icon(iconName, 15)}<span>${esc(localized(label))}</span></button>`).join('')}</div>
+    <div class="tab-strip" role="tablist">${tabs.map(([id, label, iconName]) => `<button class="tab-button ${tab === id ? 'active' : ''}" data-action="patient-tab" data-tab="${id}" role="tab" aria-selected="${tab === id}">${icon(iconName, 15)}<span>${esc(label)}</span></button>`).join('')}</div>
     ${await renderPatientTab(p, tab, patient, counts)}
   </div>`;
 }
@@ -831,9 +762,9 @@ async function renderPatientTab(p, tab, patient, counts = {}) {
           ['Discounts', fin.discountCents, 'patient-tab', 'billing'],
           ['Refunded', fin.refundedCents, 'patient-tab', 'payments'],
           ['Adjustments', fin.adjustedCents, 'patient-tab', 'payments'],
-        ].map(([label, cents, act, tab]) => `<button class="finance-card ${label === 'Total due' && cents > 0 ? 'finance-card-warn' : ''}" data-action="${act}" data-tab="${tab}"><small>${esc(localized(label))}</small><strong>${currency(centsToMoney(cents || 0))}</strong></button>`).join('')}
-        <div class="finance-card finance-card-static"><small>${esc(localized('Visits'))}</small><strong>${number(fin.visitCount ?? counts.visits ?? 0)}</strong></div>
-        <div class="finance-card finance-card-static"><small>${esc(localized('Invoices'))}</small><strong>${number(fin.invoiceCount ?? 0)}</strong></div>
+        ].map(([label, cents, act, tab]) => `<button class="finance-card ${label === 'Total due' && cents > 0 ? 'finance-card-warn' : ''}" data-action="${act}" data-tab="${tab}"><small>${esc(label)}</small><strong>${currency(centsToMoney(cents || 0))}</strong></button>`).join('')}
+        <div class="finance-card finance-card-static"><small>${esc('Visits')}</small><strong>${number(fin.visitCount ?? counts.visits ?? 0)}</strong></div>
+        <div class="finance-card finance-card-static"><small>${esc('Invoices')}</small><strong>${number(fin.invoiceCount ?? 0)}</strong></div>
       </section>` : '';
       return `${finCards}<div class="patient-grid">
         <section class="card"><div class="card-title"><div class="card-title-text">${icon('user', 17)}<h2>Details</h2></div></div>
@@ -912,19 +843,19 @@ async function renderPatientVisits(id, patient) {
     const roll = billingRoll[v.id];
     if (!roll) return '';
     return `<div class="visit-billing">
-      <span class="visit-billing-chip"><small>${esc(localized('Billed'))}</small><strong>${currency(centsToMoney(roll.billedCents))}</strong></span>
-      <span class="visit-billing-chip"><small>${esc(localized('Paid'))}</small><strong>${currency(centsToMoney(roll.paidCents))}</strong></span>
-      <span class="visit-billing-chip ${roll.dueCents > 0 ? 'warn' : ''}"><small>${esc(localized('Due'))}</small><strong>${currency(centsToMoney(roll.dueCents))}</strong></span>
+      <span class="visit-billing-chip"><small>${esc('Billed')}</small><strong>${currency(centsToMoney(roll.billedCents))}</strong></span>
+      <span class="visit-billing-chip"><small>${esc('Paid')}</small><strong>${currency(centsToMoney(roll.paidCents))}</strong></span>
+      <span class="visit-billing-chip ${roll.dueCents > 0 ? 'warn' : ''}"><small>${esc('Due')}</small><strong>${currency(centsToMoney(roll.dueCents))}</strong></span>
       ${roll.invoices.map((inv) => `<button class="chip-button" data-action="open-invoice-detail" data-id="${attr(inv.id)}">${icon('receipt', 13)}<span>${esc(inv.invoiceNumber)} · ${esc(inv.status)}</span></button>`).join('')}
       ${roll.payments.map((pay) => `<button class="chip-button" data-action="print-payment" data-id="${attr(pay.id)}">${icon('credit', 13)}<span>${esc(pay.receiptNumber)}</span></button>`).join('')}
     </div>`;
   };
   const rows = visits.map((v, index) => {
     const detailFields = [
-      [localized('Chief complaint'), v.chiefComplaint], [localized('Symptoms'), v.symptoms], [localized('Findings'), v.findings],
-      [localized('Diagnosis'), v.diagnosis], [localized('Treatment performed'), v.treatmentPerformed], [localized('Procedures'), v.procedures],
-      [localized('Teeth'), v.teeth], [localized('Anesthesia'), v.anesthesia], [localized('Medications'), v.medications],
-      [localized('Notes'), v.notes], [localized('Follow-up'), v.followUpDate ? dateFull(v.followUpDate) : '']
+      ['Chief complaint', v.chiefComplaint], ['Symptoms', v.symptoms], ['Findings', v.findings],
+      ['Diagnosis', v.diagnosis], ['Treatment performed', v.treatmentPerformed], ['Procedures', v.procedures],
+      ['Teeth', v.teeth], ['Anesthesia', v.anesthesia], ['Medications', v.medications],
+      ['Notes', v.notes], ['Follow-up', v.followUpDate ? dateFull(v.followUpDate) : '']
     ].filter(([, value]) => value);
     return `<div class="visit-card">
     <div class="visit-card-head" data-action="toggle-visit" data-visit="${index}" role="button" tabindex="0" aria-expanded="${index === 0 ? 'true' : 'false'}">
@@ -940,7 +871,7 @@ async function renderPatientVisits(id, patient) {
   </div>`;
   }).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('clipboard', 17)}<h2>Clinical records <span class="muted">(${number(result.total || 0)})</span></h2></div>${button('Record visit', 'open-visit', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
-    ${toolbar(`<input type="date" data-change="visit-filter" data-key="from" value="${attr(filters.from || '')}" aria-label="Visits from"><input type="date" data-change="visit-filter" data-key="to" value="${attr(filters.to || '')}" aria-label="Visits to">${dentists.length > 1 ? `<select data-change="visit-filter" data-key="dentistId" aria-label="Dentist filter"><option value="">${esc(localized('All clinicians'))}</option>${dentists.map(([did, name]) => `<option value="${attr(did)}" ${filters.dentistId === did ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>` : ''}`, `${(filters.from || filters.to || filters.dentistId) ? `<button class="chip-button" data-action="visit-filter-clear">${icon('x', 13)}<span>${esc(localized('Clear filters'))}</span></button>` : ''}`)}
+    ${toolbar(`<input type="date" data-change="visit-filter" data-key="from" value="${attr(filters.from || '')}" aria-label="Visits from"><input type="date" data-change="visit-filter" data-key="to" value="${attr(filters.to || '')}" aria-label="Visits to">${dentists.length > 1 ? `<select data-change="visit-filter" data-key="dentistId" aria-label="Dentist filter"><option value="">${esc('All clinicians')}</option>${dentists.map(([did, name]) => `<option value="${attr(did)}" ${filters.dentistId === did ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>` : ''}`, `${(filters.from || filters.to || filters.dentistId) ? `<button class="chip-button" data-action="visit-filter-clear">${icon('x', 13)}<span>${esc('Clear filters')}</span></button>` : ''}`)}
     ${!rows ? (filters.from || filters.to || filters.dentistId ? emptyState('clipboard', 'No visits match the filters', 'Loosen the date range or clinician filter.') : emptyState('clipboard', 'No visits yet', 'Clinical visits for this patient appear here.', button('Record visit', 'open-visit', 'plus', 'secondary', `data-id="${attr(id)}"`))) : rows}
     ${result.total > 25 ? '<p class="muted">Latest 25 visits shown — narrow the date range to see older records.</p>' : ''}
   </section>`;
@@ -1022,9 +953,9 @@ async function renderPatientStatement(id, patient) {
   const rows = entries.map((entry) => `<tr><td>${date(entry.date)}</td><td>${esc(entry.type)}</td><td>${esc(entry.reference)}</td><td class="${entry.debitCents > 0 ? 'text-danger' : 'muted'}">${entry.debitCents > 0 ? currency(centsToMoney(entry.debitCents)) : ''}</td><td class="${entry.creditCents > 0 ? 'text-success' : 'muted'}">${entry.creditCents > 0 ? currency(centsToMoney(entry.creditCents)) : ''}</td><td><strong>${currency(centsToMoney(entry.balanceCents))}</strong></td><td class="muted">${esc(entry.note || '')}</td></tr>`).join('');
   const pages = Math.max(1, Math.ceil((statement.total || 0) / 25));
   return `<section class="card statement-card">
-    <div class="card-title"><div class="card-title-text">${icon('chart', 17)}<h2>Financial statement</h2></div><div class="statement-actions"><div class="mini-stat"><small>${esc(localized('Lifetime billed'))}</small><strong>${currency(centsToMoney(statement.billedCents || 0))}</strong></div><div class="mini-stat"><small>${esc(localized('Balance'))}</small><strong class="${(statement.balanceCents || 0) > 0 ? 'text-warning' : ''}">${currency(centsToMoney(statement.balanceCents || 0))}</strong></div></div></div>
-    ${toolbar(`<span class="statement-period"><input type="date" data-change="statement-period" data-key="from" value="${attr(period.from || '')}" aria-label="Statement from">${icon('arrow', 13, 'muted')}<input type="date" data-change="statement-period" data-key="to" value="${attr(period.to || '')}" aria-label="Statement to">${(period.from || period.to) ? `<button class="chip-button" data-action="statement-period-clear">${icon('x', 13)}<span>${esc(localized('All time'))}</span></button>` : `<span class="muted">${esc(localized('All time'))}</span>`}</span>`, `${button('Print statement', 'print-patient-statement', 'printer', 'secondary', `data-id="${attr(id)}"`)}`)}
-    ${statement.openingBalanceCents !== undefined && (period.from || period.to) ? `<p class="muted">${esc(localized('Opening balance'))}: <strong>${currency(centsToMoney(statement.openingBalanceCents))}</strong></p>` : ''}
+    <div class="card-title"><div class="card-title-text">${icon('chart', 17)}<h2>Financial statement</h2></div><div class="statement-actions"><div class="mini-stat"><small>${esc('Lifetime billed')}</small><strong>${currency(centsToMoney(statement.billedCents || 0))}</strong></div><div class="mini-stat"><small>${esc('Balance')}</small><strong class="${(statement.balanceCents || 0) > 0 ? 'text-warning' : ''}">${currency(centsToMoney(statement.balanceCents || 0))}</strong></div></div></div>
+    ${toolbar(`<span class="statement-period"><input type="date" data-change="statement-period" data-key="from" value="${attr(period.from || '')}" aria-label="Statement from">${icon('arrow', 13, 'muted')}<input type="date" data-change="statement-period" data-key="to" value="${attr(period.to || '')}" aria-label="Statement to">${(period.from || period.to) ? `<button class="chip-button" data-action="statement-period-clear">${icon('x', 13)}<span>${esc('All time')}</span></button>` : `<span class="muted">${esc('All time')}</span>`}</span>`, `${button('Print statement', 'print-patient-statement', 'printer', 'secondary', `data-id="${attr(id)}"`)}`)}
+    ${statement.openingBalanceCents !== undefined && (period.from || period.to) ? `<p class="muted">${esc('Opening balance')}: <strong>${currency(centsToMoney(statement.openingBalanceCents))}</strong></p>` : ''}
     ${entries.length ? dataTable(['Date', 'Type', 'Reference', 'Debit', 'Credit', 'Balance', 'Note'], rows) : emptyState('chart', 'No financial activity in this period', 'Invoices and payments for this patient build the running balance.')}
     ${pages > 1 ? `<div class="pager"><button class="btn btn-secondary" data-action="statement-page" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>${icon('arrow', 14, 'rotate-90')} Newer</button><span class="muted">Page ${page} / ${pages}</span><button class="btn btn-secondary" data-action="statement-page" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>Older ${icon('arrow', 14)}</button></div>` : ''}
   </section>`;
@@ -1078,7 +1009,7 @@ async function renderAppointments() {
     const result = await q('appointmentsBetween', { from, to, query: listState.appointments.query });
     data = result.rows || [];
   }
-  const viewControls = `<div class="view-switch">${[['day', 'Day'], ['week', 'Week'], ['agenda', 'Agenda']].map(([key, label]) => `<button class="btn ${ui.apptView === key ? 'btn-primary' : 'btn-secondary'}" data-action="set-appt-view" data-view="${key}">${esc(localized(label))}</button>`).join('')}</div>`;
+  const viewControls = `<div class="view-switch">${[['day', 'Day'], ['week', 'Week'], ['agenda', 'Agenda']].map(([key, label]) => `<button class="btn ${ui.apptView === key ? 'btn-primary' : 'btn-secondary'}" data-action="set-appt-view" data-view="${key}">${esc(label)}</button>`).join('')}</div>`;
   const nav = ui.apptView === 'day'
     ? `<div class="cal-nav"><button class="icon-button" data-action="cal-step" data-step="-1" aria-label="Previous day">${icon('left', 16)}</button><strong>${dateFull(ui.calendarDate)}</strong><button class="icon-button" data-action="cal-step" data-step="1" aria-label="Next day">${icon('right', 16)}</button></div>`
     : `<div class="cal-nav"><button class="icon-button" data-action="cal-step" data-step="${ui.apptView === 'week' ? -7 : -30}" aria-label="Previous">${icon('left', 16)}</button><strong>${date(ui.calendarDate)} → ${date(shiftDate(ui.calendarDate, ui.apptView === 'week' ? 6 : 29))}</strong><button class="icon-button" data-action="cal-step" data-step="${ui.apptView === 'week' ? 7 : 30}" aria-label="Next">${icon('right', 16)}</button></div>`;
@@ -1089,8 +1020,10 @@ async function renderAppointments() {
   </div>`;
 }
 function shiftDate(value, days) {
-  const d = new Date(`${value}T00:00:00`);
-  d.setDate(d.getDate() + days);
+  // Pure calendar arithmetic in UTC space: a local-time parse would shift the
+  // result by a day in any non-UTC clinic (Dhaka's "+1 day" used to be a no-op).
+  const d = new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -1140,11 +1073,10 @@ async function renderPrescriptions() {
 }
 
 async function renderDental() {
-  const patients = appState.directory.patients.slice(0, 200);
   return `<div class="page">
     ${pageHeader('Dental Chart', 'Tooth-level records with preserved history.', button('Open from a patient', 'navigate', 'arrow', 'secondary', 'data-page="patients"'))}
     <section class="card"><div class="card-title"><div class="card-title-text">${icon('tooth', 17)}<h2>Choose a patient</h2></div></div>
-      <div class="dental-patient-picker"><label class="field-label">Patient<select data-change="dental-patient">${['', 'Choose patient...'].map((v) => `<option value="${v}"></option>`).join('')}${patients.map((p) => `<option value="${attr(p.id)}">${esc(`${p.patientCode || ''} · ${p.fullName}`)}</option>`).join('')}</select></label></div>
+      <div class="dental-patient-picker">${patientPicker({ name: 'dentalPatientId', value: ui.dentalPatientId || ui.patientId || '', hint: 'Search any patient in the practice…' })}</div>
       <p class="form-note">${icon('shield', 14)} Every tooth keeps its full history — new records supersede, they never overwrite. Dentiva Pro records what you enter; it does not recommend treatment.</p>
     </section>
   </div>`;
@@ -1200,7 +1132,7 @@ async function renderAccounting() {
     <div class="metric-grid">
       <div class="metric-card"><div class="metric-top"><span class="metric-label">Collected (all time)</span><span class="metric-icon soft-purple">${icon('credit', 18)}</span></div><strong>${currency(summary.collectedCents)}</strong><small>${currency(summary.refundedCents)} refunded</small></div>
       <div class="metric-card"><div class="metric-top"><span class="metric-label">Expenses (all time)</span><span class="metric-icon soft-amber">${icon('dollar', 18)}</span></div><strong>${currency(summary.expensesCents)}</strong><small>${(summary.expenseCategories || []).length} categories</small></div>
-      <div class="metric-card ${summary.netOperatingCents < 0 ? 'metric-negative' : ''}"><div class="metric-top"><span class="metric-label">Net operating</span><span class="metric-icon">${icon('chart', 18)}</span></div><strong>${currency(summary.netOperatingCents)}</strong><small>Collected − expenses</small></div>
+      <div class="metric-card ${summary.netOperatingCents < 0 ? 'metric-negative' : ''}"><div class="metric-top"><span class="metric-label">Net operating</span><span class="metric-icon">${icon('chart', 18)}</span></div><strong>${currency(summary.netOperatingCents)}</strong><small>Collected − refunded − expenses</small></div>
       <div class="metric-card"><div class="metric-top"><span class="metric-label">Receivables</span><span class="metric-icon soft-blue">${icon('receipt', 18)}</span></div><strong>${currency(summary.receivablesCents)}</strong><small>Outstanding invoice balance</small></div>
     </div>
     <div class="accounting-grid">
@@ -1517,8 +1449,7 @@ async function renderSettings() {
       </section>
       <section class="card"><div class="card-title"><div class="card-title-text">${icon('globe', 17)}<h2>Language & formats</h2></div></div>
         <div class="form-grid two">
-          ${selectField('Default language', 'language', [['English', 'English'], ['Bengali', 'Bengali']], s.language || 'English')}
-          ${selectField('Currency', 'currency', [['BDT', 'BDT (৳)'], ['USD', 'USD ($)'], ['EUR', 'EUR (€)'], ['INR', 'INR (₹)']], s.currency || 'BDT')}
+          ${selectField('Currency', 'currency', [['BDT', 'BDT (Tk)'], ['USD', 'USD ($)'], ['EUR', 'EUR (€)'], ['INR', 'INR (₹)']], s.currency || 'BDT')}
           ${selectField('Date format', 'dateFormat', [['short', '23 Sep 2026'], ['dmy', '23/09/2026']], /dmy|DD\/MM\/YYYY/i.test(String(s.dateFormat || '')) ? 'dmy' : 'short')}
           ${selectField('Time format', 'timeFormat', [['12', '12-hour'], ['24', '24-hour']], s.timeFormat || '12')}
           ${selectField('Print page size', 'printPageSize', [['A4', 'A4'], ['Letter', 'Letter'], ['Legal', 'Legal'], ['A5', 'A5']], s.printPageSize || 'A4')}
@@ -1621,7 +1552,7 @@ function renderAbout() {
         <div class="info-card"><h3>Your practice data stays yours.</h3><p>Everything is stored on this device in a relational local database. No cloud required — no account, no sync, no telemetry.</p></div>
         <div class="info-card"><h3>Built with care in Dhaka.</h3><p>Created by Md. Shohan Khan · helloiamshohan@gmail.com</p></div>
         <div class="info-card"><h3>Clinician-in-control.</h3><p>Dentiva Pro records clinical decisions made by qualified professionals. It does not diagnose, prescribe or recommend treatment.</p></div>
-        <div class="info-card"><h3>Made for Bangladesh.</h3><p>Full Bengali + English interface, BDT by default, and the payment methods practices actually use.</p></div>
+        <div class="info-card"><h3>Built for real clinics.</h3><p>A complete English-language interface, BDT by default, and the payment methods practices actually use.</p></div>
       </div>
       <p class="form-note">${s.clinicName ? `${esc(s.clinicName)} · ` : ''}Workspace on this device · last backup ${appState.storage?.lastBackupAt ? date(appState.storage.lastBackupAt.slice(0, 10)) : 'never'}</p>
     </section>
@@ -1648,20 +1579,43 @@ function modal() {
   return `<div class="modal-overlay" data-modal-window><div class="modal-window" role="dialog" aria-modal="true">${builder(data)}</div></div>`;
 }
 function modalHead(eyebrow, title, subtitle = '') {
-  return `<div class="modal-head"><div><span class="eyebrow">${esc(eyebrow)}</span><h2>${esc(localized(title))}</h2>${subtitle ? `<p>${esc(localized(subtitle))}</p>` : ''}</div><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon('close', 18)}</button></div>`;
+  return `<div class="modal-head"><div><span class="eyebrow">${esc(eyebrow)}</span><h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon('close', 18)}</button></div>`;
 }
 function modalFooter(cancel = 'Cancel', save = 'Save record', saveAction = 'submit-modal') {
   return `<div class="modal-footer"><button class="btn btn-link" data-action="close-modal">${esc(cancel)}</button><button class="btn btn-primary" type="submit" data-submit-action="${saveAction}">${icon('check', 16)}<span>${esc(save)}</span></button></div>`;
 }
 function field(label, name, value = '', type = 'text', extra = '') {
-  return `<label class="field-label">${esc(localized(label))}${type === 'textarea' ? `<textarea name="${attr(name)}" ${extra}>${attr(value)}</textarea>` : `<input type="${type}" name="${attr(name)}" value="${attr(value)}" ${extra}>`}</label>`;
+  return `<label class="field-label">${esc(label)}${type === 'textarea' ? `<textarea name="${attr(name)}" ${extra}>${attr(value)}</textarea>` : `<input type="${type}" name="${attr(name)}" value="${attr(value)}" ${extra}>`}</label>`;
 }
 function selectField(label, name, options, value = '', extra = '') {
-  return `<label class="field-label">${esc(localized(label))}<select name="${attr(name)}" ${extra}>${options.map(([val, label]) => `<option value="${attr(val)}" ${String(val) === String(value) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
+  return `<label class="field-label">${esc(label)}<select name="${attr(name)}" ${extra}>${options.map(([val, label]) => `<option value="${attr(val)}" ${String(val) === String(value) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
 }
-function patientOptions(value = '', onlyActive = true) {
-  const list = (onlyActive ? appState.directory.patients : appState.directory.patients).sort((a, b) => String(a.fullName).localeCompare(String(b.fullName)));
-  return [['', 'Choose patient...'], ...list.map((p) => [p.id, `${p.patientCode || ''} · ${p.fullName}`])];
+function patientLabel(id) {
+  if (!id) return '';
+  const known = appState.patientLabels[id];
+  return known ? patientDisplay(known) : '';
+}
+function patientDisplay(patient) {
+  if (!patient) return '';
+  return `${patient.patientCode || ''}${patient.patientCode && patient.fullName ? ' · ' : ''}${patient.fullName || ''}`;
+}
+/**
+ * Patient picker (v2.0.0). The old `<select>` was filled from a capped client
+ * directory, so in a lifetime practice every patient past the cap was simply
+ * unselectable from every form. This combobox queries the SERVER for matches,
+ * so any patient in the workspace is reachable no matter how many exist.
+ * It keeps a hidden `input[name=patientId]` so existing forms are unchanged.
+ */
+function patientPicker({ name = 'patientId', value = '', selectedText = '', label = 'Patient', hint = 'Search by name, patient code or phone.' } = {}) {
+  const text = selectedText || patientLabel(value);
+  return `<label class="field-label">${esc(label)}
+    <div class="patient-picker" data-patient-picker>
+      <input type="hidden" name="${attr(name)}" value="${attr(value)}">
+      <input type="text" class="patient-picker-input" data-input="patient-lookup" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-autocomplete="list"
+             placeholder="${attr(hint)}" value="${attr(text)}">
+      <div class="patient-picker-results" data-patient-results hidden></div>
+    </div></label>`;
 }
 function dentistOptions(value = '') {
   return [['', appState.settings.dentistName || 'Primary dentist'], ...appState.directory.staff.filter((s) => ['Dentist', 'Manager'].includes(s.role)).map((s) => [s.id, s.name])];
@@ -1705,7 +1659,7 @@ function modalSetup(data = {}) {
   const step = data.step || 1;
   if (step === 3) {
     return `<div class="modal-window-inner">${modalHead('FIRST RUN', 'All set', 'Your workspace is ready. Enter to start the day.')}
-      <div class="setup-success">${icon('check', 34)}<p>${esc(data.clinicName || 'Your clinic')} · ${esc(data.dentistName || 'Dentist')} · ${esc(data.language || 'English')} · ${esc(data.currency || 'BDT')}</p><p class="form-note">The administrator account now has a local PIN. You can add team accounts any time from User Accounts.</p></div>
+      <div class="setup-success">${icon('check', 34)}<p>${esc(data.clinicName || 'Your clinic')} · ${esc(data.dentistName || 'Dentist')} · ${esc(data.currency || 'BDT')}</p><p class="form-note">The administrator account now has a local PIN. You can add team accounts any time from User Accounts.</p></div>
       <div class="modal-footer"><button class="btn btn-link" data-action="close-modal">Review settings</button><button class="btn btn-primary" type="button" data-action="finish-setup">${icon('arrow', 16)}<span>Enter workspace</span></button></div>
     </div>`;
   }
@@ -1722,10 +1676,9 @@ function modalSetup(data = {}) {
       ${modalFooter('Exit', 'Continue')}
     </form>`;
   }
-  return `<form data-form="setup"><input type="hidden" name="setupStep" value="2">${modalHead('FIRST RUN', 'Finalise the workspace', 'Choose language, currency and create the first Administrator account.')}
+  return `<form data-form="setup"><input type="hidden" name="setupStep" value="2">${modalHead('FIRST RUN', 'Finalise the workspace', 'Choose your currency and create the first Administrator account.')}
     <div class="form-grid two">
-      ${selectField('Default language', 'language', [['English', 'English'], ['Bengali', 'Bengali']], data.language || 'English')}
-      ${selectField('Currency', 'currency', [['BDT', 'BDT (৳)'], ['USD', 'USD ($)'], ['INR', 'INR (₹)']], data.currency || 'BDT')}
+      ${selectField('Currency', 'currency', [['BDT', 'BDT (Tk)'], ['USD', 'USD ($)'], ['INR', 'INR (₹)']], data.currency || 'BDT')}
       ${field('Administrator PIN', 'adminPin', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password" placeholder="4–12 digits"')}
       ${field('Confirm PIN', 'adminPinConfirm', '', 'password', 'required minlength=4 maxlength=12 inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password"')}
     </div>
@@ -1768,7 +1721,7 @@ function modalPatientMerge(data = {}) {
   const p = data.patient || {};
   return `<form data-form="merge"><input type="hidden" name="primaryId" value="${attr(p.id || '')}">${modalHead('MERGE PATIENTS', 'Merge duplicate into this patient', 'Every record from the duplicate moves here; the duplicate is archived. Codes and history are preserved.')}
     <div class="form-grid">
-      ${selectField('Duplicate patient to merge', 'duplicateId', appState.directory.patients.filter((x) => x.id !== p.id).map((x) => [x.id, `${x.patientCode || ''} · ${x.fullName}`]), '')}
+      ${patientPicker({ name: 'duplicateId', label: 'Duplicate patient to merge', hint: 'Search the duplicate record…' })}
       <p class="form-note">Review the two records before confirming. This cannot be undone without a restore.</p>
     </div>
     ${modalFooter('Cancel', 'Merge records', 'merge-patients')}
@@ -1781,7 +1734,7 @@ function modalAppointment(data = {}) {
   const editing = Boolean(a.id);
   return `<form data-form="appointment"><input type="hidden" name="id" value="${attr(a.id || '')}">${modalHead('APPOINTMENT', editing ? 'Edit appointment' : 'Book appointment', 'Conflicts with the same chair or dentist are flagged before you confirm.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(a.patientId || ui.patientId), a.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: a.patientId || ui.patientId })}
       ${field('Date', 'date', a.date || today(), 'date', 'required')}
       ${field('Time', 'time', a.time || '10:00', 'time', 'required')}
       ${field('Duration (minutes)', 'duration', a.duration || appState.settings.defaultDuration || 30, 'number', 'min="5" max="480" step="5"')}
@@ -1823,7 +1776,7 @@ function modalVisit(data = {}) {
   const editing = Boolean(v.id);
   return `<form data-form="visit"><input type="hidden" name="id" value="${attr(v.id || '')}"><input type="hidden" name="appointmentId" value="${attr(v.appointmentId || '')}">${modalHead('CLINICAL RECORD', editing ? 'Edit visit' : 'Record visit', 'What happened, what was found, what was done — and when to follow up.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(v.patientId || ui.patientId), v.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: v.patientId || ui.patientId })}
       ${field('Date', 'date', v.date || today(), 'date', 'required')}
       ${field('Reason', 'reason', v.reason, 'text')}
       ${field('Chief complaint', 'chiefComplaint', v.chiefComplaint, 'textarea', 'rows="2"')}
@@ -1923,33 +1876,33 @@ function modalPrescription(data = {}) {
   const templates = appState.settings.medicationTemplates || [];
   const catalog = (appState.medicationCatalog || []).filter((item) => item.active !== false);
   const tail = [
-    ['advice', localized('Advice'), 'e.g. Warm saline rinse daily'],
-    ['followUp', localized('Follow-up'), 'e.g. Review after RCT'],
-    ['referral', localized('Referral'), 'e.g. Refer to endodontist if symptoms persist'],
+    ['advice', 'Advice', 'e.g. Warm saline rinse daily'],
+    ['followUp', 'Follow-up', 'e.g. Review after RCT'],
+    ['referral', 'Referral', 'e.g. Refer to endodontist if symptoms persist'],
   ];
   return `<form data-form="prescription" class="rx-builder"><input type="hidden" name="id" value="${attr(rx.id || '')}">${modalHead('PRESCRIPTION', editing ? 'Edit prescription' : 'New prescription', 'Clinical record plus a structured medication list — you review everything before it prints.')}
     <div class="form-grid three">
-      ${selectField('Patient', 'patientId', patientOptions(patientId), patientId, 'required')}
+      ${patientPicker({ value: patientId })}
       ${field('Date', 'date', rx.date || today(), 'date', 'required')}
       ${field('Prescriber', 'doctor', rx.doctor || appState.settings.dentistName, 'text', 'required')}
-      ${patientVisits.length ? `<label class="field-label">${esc(localized('Linked visit'))} <select name="visitId"><option value="">—</option>${patientVisits.map((v) => `<option value="${attr(v.id)}" ${String(rx.visitId || data.visitId || '') === v.id ? 'selected' : ''}>${esc([date(v.date), v.reason || v.visitCode].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : `<input type="hidden" name="visitId" value="${attr(rx.visitId || data.visitId || '')}">`}
+      ${patientVisits.length ? `<label class="field-label">${esc('Linked visit')} <select name="visitId"><option value="">—</option>${patientVisits.map((v) => `<option value="${attr(v.id)}" ${String(rx.visitId || data.visitId || '') === v.id ? 'selected' : ''}>${esc([date(v.date), v.reason || v.visitCode].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : `<input type="hidden" name="visitId" value="${attr(rx.visitId || data.visitId || '')}">`}
     </div>
     <details class="rx-clinical" ${editing && (rx.chiefComplaint || rx.onExamination || rx.diagnosis) ? 'open' : (rx.chiefComplaint || rx.onExamination || rx.requiredExamination || rx.diagnosis) ? 'open' : 'open'}>
-      <summary>${icon('clipboard', 15)}<span>${esc(localized('Clinical documentation'))}</span></summary>
-      ${rxClinicalPicker('chiefComplaint', localized('C/C — Chief complaint (multi-select)'), RX_CC_OPTIONS, rx.chiefComplaint, 'Custom / other complaints — added after the selected ones')}
-      ${rxClinicalPicker('onExamination', localized('O/E — On examination (multi-select)'), RX_OE_OPTIONS, rx.onExamination, 'Custom / other findings — e.g. tenderness, tooth number details')}
+      <summary>${icon('clipboard', 15)}<span>${esc('Clinical documentation')}</span></summary>
+      ${rxClinicalPicker('chiefComplaint', 'C/C — Chief complaint (multi-select)', RX_CC_OPTIONS, rx.chiefComplaint, 'Custom / other complaints — added after the selected ones')}
+      ${rxClinicalPicker('onExamination', 'O/E — On examination (multi-select)', RX_OE_OPTIONS, rx.onExamination, 'Custom / other findings — e.g. tenderness, tooth number details')}
       <div class="form-grid two">
-        <label class="field-label">${esc(localized('R/E — Required examination'))} <textarea name="requiredExamination" rows="2" placeholder="e.g. IOPA X-ray 46, OPG">${attr(rx.requiredExamination || '')}</textarea></label>
-        <label class="field-label">${esc(localized('Diagnosis'))} <textarea name="diagnosis" rows="2" placeholder="Clinical diagnosis by the prescriber">${attr(rx.diagnosis || '')}</textarea></label>
+        <label class="field-label">${esc('R/E — Required examination')} <textarea name="requiredExamination" rows="2" placeholder="e.g. IOPA X-ray 46, OPG">${attr(rx.requiredExamination || '')}</textarea></label>
+        <label class="field-label">${esc('Diagnosis')} <textarea name="diagnosis" rows="2" placeholder="Clinical diagnosis by the prescriber">${attr(rx.diagnosis || '')}</textarea></label>
       </div>
     </details>
     <section class="rx-med-section">
       <div class="rx-med-head">
-        <strong>${icon('file', 15)} ${esc(localized('Medicines'))}</strong>
+        <strong>${icon('file', 15)} ${esc('Medicines')}</strong>
         <span class="rx-med-tools">
-          ${templates.length ? `<select id="rx-template-select" aria-label="Apply template"><option value="">${esc(localized('Apply template…'))}</option>${templates.map((t) => `<option value="${attr(t.id)}">${esc(t.name)}</option>`).join('')}</select><button type="button" class="text-button" data-action="rx-template-apply">${esc(localized('Apply'))}</button>` : ''}
-          <button type="button" class="text-button" data-action="rx-template-save" ${can('prescriptions.edit') ? '' : 'disabled'}>${icon('save', 14)} ${esc(localized('Save as template'))}</button>
-          <button type="button" class="btn btn-secondary btn-small" data-action="rx-row-add">${icon('plus', 14)}<span>${esc(localized('Add medicine'))}</span></button>
+          ${templates.length ? `<select id="rx-template-select" aria-label="Apply template"><option value="">${esc('Apply template…')}</option>${templates.map((t) => `<option value="${attr(t.id)}">${esc(t.name)}</option>`).join('')}</select><button type="button" class="text-button" data-action="rx-template-apply">${esc('Apply')}</button>` : ''}
+          <button type="button" class="text-button" data-action="rx-template-save" ${can('prescriptions.edit') ? '' : 'disabled'}>${icon('save', 14)} ${esc('Save as template')}</button>
+          <button type="button" class="btn btn-secondary btn-small" data-action="rx-row-add">${icon('plus', 14)}<span>${esc('Add medicine')}</span></button>
         </span>
       </div>
       <datalist id="rx-catalog">${catalog.map((item) => `<option value="${attr(item.name)}">${attr(item.strength || '')}${item.dosage ? ` — ${attr(item.dosage)}` : ''}</option>`).join('')}</datalist>
@@ -1957,7 +1910,7 @@ function modalPrescription(data = {}) {
       <div id="rx-med-rows">${meds.map((item, i) => rxMedicationRow(item, i)).join('')}</div>
     </section>
     <details class="rx-clinical">
-      <summary>${icon('flag', 15)}<span>${esc(localized('Advice, follow-up & referral'))}</span></summary>
+      <summary>${icon('flag', 15)}<span>${esc('Advice, follow-up & referral')}</span></summary>
       <div class="form-grid two">
         ${tail.map(([name, label, ph]) => `<label class="field-label">${esc(label)} <textarea name="${name}" rows="2" placeholder="${attr(ph)}">${attr(rx[name] || '')}</textarea></label>`).join('')}
         ${field('Follow-up date', 'followUpDate', rx.followUpDate, 'date')}
@@ -1966,7 +1919,7 @@ function modalPrescription(data = {}) {
     ${field('Prescription notes', 'notes', rx.notes, 'textarea', 'rows="2" placeholder="Internal notes — shown on the printed document footer area only when filled"')}
     <div class="form-note">${icon('shield', 14)} Prescriptions remain clinician-authored. Templates and frequency patterns refill row fields for review — never a recommendation.</div>
     <div class="modal-footer">
-      <button type="button" class="btn btn-ghost" data-action="rx-preview">${icon('eye', 15)}<span>${esc(localized('Preview'))}</span></button>
+      <button type="button" class="btn btn-ghost" data-action="rx-preview">${icon('eye', 15)}<span>${esc('Preview')}</span></button>
       <span class="modal-footer-spacer"></span>
       <button type="button" class="btn btn-link" data-action="close-modal">Cancel</button>
       <button type="submit" class="btn btn-primary">${icon('check', 15)}<span>${editing ? 'Save prescription' : 'Create prescription'}</span></button>
@@ -1997,7 +1950,7 @@ function modalInvoice(data = {}) {
   const items = inv.items || [];
   return `<form data-form="invoice"><input type="hidden" name="id" value="${attr(inv.id || '')}">${modalHead('INVOICE', editing ? `Edit invoice ${inv.invoiceNumber || ''}` : 'New invoice', 'Line items with catalog defaults; totals are exact to the taka.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(inv.patientId || ui.patientId), inv.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: inv.patientId || ui.patientId })}
       ${field('Date', 'date', inv.date || today(), 'date', 'required')}
       ${selectField('Dentist', 'dentistId', dentistOptions(inv.dentistId), inv.dentistId)}
       <label class="field-label">Treatment<select name="treatmentId" data-change="invoice-treatment">${treatmentOptions(inv.treatmentId)}</select></label>
@@ -2050,7 +2003,7 @@ function modalPayment(data = {}) {
   const due = inv?.dueCents !== undefined ? inv.dueCents : null;
   return `<form data-form="payment"><input type="hidden" name="invoiceId" value="${attr(p.invoiceId || data.invoiceId || '')}">${modalHead('PAYMENT', 'Record payment', 'Overpayment is blocked; the receipt number stays sequential.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(p.patientId || ui.patientId), p.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: p.patientId || ui.patientId })}
       ${selectField('Invoice (optional)', 'invoiceId', [['', 'Standalone payment'], ...((ui.invoiceOptions || []).map((i) => [i.id, `${i.invoiceNumber} · due ${currency(centsToMoney(i.dueCents ?? i.due))}`]))], p.invoiceId || data.invoiceId || '')}
       ${field('Date', 'date', p.date || today(), 'date', 'required')}
       ${selectField('Method', 'method', paymentMethodOptions(), method, 'required data-change="payment-method"')}
@@ -2202,7 +2155,7 @@ function modalTreatmentPlan(data = {}) {
   const stages = plan.stages || [];
   return `<form data-form="treatment-plan"><input type="hidden" name="id" value="${attr(plan.id || '')}">${modalHead(editing ? 'TREATMENT PLAN' : 'NEW TREATMENT PLAN', editing ? 'Edit treatment plan' : 'Create a treatment plan', 'Treatment plan is clinician-authored; stages can be converted to a visit explicitly.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(plan.patientId || ui.patientId), plan.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: plan.patientId || ui.patientId })}
       ${field('Plan title', 'title', plan.title, 'text', 'required')}
       ${field('Clinical goal', 'goal', plan.goal, 'textarea', 'rows="2"')}
       ${selectField('Plan status', 'status', [['Draft', 'Draft'], ['In Progress', 'In Progress'], ['Completed', 'Completed'], ['Cancelled', 'Cancelled']], plan.status || 'Draft')}
@@ -2227,7 +2180,7 @@ function modalReferral(data = {}) {
   const editing = Boolean(r.id);
   return `<form data-form="referral"><input type="hidden" name="id" value="${attr(r.id || '')}">${modalHead(editing ? 'REFERRAL' : 'NEW REFERRAL', editing ? 'Edit referral' : 'Record a referral', 'Keep the reason, destination and response connected to the patient record.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(r.patientId || ui.patientId), r.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: r.patientId || ui.patientId })}
       ${field('Referral date', 'date', r.date || today(), 'date', 'required')}
       ${field('Referred to', 'referralTo', r.referralTo, 'text', 'required placeholder="Doctor, specialist or organisation"')}
       ${field('Specialty', 'specialty', r.specialty)}
@@ -2243,7 +2196,7 @@ function modalFollowup(data = {}) {
   const editing = Boolean(task.id);
   return `<form data-form="followup"><input type="hidden" name="id" value="${attr(task.id || '')}">${modalHead('FOLLOW-UP', editing ? 'Edit follow-up' : 'Schedule follow-up', 'A due follow-up date becomes an actionable task on the dashboard.')}
     <div class="form-grid two">
-      ${selectField('Patient', 'patientId', patientOptions(task.patientId || ui.patientId), task.patientId || ui.patientId, 'required')}
+      ${patientPicker({ value: task.patientId || ui.patientId })}
       ${field('Title', 'title', task.title, 'text')}
       ${field('Reason', 'reason', task.reason, 'text')}
       ${field('Due date', 'dueDate', task.dueDate || today(), 'date', 'required')}
@@ -2640,7 +2593,7 @@ async function saveSetupStep(data) {
     if (!/^\d{4,12}$/.test(data.adminPin || '')) return notify('PINs must be 4–12 digits.', 'error');
     const existingUsers = appState.boot?.userDirectory || [];
     const admin = existingUsers.find((user) => user.role === 'Administrator' && user.active !== false) || existingUsers[0];
-    await op('settings.update', { language: data.language || 'English', currency: data.currency || 'BDT' });
+    await op('settings.update', { currency: data.currency || 'BDT' });
     let accountSaved = true;
     if (admin && admin.id) {
       const result = await op('user.update', { id: admin.id, name: admin.name, role: admin.role, active: true, pin: data.adminPin, confirmPin: data.adminPinConfirm });
@@ -2653,17 +2606,17 @@ async function saveSetupStep(data) {
     }
     if (!accountSaved) return;
     appState.setupComplete = true;
-    appState.settings = { ...appState.settings, language: data.language || 'English', currency: data.currency || 'BDT' };
-    ui.modal = { type: 'setup', data: { step: 3, clinicName: data.clinicName || appState.settings.clinicName, dentistName: data.dentistName || appState.settings.dentistName, language: data.language || 'English', currency: data.currency || 'BDT' } };
+    appState.settings = { ...appState.settings, currency: data.currency || 'BDT' };
+    ui.modal = { type: 'setup', data: { step: 3, clinicName: data.clinicName || appState.settings.clinicName, dentistName: data.dentistName || appState.settings.dentistName, currency: data.currency || 'BDT' } };
     notify('Account PIN saved.', 'success');
     render();
     return;
   }
-  const result = await op('setup.complete', { clinicName: data.clinicName, dentistName: data.dentistName, professionalTitle: data.professionalTitle, phone: data.phone, email: data.email, address: data.address, city: data.city, language: data.language, currency: data.currency });
+  const result = await op('setup.complete', { clinicName: data.clinicName, dentistName: data.dentistName, professionalTitle: data.professionalTitle, phone: data.phone, email: data.email, address: data.address, city: data.city, currency: data.currency });
   if (result) {
     appState.setupComplete = true;
     appState.settings = { ...appState.settings, clinicName: data.clinicName, dentistName: data.dentistName };
-    ui.modal = { type: 'setup', data: { step: 2, clinicName: data.clinicName, dentistName: data.dentistName, language: data.language || 'English', currency: data.currency || 'BDT' } };
+    ui.modal = { type: 'setup', data: { step: 2, clinicName: data.clinicName, dentistName: data.dentistName, currency: data.currency || 'BDT' } };
     render();
   }
 }
@@ -2672,6 +2625,20 @@ async function saveSetupStep(data) {
 /* Click actions                                                       */
 /* ------------------------------------------------------------------ */
 async function handleClick(event) {
+  // Patient-picker option selection runs before the generic [data-action]
+  // dispatch: the option carries its own data attribute so a nested action
+  // can never swallow it.
+  const patientOption = event.target.closest('[data-patient-option]');
+  if (patientOption) {
+    event.preventDefault();
+    const wrapper = patientOption.closest('[data-patient-picker]');
+    if (wrapper) {
+      selectPatientOption(wrapper, patientOption);
+      if (wrapper.closest('.dental-patient-picker')) applyDentalPatient(patientOption.dataset.patientOption || '');
+      else wrapper.querySelector('.patient-picker-input')?.focus();
+    }
+    return;
+  }
   const target = event.target.closest('[data-action]');
   if (!target) {
     // Backdrop clicks (the overlay itself) close the dialog. Clicks on any
@@ -2721,7 +2688,7 @@ async function handleClick(event) {
       }
       return;
 
-    case 'open-patient': return openModal('patient', { patient: id ? appState.directory.patients.find((p) => p.id === id) || (await q('record', { collection: 'patients', id })).record : {} });
+    case 'open-patient': return openModal('patient', { patient: id ? cachedPatient(id) || (await q('record', { collection: 'patients', id })).record : {} });
     case 'open-patient-profile': ui.patientId = id; ui.patientTab = 'overview'; ui.page = 'patients'; return render();
     case 'open-patient-merge': return openModal('merge', { patient: await q('record', { collection: 'patients', id }).then((r) => r.record) });
     case 'patient-tab': ui.patientTab = target.dataset.tab; return render();
@@ -2842,7 +2809,7 @@ async function handleClick(event) {
       if (result) { ui.dentalTooth = null; notify('Tooth record cleared — history preserved.'); return render(); }
       return;
     }
-    case 'print-chart': { const patient = appState.directory.patients.find((p) => p.id === id) || (await q('record', { collection: 'patients', id })).record; return printDentalChart(patient); }
+    case 'print-chart': { const patient = cachedPatient(id) || (await q('record', { collection: 'patients', id })).record; return printDentalChart(patient); }
 
     case 'open-invoice': {
       const invoice = id ? (await q('record', { collection: 'invoices', id })).record : {};
@@ -2915,7 +2882,7 @@ async function handleClick(event) {
     case 'rx-template-save': {
       const meds = rxRowFromContainer();
       if (!meds.length) return notify('Add at least one medicine first.', 'error');
-      const name = target.dataset.name || window.prompt(localized('Template name:'), '');
+      const name = target.dataset.name || window.prompt('Template name:', '');
       if (!name) return;
       (async () => {
         const result = await op('medicationTemplate.save', { name: name.trim(), medications: meds });
@@ -2932,7 +2899,7 @@ async function handleClick(event) {
       const data = Object.fromEntries(new FormData(form).entries());
       const meds = rxRowFromContainer();
       if (!meds.length) return notify('Add at least one medicine to preview.', 'error');
-      let patient = ui.patientDetail?.patient || appState.directory.patients.find((pt) => pt.id === data.patientId);
+      let patient = ui.patientDetail?.patient || cachedPatient(data.patientId);
       if (!patient && data.patientId) {
         // Directory cache may not include a patient created moments ago via a
         // script/seed or another tab: fall back to the store so the printed
@@ -2941,19 +2908,19 @@ async function handleClick(event) {
       }
       patient = patient || {};
       const sections = [
-        { label: localized('C/C'), text: data.chiefComplaint }, { label: localized('O/E'), text: data.onExamination },
-        { label: localized('R/E'), text: data.requiredExamination }, { label: localized('Diagnosis'), text: data.diagnosis },
+        { label: 'C/C', text: data.chiefComplaint }, { label: 'O/E', text: data.onExamination },
+        { label: 'R/E', text: data.requiredExamination }, { label: 'Diagnosis', text: data.diagnosis },
       ].filter((sec) => sec.text);
       const tailMap = [
-        { label: localized('Advice'), text: data.advice },
-        { label: data.followUpDate ? `${localized('Follow-up')} · ${dateFull(data.followUpDate)}` : localized('Follow-up'), text: data.followUp },
-        { label: localized('Referral'), text: data.referral }, { label: localized('Notes'), text: data.notes },
+        { label: 'Advice', text: data.advice },
+        { label: data.followUpDate ? `${'Follow-up'} · ${dateFull(data.followUpDate)}` : 'Follow-up', text: data.followUp },
+        { label: 'Referral', text: data.referral }, { label: 'Notes', text: data.notes },
       ].filter((sec) => sec.text);
       const body = medicationTable({ medications: meds }) +
         tailMap.map((sec) => `<div class="doc-section"><span class="doc-section-label">${esc(sec.label)}</span><p>${esc(sec.text).replace(/\n/g, '<br>')}</p></div>`).join('');
       const previewSpec = {
-        kind: 'prescription', title: localized('PRESCRIPTION'), docRef: ui.modal?.data?.prescription?.prescriptionCode || 'Preview', docDate: dateFull(data.date || today()),
-        patientPairs: [[localized('Name'), patient.fullName || ''], [localized('Patient ID'), patient.patientCode || ''], [localized('Age'), patient.dateOfBirth ? `${ageFromDate(patient.dateOfBirth)} yrs` : ''], [localized('Sex'), patient.gender || ''], [localized('Phone'), patient.phone || '']],
+        kind: 'prescription', title: 'PRESCRIPTION', docRef: ui.modal?.data?.prescription?.prescriptionCode || 'Preview', docDate: dateFull(data.date || today()),
+        patientPairs: [['Name', patient.fullName || ''], ['Patient ID', patient.patientCode || ''], ['Age', patient.dateOfBirth ? `${ageFromDate(patient.dateOfBirth)} yrs` : ''], ['Sex', patient.gender || ''], ['Phone', patient.phone || '']],
         clinicalSections: sections, body
       };
       const currentModal = ui.modal;
@@ -3052,10 +3019,10 @@ async function handleClick(event) {
         }
         return;
       }
-      return openModal('attachment', { patient: appState.directory.patients.find((p) => p.id === ui.patientId) || {} });
+      return openModal('attachment', { patient: cachedPatient(ui.patientId) || { id: ui.patientId } });
     }
     case 'open-attachment-add': {
-      const patient = appState.directory.patients.find((p) => p.id === id) || { id };
+      const patient = cachedPatient(id) || { id };
       return openModal('attachment', { patient });
     }
     case 'pick-attachment': { const input = target.querySelector('input[type="file"]'); if (input) input.click(); return; }
@@ -3369,9 +3336,16 @@ async function handleInput(event) {
   if (key === 'global-search') {
     ui.search = target.value;
     if (ui.modal?.type === 'search') {
-      const results = await globalSearch(target.value);
-      const container = document.getElementById('command-results');
-      if (container) container.innerHTML = commandResultsHtml(results);
+      // Debounced: a lifetime practice has hundreds of thousands of records, and
+      // a search per keystroke would block the window while typing.
+      const token = (ui.searchToken = (ui.searchToken || 0) + 1);
+      clearTimeout(ui.searchTimer);
+      ui.searchTimer = setTimeout(async () => {
+        const results = await globalSearch(target.value);
+        if (token !== ui.searchToken) return; // a newer keystroke already answered
+        const container = document.getElementById('command-results');
+        if (container) container.innerHTML = commandResultsHtml(results);
+      }, 180);
     }
     return;
   }
@@ -3380,9 +3354,15 @@ async function handleInput(event) {
     return;
   }
   if (key === 'command-search') {
-    const results = await globalSearch(target.value);
-    const container = document.getElementById('command-results');
-    if (container) container.innerHTML = commandResultsHtml(results);
+    // Same debounce + stale-response guard as the topbar search.
+    const token = (ui.searchToken = (ui.searchToken || 0) + 1);
+    clearTimeout(ui.searchTimer);
+    ui.searchTimer = setTimeout(async () => {
+      const results = await globalSearch(target.value);
+      if (token !== ui.searchToken) return;
+      const container = document.getElementById('command-results');
+      if (container) container.innerHTML = commandResultsHtml(results);
+    }, 180);
     return;
   }
   if (key === 'list-query') {
@@ -3394,6 +3374,20 @@ async function handleInput(event) {
   }
   if (key === 'dental-note') { ui.toothNote = target.value; return; }
   if (key === 'invoice-lines') { updateInvoiceTotals(); return; }
+  if (key === 'patient-lookup') {
+    const wrapper = target.closest('[data-patient-picker]');
+    if (!wrapper) return;
+    const hidden = wrapper.querySelector('input[type="hidden"]');
+    // The typed text is no longer a chosen patient until an option is picked.
+    if (hidden) hidden.value = '';
+    const query = target.value.trim();
+    const token = String(query);
+    wrapper.dataset.pending = token;
+    clearTimeout(wrapper._lookupTimer);
+    wrapper._lookupTimer = setTimeout(() => { openPatientResults(wrapper, token); }, 160);
+    if (!query) closePatientResults(wrapper);
+    return;
+  }
 }
 function handleFilePick(event) {
   const target = event.target;
@@ -3462,7 +3456,7 @@ async function handleChange(event) {
     case 'inventory-lowstock': listState.inventory.filters = { ...listState.inventory.filters, lowStock: target.checked || undefined }; listState.inventory.page = 1; return render();
     case 'inventory-expiring': listState.inventory.filters = { ...listState.inventory.filters, expiringBefore: target.checked ? shiftDate(today(), 60) : undefined }; listState.inventory.page = 1; return render();
     case 'dental-patient': {
-      if (target.value) { ui.dentalPatientId = target.value; ui.patientId = target.value; ui.patientTab = 'dental'; ui.page = 'patients'; render(); }
+      applyDentalPatient(target.value);
       return;
     }
     case 'user-role': {
@@ -3500,7 +3494,31 @@ async function handleChange(event) {
     default: return;
   }
 }
+function movePatientHighlight(wrapper, delta) {
+  const options = [...wrapper.querySelectorAll('[data-patient-option]')];
+  if (!options.length) return;
+  const current = options.findIndex((option) => option.classList.contains('active'));
+  const next = (current + delta + options.length) % options.length;
+  options.forEach((option, index) => option.classList.toggle('active', index === next));
+  options[next]?.scrollIntoView({ block: 'nearest' });
+}
 function handleKeydown(event) {
+  const pickerInput = event.target?.closest?.('[data-patient-picker]');
+  if (pickerInput && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+    const results = pickerInput.querySelector('[data-patient-results]');
+    if (event.key === 'Escape') { closePatientResults(pickerInput); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (results?.hidden || !results.innerHTML) { openPatientResults(pickerInput, event.target.value.trim()); return; }
+      movePatientHighlight(pickerInput, event.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (event.key === 'Enter') {
+      const active = results?.querySelector('[data-patient-option].active') || results?.querySelector('[data-patient-option]');
+      if (active) { event.preventDefault(); selectPatientOption(pickerInput, active); }
+      return;
+    }
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
     ui.modal = { type: 'search', data: { query: '', results: commandResultsHtml({ actions: commandActionsFor('') }) } };
@@ -3578,7 +3596,7 @@ function buildPrintDocument(title, content, pageSize = 'A4') {
   const showContact = doc.showClinicContact !== false;
   const footer = doc.footer || '';
   const s = appState.settings;
-  const lang = (s.language || 'English') === 'Bengali' ? 'bn' : 'en';
+  const lang = 'en';
   const logo = showLogo ? safeLogoSource(s.logo) : '';
   const brand = s.clinicName || 'Dentiva Pro';
   const contactParts = showContact
@@ -3587,7 +3605,7 @@ function buildPrintDocument(title, content, pageSize = 'A4') {
   const prescriberLine = [s.dentistName, s.professionalTitle].filter(Boolean).join(', ');
   return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
     html,body{margin:0;padding:${receipt ? '4mm' : '12mm'};color:#111;background:#fff;font-size:${receipt ? '11px' : '13px'};line-height:1.45;
-      font-family:'SolaimanLipi','Nirmala UI','Noto Sans Bengali','Hind Siliguri',Arial,Helvetica,sans-serif}
+      font-family:'Segoe UI',Arial,Helvetica,'Segoe UI Symbol',sans-serif}
     .print-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #0c6b70;padding-bottom:10px;margin-bottom:14px}
     .print-brand{display:flex;gap:10px;align-items:flex-start}
     .print-logo{max-height:${receipt ? '34px' : '48px'};max-width:120px;object-fit:contain}
@@ -3619,7 +3637,8 @@ function buildPrintDocument(title, content, pageSize = 'A4') {
 function defaultPrintPageSize() { return normalizePrintPageSize(appState.settings.printPageSize === 'Receipt80' ? 'A4' : appState.settings.printPageSize || 'A4'); }
 /* Shared document engine — preview/print/PDF are one definition. */
 import { buildDocument, medicationTable, invoiceLines, totalsSection, statementTable } from './doc-engine.js';
-function docLang() { return (appState.settings.language || 'English') === 'Bengali' ? 'bn' : 'en'; }
+/* English-only product (v2.0.0): documents are always generated as en. */
+function docLang() { return 'en'; }
 function openDocumentPreview(title, spec) {
   // Store the SPEC, not the html: the paper-size selector and the actual
   // print/PDF call must always render the same document definition fresh.
@@ -3686,10 +3705,10 @@ async function printInvoice(inv) {
     pairs,
     total: ['Total', currency(centsToMoney(inv.totalCents ?? moneyToCents(inv.total || 0)))],
     receipts: receiptRows
-  }) + `<div class="doc-total-row doc-grand-mt-less"><span>${esc(localized('Status'))}</span><strong>${esc(inv.status || 'Issued')}</strong></div>`;
+  }) + `<div class="doc-total-row doc-grand-mt-less"><span>${esc('Status')}</span><strong>${esc(inv.status || 'Issued')}</strong></div>`;
   return openDocumentPreview(`Invoice ${inv.invoiceNumber || ''}`, {
-    kind: 'invoice', title: localized('INVOICE'), docRef: inv.invoiceNumber || '', docDate: dateFull(inv.date),
-    patientPairs: [[localized('Patient'), patient.fullName || patientName(inv.patientId)], [localized('Patient ID'), patient.patientCode || ''], [localized('Phone'), patient.phone || ''], [localized('Address'), [patient.address, patient.city, patient.district].filter(Boolean).join(', ')]],
+    kind: 'invoice', title: 'INVOICE', docRef: inv.invoiceNumber || '', docDate: dateFull(inv.date),
+    patientPairs: [['Patient', patient.fullName || patientName(inv.patientId)], ['Patient ID', patient.patientCode || ''], ['Phone', patient.phone || ''], ['Address', [patient.address, patient.city, patient.district].filter(Boolean).join(', ')]],
     body
   });
 }
@@ -3700,24 +3719,24 @@ async function printPayment(payment) {
   const invoice = payment.invoiceId ? ((await q('record', { collection: 'invoices', id: payment.invoiceId }).catch(() => ({}))).record || null) : null;
   const received = centsToMoney(payment.amountCents ?? payment.amount ?? 0);
   const meta = [
-    { label: localized('Invoice'), text: invoice?.invoiceNumber || '' },
-    { label: localized('Payment method'), text: payment.method },
-    { label: localized('Reference'), text: payment.reference || payment.transactionId },
-    { label: localized('Received by'), text: appState.session?.userName || '' },
-    { label: localized('Status'), text: payment.status || 'Recorded' },
-    { label: localized('Notes'), text: payment.notes },
+    { label: 'Invoice', text: invoice?.invoiceNumber || '' },
+    { label: 'Payment method', text: payment.method },
+    { label: 'Reference', text: payment.reference || payment.transactionId },
+    { label: 'Received by', text: appState.session?.userName || '' },
+    { label: 'Status', text: payment.status || 'Recorded' },
+    { label: 'Notes', text: payment.notes },
   ].filter((sec) => sec.text);
   return openDocumentPreview(`Money receipt ${payment.receiptNumber || ''}`, {
-    kind: 'receipt', title: localized('MONEY RECEIPT'), docRef: payment.receiptNumber || '', docDate: dateFull(payment.date), pageSize: 'Receipt80', signature: false,
-    patientPairs: [[localized('Patient'), patient.fullName || patientName(payment.patientId)], [localized('Patient ID'), patient.patientCode || ''], [localized('Phone'), patient.phone || '']],
+    kind: 'receipt', title: 'MONEY RECEIPT', docRef: payment.receiptNumber || '', docDate: dateFull(payment.date), pageSize: 'Receipt80', signature: false,
+    patientPairs: [['Patient', patient.fullName || patientName(payment.patientId)], ['Patient ID', patient.patientCode || ''], ['Phone', patient.phone || '']],
     clinicalSections: meta,
     totals: {
       pairs: [
-        [localized('Received'), currency(received)],
-        ...(refunded ? [[localized('Refunded / reversed'), currency(refunded * -1)]] : []),
-        ...(invoice ? [[localized('Remaining due'), currency(Math.max(0, centsToMoney(invoice.dueCents ?? invoice.due ?? 0)))]] : []),
+        ['Received', currency(received)],
+        ...(refunded ? [['Refunded / reversed', currency(refunded * -1)]] : []),
+        ...(invoice ? [['Remaining due', currency(Math.max(0, centsToMoney(invoice.dueCents ?? invoice.due ?? 0)))]] : []),
       ],
-      total: [refunded ? localized('Net received') : localized('Amount received'), currency(Math.max(0, received - refunded))]
+      total: [refunded ? 'Net received' : 'Amount received', currency(Math.max(0, received - refunded))]
     }
   });
 }
@@ -3725,22 +3744,22 @@ async function printPrescription(rx) {
   const patient = ui.patientDetail?.patient?.id === rx.patientId ? ui.patientDetail.patient
     : ((await q('record', { collection: 'patients', id: rx.patientId })).record || {});
   const sections = [
-    { label: localized('C/C'), text: rx.chiefComplaint },
-    { label: localized('O/E'), text: rx.onExamination },
-    { label: localized('R/E'), text: rx.requiredExamination },
-    { label: localized('Diagnosis'), text: rx.diagnosis },
+    { label: 'C/C', text: rx.chiefComplaint },
+    { label: 'O/E', text: rx.onExamination },
+    { label: 'R/E', text: rx.requiredExamination },
+    { label: 'Diagnosis', text: rx.diagnosis },
   ].filter((sec) => sec.text);
   const tail = [
-    { label: localized('Advice'), text: rx.advice },
-    { label: rx.followUpDate ? `${localized('Follow-up')} · ${dateFull(rx.followUpDate)}` : localized('Follow-up'), text: rx.followUp },
-    { label: localized('Referral'), text: rx.referral },
-    { label: localized('Notes'), text: rx.notes },
+    { label: 'Advice', text: rx.advice },
+    { label: rx.followUpDate ? `${'Follow-up'} · ${dateFull(rx.followUpDate)}` : 'Follow-up', text: rx.followUp },
+    { label: 'Referral', text: rx.referral },
+    { label: 'Notes', text: rx.notes },
   ].filter((sec) => sec.text);
   const body = medicationTable({ medications: rx.medications || [] }) +
     tail.map((sec) => `<div class="doc-section"><span class="doc-section-label">${esc(sec.label)}</span><p>${esc(sec.text).replace(/\n/g, '<br>')}</p></div>`).join('');
   return openDocumentPreview(`Prescription ${rx.prescriptionCode || ''}`, {
-    kind: 'prescription', title: localized('PRESCRIPTION'), docRef: rx.prescriptionCode || '', docDate: dateFull(rx.date),
-    patientPairs: [[localized('Name'), patient.fullName || patientName(rx.patientId)], [localized('Patient ID'), patient.patientCode || ''], [localized('Age'), patient.dateOfBirth ? `${ageFromDate(patient.dateOfBirth)} yrs` : ''], [localized('Sex'), patient.gender || ''], [localized('Phone'), patient.phone || '']],
+    kind: 'prescription', title: 'PRESCRIPTION', docRef: rx.prescriptionCode || '', docDate: dateFull(rx.date),
+    patientPairs: [['Name', patient.fullName || patientName(rx.patientId)], ['Patient ID', patient.patientCode || ''], ['Age', patient.dateOfBirth ? `${ageFromDate(patient.dateOfBirth)} yrs` : ''], ['Sex', patient.gender || ''], ['Phone', patient.phone || '']],
     clinicalSections: sections, body
   });
 }
@@ -3764,20 +3783,20 @@ async function printPatientStatement(patient, { from = '', to = '' } = {}) {
     page += 1;
     if (page > 40) break; /* safety valve; total is authoritative */
   }
-  const body = (agg.openingBalanceCents ? `<div class="doc-section"><span class="doc-section-label">${esc(localized('Opening balance'))}</span><p>${currency(centsToMoney(agg.openingBalanceCents))}</p></div>` : '') +
+  const body = (agg.openingBalanceCents ? `<div class="doc-section"><span class="doc-section-label">${esc('Opening balance')}</span><p>${currency(centsToMoney(agg.openingBalanceCents))}</p></div>` : '') +
     statementTable({
       rows: rows.map((r) => ({ ...r, date: date(r.date) })),
       summary: [
-        [localized('Lifetime billed'), currency(centsToMoney(agg.billedCents || 0))],
-        [localized('Lifetime paid'), currency(centsToMoney(Math.max(0, (agg.paidCents || 0) - (agg.refundedCents || 0))))],
-        [localized('Closing balance'), currency(centsToMoney(rows.length ? rows[rows.length - 1].balanceCents : (agg.openingBalanceCents || 0)))]
+        ['Lifetime billed', currency(centsToMoney(agg.billedCents || 0))],
+        ['Lifetime paid', currency(centsToMoney(Math.max(0, (agg.paidCents || 0) - (agg.refundedCents || 0))))],
+        ['Closing balance', currency(centsToMoney(rows.length ? rows[rows.length - 1].balanceCents : (agg.openingBalanceCents || 0)))]
       ],
       formatMoney: (v) => currency(v)
     });
-  const period = from || to ? `${from ? dateFull(from) : '—'} → ${to ? dateFull(to) : '—'}` : localized('All time');
+  const period = from || to ? `${from ? dateFull(from) : '—'} → ${to ? dateFull(to) : '—'}` : 'All time';
   return openDocumentPreview(`Financial statement — ${patient.fullName}`, {
-    kind: 'statement', title: localized('FINANCIAL STATEMENT'), docRef: patient.patientCode || '', docDate: `${localized('Statement period')}: ${period}`,
-    patientPairs: [[localized('Patient'), patient.fullName], [localized('Patient ID'), patient.patientCode || ''], [localized('Phone'), patient.phone || ''], [localized('Address'), [patient.address, patient.city, patient.district].filter(Boolean).join(', ')]],
+    kind: 'statement', title: 'FINANCIAL STATEMENT', docRef: patient.patientCode || '', docDate: `${'Statement period'}: ${period}`,
+    patientPairs: [['Patient', patient.fullName], ['Patient ID', patient.patientCode || ''], ['Phone', patient.phone || ''], ['Address', [patient.address, patient.city, patient.district].filter(Boolean).join(', ')]],
     body
   });
 }
@@ -3880,8 +3899,84 @@ async function refreshDirectory() {
     if (directory) {
       appState.directory = { patients: directory.patients || [], staff: directory.staff || [], treatments: directory.treatments || [] };
       appState.medicationCatalog = directory.medicationCatalog || [];
+      appState.directoryTruncated = Boolean(directory.patientsTruncated);
+      for (const patient of appState.directory.patients) rememberPatient(patient);
     }
   } catch { /* keep last directory */ }
+}
+
+/* ---- patient lookup (server-side, uncapped) ------------------------------ */
+
+function rememberPatient(patient) {
+  if (patient?.id) appState.patientLabels[patient.id] = { id: patient.id, patientCode: patient.patientCode || '', fullName: patient.fullName || '' };
+  return patient;
+}
+async function lookupPatients(query, { pageSize = 20 } = {}) {
+  const result = await q('patientLookup', { query: String(query || ''), pageSize });
+  const rows = result?.ok ? (result.rows || []) : [];
+  rows.forEach(rememberPatient);
+  return result?.ok ? result : { rows: [], total: 0 };
+}
+function patientResultHtml(rows, activeIndex) {
+  if (!rows.length) return '<div class="patient-picker-empty muted">No matching patient.</div>';
+  return rows.map((patient, index) => `<button type="button" class="patient-picker-option ${index === activeIndex ? 'active' : ''}" data-patient-option="${attr(patient.id)}" data-patient-text="${attr(patientDisplay(patient))}" role="option"><span class="patient-picker-name">${esc(patient.fullName || '')}</span><small>${esc(patient.patientCode || '')}${patient.archived ? ' · archived' : ''}${patient.phone ? ` · ${esc(patient.phone)}` : ''}</small></button>`).join('');
+}
+function closePatientResults(wrapper) {
+  const results = wrapper?.querySelector('[data-patient-results]');
+  const input = wrapper?.querySelector('.patient-picker-input');
+  if (results) { results.hidden = true; results.innerHTML = ''; }
+  if (input) input.setAttribute('aria-expanded', 'false');
+}
+async function openPatientResults(wrapper, query) {
+  const results = wrapper.querySelector('[data-patient-results]');
+  const input = wrapper.querySelector('.patient-picker-input');
+  if (!results || !input) return;
+  const found = await lookupPatients(query);
+  if (!wrapper.isConnected) return;
+  // A newer keystroke supersedes this response.
+  if (wrapper.dataset.pending !== String(query)) return;
+  results.innerHTML = patientResultHtml(found.rows, 0);
+  if (found.total > found.rows.length) {
+    results.innerHTML += `<div class="patient-picker-more muted">${number(found.total)} match(es) — keep typing to narrow the list.</div>`;
+  }
+  results.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+/**
+ * Fill the visible text of pickers whose value came from a record rather than
+ * from the cached directory page (e.g. editing an invoice for patient #4 812).
+ */
+async function hydratePatientPickers() {
+  const wrappers = [...document.querySelectorAll('[data-patient-picker]')].filter((wrapper) => {
+    const hidden = wrapper.querySelector('input[type="hidden"]');
+    const input = wrapper.querySelector('.patient-picker-input');
+    return hidden?.value && input && !input.value;
+  });
+  await Promise.all(wrappers.map(async (wrapper) => {
+    const hidden = wrapper.querySelector('input[type="hidden"]');
+    const result = await q('record', { collection: 'patients', id: hidden.value });
+    const record = result?.ok ? result.record : null;
+    if (!record || !wrapper.isConnected) return;
+    rememberPatient(record);
+    const input = wrapper.querySelector('.patient-picker-input');
+    if (input && !input.value) input.value = patientDisplay(record);
+  }));
+}
+function selectPatientOption(wrapper, option) {
+  const hidden = wrapper.querySelector('input[type="hidden"]');
+  const input = wrapper.querySelector('.patient-picker-input');
+  if (hidden) hidden.value = option.dataset.patientOption || '';
+  if (input) input.value = option.dataset.patientText || '';
+  closePatientResults(wrapper);
+}
+/** Open a patient's chart from the dental page's patient picker. */
+function applyDentalPatient(patientId) {
+  if (!patientId) return;
+  ui.dentalPatientId = patientId;
+  ui.patientId = patientId;
+  ui.patientTab = 'dental';
+  ui.page = 'patients';
+  render();
 }
 function permissionGroupsHtml(prechecked = null) {
   return permissionGroups.map(([group, permissions]) => `<div class="permission-group"><h4>${esc(group)}</h4>${permissions.map((permission) => `<label class="permission-option"><input type="checkbox" name="permissions" value="${attr(permission)}" ${prechecked?.has(permission) ? 'checked' : ''}><span>${esc(permission.replaceAll('.', ' · '))}</span></label>`).join('')}</div>`).join('');
@@ -3933,14 +4028,14 @@ function render() {
   app.innerHTML = shell();
   const main = document.querySelector('#main-content');
   if (!main) return;
-  if (appState.unsupportedSchema) { main.innerHTML = unsupportedSchemaScreen(); translateDom(); return; }
-  if (requiresLogin()) { main.innerHTML = authScreen(); translateDom(); return; }
-  if (ui.locked) { main.innerHTML = lockScreen(); translateDom(); return; }
+  if (appState.unsupportedSchema) { main.innerHTML = unsupportedSchemaScreen(); return; }
+  if (requiresLogin()) { main.innerHTML = authScreen(); return; }
+  if (ui.locked) { main.innerHTML = lockScreen(); return; }
   main.innerHTML = `<div class="page-loading"><div class="boot-spinner small"></div></div>`;
   renderPage().then((html) => {
     const current = document.querySelector('#main-content');
     if (current) current.innerHTML = html;
-    translateDom();
+    hydratePatientPickers();
   }).catch((error) => {
     console.error(error);
     const current = document.querySelector('#main-content');
@@ -3959,6 +4054,12 @@ document.addEventListener('change', (event) => {
   else handleChange(event);
 });
 document.addEventListener('keydown', handleKeydown);
+// A patient picker closes when the pointer goes anywhere outside it.
+document.addEventListener('pointerdown', (event) => {
+  document.querySelectorAll('[data-patient-picker]').forEach((wrapper) => {
+    if (!wrapper.contains(event.target)) closePatientResults(wrapper);
+  });
+}, true);
 
 /* idle lock — application lockout after autoLockMinutes without interaction */
 const IDLE_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'];

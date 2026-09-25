@@ -11,7 +11,7 @@
 ```bash
 npm install
 npm run dev             # Vite dev server — browser mode (LocalRepo + WebCrypto PBKDF2)
-npm test                # node:test suite (55 tests)
+npm test                # node:test suite (142 tests)
 npm run benchmark:datasets
 npm run start:desktop   # production build + Electron (desktop mode, SqlRepo)
 ```

@@ -611,7 +611,11 @@ app.whenReady().then(async () => {
         });
       }
       // mode === 'pdf' — render PDF then let the user pick the save location.
-      const pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: { marginType: 'default' }, pageSize: pageSizeForPdf(pageSize) });
+      // Receipt80: Chromium's printToPDF rejects default 1cm margins on an
+      // 80mm page (the service-side paper-width check). Use explicit zero
+      // margins — the document's own padding already insets the content.
+      const pdfMargins = normalizePageSize(pageSize) === 'Receipt80' ? { marginType: 'none' } : { marginType: 'default' };
+      const pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: pdfMargins, pageSize: pageSizeForPdf(pageSize) });
       if (isSmoke) {
         // Smoke-only deterministic path: never a dialog, never user-controlled —
         // filename is derived from the sanitized title inside the OS temp dir.

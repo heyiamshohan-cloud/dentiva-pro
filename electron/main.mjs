@@ -321,6 +321,7 @@ function smokeDocs() {
     if (!invId) throw new Error('docs-flow invoice.create returned no record id');
     const payment = await op('payment.record', { patientId: patient.id, invoiceId: invId, date: '2026-09-24', amount: 1200, method: 'bKash', reference: 'TX9AB12XYZ34' });
     if (!payment?.ok) throw new Error(`docs-flow payment.record: ${payment?.error}`);
+    if (String(payment.record?.invoiceId || '') !== String(invId)) throw new Error('SMOKE-PROBE paymentLink ' + JSON.stringify({ invId, stored: payment.record?.invoiceId }));
 
     // ── 1. PRESCRIPTION through the real modal + chips + preview ──────────
     document.querySelector('[data-action="navigate"][data-page="prescriptions"]')?.click();

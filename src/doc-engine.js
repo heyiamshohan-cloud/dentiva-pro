@@ -242,7 +242,7 @@ html,body{ margin:0; padding:${receipt ? '3mm' : '12mm'}; color:var(--ink); back
 .muted{ color:var(--muted); }
 @page{ size:${PAGE_CSS[size] || PAGE_CSS.A4}; margin:${receipt ? '3mm' : '9mm'}; }
 @media print{ body{ padding:0 } .doc-table thead{ display:table-header-group } }
-</style></head><body>${clinicHeader({ settings, labels, title, docRef, docDate, receipt })}${[patient, clinical, body, totals, signature && !receipt ? signatureBlock({ settings, labels }) : ''].join('')}
+</style></head><body>${clinicHeader({ settings, labels, title, docRef, docDate, receipt })}${[patient, clinical, body, typeof totals === 'string' ? totals : (totals ? totalsSection(totals) : ''), signature && !receipt ? signatureBlock({ settings, labels }) : ''].join('')}
 ${documentFooter({ settings, generatedOn: footerStamp, labels })}
 </body></html>`;
   return { html, pageSize: size };

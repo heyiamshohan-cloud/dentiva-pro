@@ -393,9 +393,11 @@ function smokeDocs() {
     await clickEl(document.querySelector(receiptRowSel), 'print-payment');
     if (!(await waitFor(() => previewHtml().length > 400))) throw new Error('receipt preview did not render');
     const rcHtml = previewHtml();
-    for (const token of [payment.record.receiptNumber, patient.patientCode, 'bKash', 'TX9AB12XYZ34', 'Remaining due']) {
+    for (const token of [payment.record.receiptNumber, patient.patientCode, 'bKash', 'TX9AB12XYZ34']) {
       if (!rcHtml.includes(token)) throw new Error(`receipt missing '${token}'`);
     }
+    // 'Remaining due' is localized at print-time (clinic language); accept Bangla too
+    if (!(rcHtml.includes('Remaining due') || rcHtml.includes('বাকি টাকা'))) throw new Error(`receipt missing remaining-due row (en/bn)`);
     mark('docs-receipt-content-ok');
     await pdfFor('docs-receipt-80mm', 'Receipt80');
     await pdfFor('docs-receipt-A5', 'A5');

@@ -611,11 +611,17 @@ app.whenReady().then(async () => {
         });
       }
       // mode === 'pdf' — render PDF then let the user pick the save location.
-      // Receipt80: Chromium's printToPDF rejects default 1cm margins on an
-      // 80mm page (the service-side paper-width check). Use explicit zero
-      // margins — the document's own padding already insets the content.
+      // Receipt80: Windows Chromium's printToPDF rejects arbitrary custom page
+      // sizes ("Printing failed"). First attempt with the explicit size; on
+      // failure retry WITHOUT pageSize — the document's own @page rule
+      // (80mm × 200mm) then governs the PDF geometry.
       const pdfMargins = normalizePageSize(pageSize) === 'Receipt80' ? { marginType: 'none' } : { marginType: 'default' };
-      const pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: pdfMargins, pageSize: pageSizeForPdf(pageSize) });
+      let pdf;
+      try {
+        pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: pdfMargins, pageSize: pageSizeForPdf(pageSize) });
+      } catch (first) {
+        pdf = await printWindow.webContents.printToPDF({ printBackground: true, landscape, margins: pdfMargins });
+      }
       if (isSmoke) {
         // Smoke-only deterministic path: never a dialog, never user-controlled —
         // filename is derived from the sanitized title inside the OS temp dir.

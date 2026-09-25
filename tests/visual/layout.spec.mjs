@@ -212,17 +212,35 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await createPatientViaUi(page, 'Rx Premium Patient 日本語');
     await page.locator('aside [data-action="navigate"][data-page="prescriptions"]').first().click();
   }
+  /**
+   * Drive the searchable patient picker the way a clinician does. v2.0.0
+   * replaced the old `<select name="patientId">` (which silently stopped at
+   * the first 500 patients) with the server-side lookup picker, so the audit
+   * flow must type and choose — exactly what this helper asserts.
+   */
+  async function pickPatient(page, form, query) {
+    const picker = form.locator('[data-patient-picker]').first();
+    const input = picker.locator('.patient-picker-input');
+    await input.click();
+    await input.fill(query);
+    const option = picker.locator('.patient-picker-option').first();
+    await expect(option).toBeVisible({ timeout: 20_000 });
+    await option.click();
+    await expect(picker.locator('input[type="hidden"][name="patientId"]')).not.toHaveValue('');
+  }
+
   test('rx: stage 1 modal opens', async ({ page }) => {
     await prepareRx(page);
     await page.locator('button:has-text("New prescription"), [data-action="open-prescription"]').first().click();
-    await expect(page.locator('form[data-form="prescription"]')).toBeVisible({ timeout: 15_000 });
-    await page.locator('form[data-form="prescription"] select[name="patientId"]').selectOption({ index: 1 });
+    const rxStage1 = page.locator('form[data-form="prescription"]');
+    await expect(rxStage1).toBeVisible({ timeout: 15_000 });
+    await pickPatient(page, rxStage1, 'Rx Premium');
   });
   test('rx: stage 2 mandated chips navigate', async ({ page }) => {
     await prepareRx(page);
     await page.locator('[data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
-    await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
+    await pickPatient(page, rxForm, 'Rx Premium');
     for (const label of ['Pain On', 'G. Carries', 'Swelling', 'Gum Bleeding', 'Bad Breath', 'Sensitivity', 'Carries / G Carries', 'BDR / BDC', 'Gingivitis', 'Parodental Pocket', 'Perio Dontitis', 'Pulpitis', 'Impected Teeth', 'Dry Socket', 'Attrition / Erosion']) {
       await expect(rxForm.locator(`[data-opt="${label}"]`)).toBeVisible({ timeout: 15_000 });
     }
@@ -234,7 +252,7 @@ test.describe('flagship screen audit (v1.6.1)', () => {
     await prepareRx(page);
     await page.locator('[data-action="open-prescription"]').first().click();
     const rxForm = page.locator('form[data-form="prescription"]');
-    await rxForm.locator('select[name="patientId"]').selectOption({ index: 1 });
+    await pickPatient(page, rxForm, 'Rx Premium');
     await rxForm.locator('[data-opt="Pain On"]').click();
     await rxForm.locator('[data-opt="Carries / G Carries"]').click();
     await rxForm.locator('textarea[name="requiredExamination"]').fill('IOPA 46');

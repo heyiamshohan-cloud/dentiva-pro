@@ -23,9 +23,14 @@ import { migrateWorkspace } from '../electron/lib/migrate.mjs';
 import { Workspace } from '../electron/lib/db.mjs';
 import { SqlRepo } from '../electron/lib/repo-sql.mjs';
 
-const today = () => new Date().toISOString().slice(0, 10);
-const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-const yesterday = () => new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+// Clinic-day arithmetic: the product's "today" is the clinic's calendar day
+// (settings timezone), so seeding from the host's UTC date would flake after
+// 18:00 UTC / midnight in Dhaka.
+import { clinicDate } from '../src/core.js';
+const dayString = (offset = 0) => new Date(Date.parse(`${clinicDate()}T00:00:00Z`) + offset * 86400000).toISOString().slice(0, 10);
+const today = () => dayString(0);
+const tomorrow = () => dayString(1);
+const yesterday = () => dayString(-1);
 
 const adminCtx = () => ({ userId: 'u-admin', userName: 'Admin', role: 'Administrator', permissions: permissionsForRole('Administrator'), firstRun: true });
 
@@ -159,4 +164,22 @@ test('notification engine produces identical kinds on the SQL runtime', async ()
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('notification signals key off the clinic calendar day, never the host clock', async () => {
+  const repo = new LocalRepo();
+  // 19:30 UTC on the 25th is 01:30 on the 26th in Asia/Dhaka: the clinic is
+  // working on the 26th while the host clock is still on the 25th.
+  const clinicCtx = { ...adminCtx(), now: () => '2026-09-25T19:30:00.000Z', today: () => '2026-09-26' };
+  const patient = (await runOp(repo, 'patient.create', { fullName: 'Midnight Patient', phone: '01788888888' }, clinicCtx)).record;
+  await runOp(repo, 'appointment.create', { patientId: patient.id, date: '2026-09-25', time: '22:00', reason: 'Host-day appointment' }, clinicCtx);
+  await runOp(repo, 'appointment.create', { patientId: patient.id, date: '2026-09-26', time: '00:30', reason: 'Clinic-day appointment' }, clinicCtx);
+  const scan = await runOp(repo, 'notifications.scan', {}, clinicCtx);
+  assert.equal(scan.ok, true);
+  const appointments = repo.listCollection('notifications', { page: 1, pageSize: 100 }).rows.find((row) => row.kind === 'appointments');
+  assert.ok(appointments, 'the clinic-day appointment must raise a signal');
+  assert.equal(appointments.id, 'auto_appointments_2026-09-26');
+  assert.equal(appointments.date, '2026-09-26');
+  assert.equal(appointments.title, '1 appointment scheduled today', 'only the clinic-day appointment may be counted');
+  assert.equal(appointments.updatedAt, '2026-09-25T19:30:00.000Z', 'timestamps still come from the caller clock');
 });

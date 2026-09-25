@@ -216,12 +216,39 @@ export async function run() {
   const rt = makeRuntimes();
   try {
     const ids = await seed(rt.local.repo);
-    await seed(rt.sql.repo);
+    // Both engines create their own row ids, so a scoped query must be driven
+    // with the ids of the runtime under test — otherwise the probe compares a
+    // "not found" against a real payload and reports a phantom divergence.
+    const sqlIds = await seed(rt.sql.repo);
 
-    for (const [name, params] of QUERIES) {
+    // Seeded-id query coverage: the generic params above cannot reach the
+    // patient/visit-scoped queries, which is exactly where a runtime gap hid
+    // before v2.0.0 (visitBilling returned an empty rollup on one engine).
+    const scopedFor = (seedIds) => [
+      ...QUERIES,
+      ['visitBilling', { visitIds: seedIds.visit1 ? [seedIds.visit1, 'missing-visit'] : [] }],
+      ['patientTimeline', { patientId: seedIds.patients[0]?.id, page: 1, pageSize: 25 }],
+      ['patientAggregate', { patientId: seedIds.patients[0]?.id }],
+      ['dentalHistory', { patientId: seedIds.patients[0]?.id }],
+      ['invoiceDetail', { id: seedIds.invoice1 }],
+      ['appointmentDay', { date: '2026-09-10' }],
+      ['appointmentsBetween', { from: '2026-09-01', to: '2026-09-30' }],
+      ['record', { collection: 'patients', id: seedIds.patients[0]?.id }],
+      ['record', { collection: 'invoices', id: seedIds.invoice1 }],
+      ['patientLedgerQuery', { patientId: seedIds.patients[0]?.id, page: 1, pageSize: 25 }],
+      ['patientFinancialSummary', { patientId: seedIds.patients[0]?.id }],
+      ['patientLedgerRollups', { patientId: seedIds.patients[0]?.id }],
+      ['patientStatement', { patientId: seedIds.patients[0]?.id, page: 1, pageSize: 25 }],
+      ['patientDuplicates', { patientCode: 'DP-0001' }]
+    ];
+    const scoped = scopedFor(ids);
+    const sqlScoped = scopedFor(sqlIds);
+    for (let index = 0; index < scoped.length; index += 1) {
+      const [name, params] = scoped[index];
+      const sqlParams = sqlScoped[index][1];
       let a; let b;
       try { a = await query(rt.local.repo, name, params); } catch (error) { a = { threw: String(error && error.message) }; }
-      try { b = await query(rt.sql.repo, name, params); } catch (error) { b = { threw: String(error && error.message) }; }
+      try { b = await query(rt.sql.repo, name, sqlParams); } catch (error) { b = { threw: String(error && error.message) }; }
       // Deep compare after removing identity/timestamp noise: any remaining
       // difference is a real behavioural divergence, not a random id.
       diff(`${name}${params.collection ? `.${params.collection}` : ''}`, denoise(a), denoise(b));

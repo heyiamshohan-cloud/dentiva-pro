@@ -7,6 +7,11 @@ export default defineConfig({
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }], ['json', { outputFile: 'test-results/results.json' }]],
   use: {
     baseURL: 'http://127.0.0.1:4175',
+    // A stale locator must fail fast and loudly. Without an action timeout a
+    // single missing selector waits for the whole test budget (90 s) and a
+    // stale spec can burn the 45-minute CI job before reporting anything.
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
     locale: 'en-GB',
     colorScheme: 'light',
     reducedMotion: 'reduce',

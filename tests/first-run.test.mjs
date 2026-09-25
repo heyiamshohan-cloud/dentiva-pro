@@ -35,8 +35,8 @@ function applyPinLikeDesktop(result, repo) {
 }
 
 const SETUP_SEQUENCE = [
-  ['setup.complete', { clinicName: 'Regression Clinic', dentistName: 'Dr. Regression', phone: '01700000000', address: '1 Test Road', language: 'English', currency: 'BDT' }],
-  ['settings.update', { language: 'English', currency: 'BDT' }],
+  ['setup.complete', { clinicName: 'Regression Clinic', dentistName: 'Dr. Regression', phone: '01700000000', address: '1 Test Road', currency: 'BDT' }],
+  ['settings.update', { currency: 'BDT' }],
   ['user.create', { name: 'Dr. Regression', role: 'Administrator', active: true, pin: '2468', confirmPin: '2468' }]
 ];
 

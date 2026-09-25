@@ -386,6 +386,47 @@ export class LocalRepo {
     return out;
   }
 
+  /**
+   * Per-visit billing rollup for a page of visit ids (Patient 360 visits tab).
+   * Mirrors `visitBillingForSql` so the browser runtime renders the same
+   * Billed / Paid / Due ribbon the desktop runtime does — the two engines must
+   * not disagree about money.
+   */
+  visitBillingFor(visitIds = []) {
+    const ids = (Array.isArray(visitIds) ? visitIds : []).map((value) => String(value)).filter(Boolean).slice(0, 100);
+    if (!ids.length) return {};
+    const wanted = new Set(ids);
+    const invoices = this.#collection('invoices')
+      .filter((invoice) => invoice && wanted.has(String(invoice.visitId || '')) && invoice.status !== 'Cancelled');
+    const byVisit = {};
+    const invoiceVisit = new Map();
+    for (const invoice of invoices) {
+      const key = String(invoice.visitId);
+      invoiceVisit.set(invoice.id, key);
+      byVisit[key] ||= { invoices: [], payments: [], billedCents: 0, paidCents: 0, dueCents: 0 };
+      const totalCents = fieldCents(invoice, 'totalCents', 'total');
+      const paidCents = fieldCents(invoice, 'paidCents', 'paid');
+      byVisit[key].invoices.push({
+        id: invoice.id, invoiceNumber: invoice.invoiceNumber || '', date: invoice.date || '', status: invoice.status || '',
+        totalCents, paidCents, dueCents: fieldCents(invoice, 'dueCents', 'due')
+      });
+      byVisit[key].billedCents += totalCents;
+      byVisit[key].dueCents += fieldCents(invoice, 'dueCents', 'due');
+    }
+    for (const payment of this.#collection('payments')) {
+      if (!payment || ['Voided', 'Cancelled'].includes(payment.status)) continue;
+      const key = invoiceVisit.get(payment.invoiceId);
+      if (!key) continue;
+      byVisit[key].payments.push({
+        id: payment.id, receiptNumber: payment.receiptNumber || '', date: payment.date || '',
+        amountCents: moneyToCents(payment.amount), method: payment.method || ''
+      });
+      byVisit[key].paidCents += moneyToCents(payment.amount);
+    }
+    for (const key of Object.keys(byVisit)) byVisit[key].dueCents = Math.max(0, byVisit[key].billedCents - byVisit[key].paidCents);
+    return byVisit;
+  }
+
   // ---- clinical / billing relationships --------------------------------------
 
   appointmentsOnDate(date) {

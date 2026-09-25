@@ -128,9 +128,11 @@ try {
   $preLaunchProfile = Profile-Snapshot $userData
   Write-Host "user-data profile before installed launch: $preLaunchProfile"
   Start-AndCheck $installedExe.FullName $userData 'installed-verify' | Out-Null
-  # Production document workflows on THIS build (v1.6.1 gate): prescription /
-  # invoice / receipt / statement preview + PDF (A4/A5/Letter/80mm, Bengali,
-  # long names, many rows) via smoke-deterministic PDF paths under %TEMP%.
+  # Production document workflows on THIS build (v2.0.0 gate): prescription /
+  # invoice / receipt / statement preview + PDF (A4/A5/Letter/80mm, long names,
+  # many rows, Unicode clinical text incl. Bengali patient names) via
+  # smoke-deterministic PDF paths under %TEMP%. The interface and document
+  # copy are English-only; patient-typed text is Unicode.
   Start-AndCheck $installedExe.FullName $userData 'docs' | Out-Null
   $smokePdfDir = Join-Path $env:TEMP 'dentiva-smoke-pdf'
   if (Test-Path $smokePdfDir) {

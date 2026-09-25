@@ -69,9 +69,31 @@ evidence table lives in [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELEASE
   number/date formatters are gone. Patient names and clinical text still accept
   any Unicode script (regression-tested).
 
+### Fixed — Patient 360 completeness
+- **Every patient sub-list is now server-paged with a visible pager.** Previously
+  each tab rendered its first page and stopped (20 timeline events, 25 visits,
+  50 prescriptions/plans/referrals/follow-ups, 100 invoices/payments/attachments
+  and audit events), so a long-standing patient silently lost records in the UI.
+  The Full timeline tab also rendered fields the timeline payload never carried,
+  printing blank titles; it now shows the event summary and the record's status,
+  and it walks the whole history through the (previously UI-unreachable) paged
+  timeline query.
+- The visits tab's Billed / Paid / Due ribbon now appears in **both** runtimes:
+  the browser engine had no per-visit billing roll-up at all.
+
+### Fixed — notifications
+- Notification signals key off the **clinic's** calendar day like everything else
+  (appointment, queue, follow-up, expiry and backup rules), so a workspace in
+  Dhaka running on a UTC host no longer raises yesterday's or tomorrow's signals.
+- The pre-1.4 notification function, dead since the reconciled engine replaced it,
+  was removed.
+
 ### Verification for this release
-- `npm test` — 142 tests, 140 pass, 0 fail, 2 skipped.
-- Differential probe (SQL vs JSON engine, every query payload) — 0 findings.
+- `npm test` — 145 tests, 143 pass, 0 fail, 2 skipped (including a long-history
+  patient walked page-by-page in both runtimes).
+- Differential probe (SQL vs JSON engine) — 46 query invocations, 14 of them
+  driven with seeded record ids, **0 findings** (the widened coverage is what
+  exposed the per-visit billing gap).
 - Full-surface sweep (every operation, query, collection and sort key) — 0 failures.
 - Scale benchmark — 100,000 patients / 945,086 records / 394 MB, integrity clean.
 

@@ -276,6 +276,7 @@ let ui = {
   patientBalanceFilter: 'all',
   patientStatusFilter: 'all',
   patientTab: 'overview',
+  patientTabPage: {},
   patientId: null,
   patientDetail: null,
   modal: null,
@@ -748,6 +749,31 @@ async function renderPatientProfile() {
   </div>`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Patient 360 sub-list paging                                         */
+/* ------------------------------------------------------------------ */
+/* Every patient sub-list is server-paged, and every one of them shows the
+ * page it is on. Before v2.0.0 each tab fetched only its first page (20
+ * timeline events, 25 visits, 50 referrals, 100 invoices/payments) with no
+ * way to reach the rest, so a patient with years of history silently lost
+ * records in the UI. The pager walks the full history through the same
+ * paginated queries the rest of the product uses. */
+const PATIENT_TAB_PAGE_SIZE = 50;
+const TIMELINE_LABELS = { visit: 'Clinical visit', appointment: 'Appointment', invoice: 'Invoice', payment: 'Payment', prescription: 'Prescription', plan: 'Treatment plan', referral: 'Referral', attachment: 'Attachment', followup: 'Follow-up' };
+const patientTabPage = (tab) => Math.max(1, Number((ui.patientTabPage || {})[tab]) || 1);
+function patientTabPager(tab, { page = 1, pageSize = PATIENT_TAB_PAGE_SIZE, total = 0, label = 'record' } = {}) {
+  const count = Number(total) || 0;
+  if (count <= pageSize && page <= 1) return count ? `<div class="pager"><span class="muted">${number(count)} ${label}${count === 1 ? '' : 's'}</span></div>` : '';
+  const pages = Math.max(1, Math.ceil(count / pageSize));
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, count);
+  return `<div class="pager">
+    <button class="btn btn-secondary" data-action="patient-tab-page" data-tab="${attr(tab)}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>${icon('arrow', 14, 'rotate-90')} Newer</button>
+    <span class="muted">${number(from)}–${number(to)} of ${number(count)}</span>
+    <button class="btn btn-secondary" data-action="patient-tab-page" data-tab="${attr(tab)}" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>Older ${icon('arrow', 14)}</button>
+  </div>`;
+}
+
 async function renderPatientTab(p, tab, patient, counts = {}) {
   const id = p.id;
   switch (tab) {
@@ -793,18 +819,29 @@ async function renderPatientTab(p, tab, patient, counts = {}) {
       </div>`;
     }
     case 'timeline': {
-      const list = await q('list', { collection: 'patients', page: 1, pageSize: 1, query: '' }).catch(() => null);
-      void list;
-      const timeline = patient.timeline;
-      const rows = (timeline.rows || []).map((row) => `<div class="timeline-row ${row.type}"><span class="timeline-icon">${icon({ visit: 'clipboard', invoice: 'receipt', payment: 'credit', appointment: 'calendar', prescription: 'file', referral: 'send', attachment: 'paperclip', followup: 'flag' }[row.type] || 'dot', 15)}</span><div><strong>${esc(row.title)}</strong><small>${date(row.date)} · ${esc(row.subtitle || '')}</small></div>${row.status ? statusBadge(row.status) : ''}</div>`).join('');
-      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Full timeline</h2></div></div>${rows || emptyState('activity', 'No activity yet', 'Records created for this patient will appear here.')}</section>`;
+      const page = patientTabPage('timeline');
+      const timeline = await q('patientTimeline', { patientId: id, page, pageSize: PATIENT_TAB_PAGE_SIZE });
+      const events = timeline.rows || [];
+      // The timeline payload carries { type, date, id, summary, record } — the
+      // row is described by `summary` and by the record's own status.
+      const rows = events.map((row) => `<div class="timeline-row ${row.type}"><span class="timeline-icon">${icon({ visit: 'clipboard', invoice: 'receipt', payment: 'credit', appointment: 'calendar', prescription: 'file', referral: 'send', attachment: 'paperclip', followup: 'flag', plan: 'layers' }[row.type] || 'dot', 15)}</span><div><strong>${esc(row.summary || row.title || 'Record')}</strong><small>${date(row.date)} · ${esc(TIMELINE_LABELS[row.type] || row.type)}</small></div>${row.record?.status ? statusBadge(row.record.status) : ''}</div>`).join('');
+      const from = (page - 1) * PATIENT_TAB_PAGE_SIZE + 1;
+      const exactTotal = timeline.complete ? Number(timeline.total || 0) : 0;
+      const pager = events.length || page > 1 ? `<div class="pager">
+        <button class="btn btn-secondary" data-action="patient-tab-page" data-tab="timeline" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>${icon('arrow', 14, 'rotate-90')} Newer</button>
+        <span class="muted">Showing ${number(from)}–${number(from + Math.max(0, events.length - 1))}${exactTotal ? ` of ${number(exactTotal)}` : '+'} events</span>
+        <button class="btn btn-secondary" data-action="patient-tab-page" data-tab="timeline" data-page="${page + 1}" ${events.length < PATIENT_TAB_PAGE_SIZE ? 'disabled' : ''}>Older ${icon('arrow', 14)}</button>
+      </div>` : '';
+      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('activity', 17)}<h2>Full timeline</h2></div></div>${rows || emptyState('activity', 'No activity yet', 'Records created for this patient will appear here.')}${pager}</section>`;
     }
     case 'visits': return renderPatientVisits(id, patient);
     case 'dental': return renderPatientDental(p, patient);
     case 'prescriptions': {
-      const result = await q('list', { collection: 'prescriptions', page: 1, pageSize: 50, filters: { patientId: id } });
+      const page = patientTabPage('prescriptions');
+      const result = await q('list', { collection: 'prescriptions', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id } });
       return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('file', 17)}<h2>Prescriptions</h2></div>${button('New prescription', 'open-prescription', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
         ${(result.rows || []).map((rx) => `<div class="record-row"><div><strong>${esc(rx.prescriptionCode || '—')} · ${esc(rx.doctor || '—')}</strong><small>${date(rx.date)} · ${(rx.medications || []).map((m) => m.medicine).filter(Boolean).join(', ') || '—'}</small></div><div class="row-actions">${button('Print', 'print-prescription', 'printer', 'link', `data-id="${attr(rx.id)}"`)}${button('View', 'open-prescription', 'eye', 'link', `data-id="${attr(rx.id)}"`)}</div></div>`).join('') || emptyState('file', 'No prescriptions yet', 'Prescriptions written for this patient appear here.', button('New prescription', 'open-prescription', 'plus', 'secondary', `data-id="${attr(id)}"`))}
+        ${patientTabPager('prescriptions', { page, total: result.total, label: 'prescription' })}
       </section>`;
     }
     case 'treatment-plan': return renderPatientPlans(id, patient);
@@ -820,9 +857,10 @@ async function renderPatientTab(p, tab, patient, counts = {}) {
       </section>`;
     }
     case 'audit': {
-      const result = await q('auditList', { page: 1, pageSize: 100, entity: 'Patient', entityId: id, userId: '' });
+      const page = patientTabPage('audit');
+      const result = await q('auditList', { page, pageSize: PATIENT_TAB_PAGE_SIZE, entity: 'Patient', entityId: id, userId: '' });
       const rows = (result.rows || []).map((entry) => `<div class="record-row"><div><strong>${esc(entry.action)}</strong><small>${dateFull(entry.createdAt?.slice(0, 10))} ${time(entry.createdAt?.slice(11, 16))} · ${esc(entry.userName || '—')} · ${esc(entry.summary || '')}</small></div></div>`).join('');
-      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('shield', 17)}<h2>Patient record audit</h2></div></div>${rows || emptyState('shield', 'No patient-record events', 'Creation, edits, archive and merge actions for this patient appear here.')}</section>`;
+      return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('shield', 17)}<h2>Patient record audit</h2></div></div>${rows || emptyState('shield', 'No patient-record events', 'Creation, edits, archive and merge actions for this patient appear here.')}${patientTabPager('audit', { page, total: result.total, label: 'event' })}</section>`;
     }
     default: return emptyState('info', 'Nothing here yet', 'This section will populate as records are created.');
   }
@@ -833,7 +871,8 @@ async function renderPatientVisits(id, patient) {
   const queryFilters = { patientId: id };
   if (filters.from) queryFilters.dateFrom = filters.from;
   if (filters.to) queryFilters.dateTo = filters.to;
-  const result = await q('list', { collection: 'visits', page: 1, pageSize: 25, filters: queryFilters, sort: 'date-desc' });
+  const page = patientTabPage('visits');
+  const result = await q('list', { collection: 'visits', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: queryFilters, sort: 'date-desc' });
   const visits = (result.rows || []).filter((v) => !filters.dentistId || v.dentistId === filters.dentistId);
   const billingRoll = visits.length && can('billing.view')
     ? (await q('visitBilling', { visitIds: visits.map((v) => v.id) }).catch(() => null))?.byVisit || {}
@@ -873,7 +912,7 @@ async function renderPatientVisits(id, patient) {
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('clipboard', 17)}<h2>Clinical records <span class="muted">(${number(result.total || 0)})</span></h2></div>${button('Record visit', 'open-visit', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
     ${toolbar(`<input type="date" data-change="visit-filter" data-key="from" value="${attr(filters.from || '')}" aria-label="Visits from"><input type="date" data-change="visit-filter" data-key="to" value="${attr(filters.to || '')}" aria-label="Visits to">${dentists.length > 1 ? `<select data-change="visit-filter" data-key="dentistId" aria-label="Dentist filter"><option value="">${esc('All clinicians')}</option>${dentists.map(([did, name]) => `<option value="${attr(did)}" ${filters.dentistId === did ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>` : ''}`, `${(filters.from || filters.to || filters.dentistId) ? `<button class="chip-button" data-action="visit-filter-clear">${icon('x', 13)}<span>${esc('Clear filters')}</span></button>` : ''}`)}
     ${!rows ? (filters.from || filters.to || filters.dentistId ? emptyState('clipboard', 'No visits match the filters', 'Loosen the date range or clinician filter.') : emptyState('clipboard', 'No visits yet', 'Clinical visits for this patient appear here.', button('Record visit', 'open-visit', 'plus', 'secondary', `data-id="${attr(id)}"`))) : rows}
-    ${result.total > 25 ? '<p class="muted">Latest 25 visits shown — narrow the date range to see older records.</p>' : ''}
+    ${patientTabPager('visits', { page, total: result.total, label: 'visit' })}
   </section>`;
 }
 
@@ -914,7 +953,8 @@ async function renderPatientDental(p, patient) {
 }
 
 async function renderPatientPlans(id, patient) {
-  const result = await q('list', { collection: 'treatmentPlans', page: 1, pageSize: 50, filters: { patientId: id } });
+  const page = patientTabPage('treatment-plan');
+  const result = await q('list', { collection: 'treatmentPlans', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id } });
   const rows = (result.rows || []).map((plan) => `<div class="record-row record-row-detail">
     <div><strong>${esc(plan.title)}</strong><small>${statusBadge(plan.status)} · ${currency(centsToMoney(plan.estimatedTotalCents ?? plan.estimatedTotal))}${plan.startDate ? ` · starts ${date(plan.startDate)}` : ''}</small>
     ${(plan.stages || []).length ? `<ul class="stage-list">${plan.stages.map((stage) => `<li data-action="cycle-plan-stage" data-plan="${attr(plan.id)}" data-stage="${attr(stage.id)}" title="Click to advance stage status"><span class="stage-dot ${stage.status}"></span><span class="stage-title">${esc(stage.title)}</span><small>${esc(stage.status)}${stage.plannedDate ? ` · ${date(stage.plannedDate)}` : ''}${stage.estimatedCost ? ` · ${currency(stage.estimatedCost)}` : ''}</small></li>`).join('')}</ul>` : ''}
@@ -922,27 +962,32 @@ async function renderPatientPlans(id, patient) {
     <div class="row-actions">${button('Print estimate', 'print-estimate', 'printer', 'link', `data-id="${attr(plan.id)}"`)}${button('Convert to visit', 'convert-treatment-plan', 'arrow', 'link', `data-id="${attr(plan.id)}"`)}${button('Edit', 'open-treatment-plan', 'edit', 'link', `data-id="${attr(plan.id)}"`)}</div>
   </div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('layers', 17)}<h2>Treatment plans</h2></div>${button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
-    ${rows || emptyState('layers', 'No treatment plans yet', 'Clinician-authored plans for this patient appear here.', button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+    ${rows || emptyState('layers', 'No treatment plans yet', 'Clinician-authored plans for this patient appear here.', button('New treatment plan', 'open-treatment-plan', 'plus', 'secondary', `data-id="${attr(id)}"`))}
+    ${patientTabPager('treatment-plan', { page, total: result.total, label: 'plan' })}</section>`;
 }
 
 async function renderPatientBilling(id, patient) {
-  const result = await q('list', { collection: 'invoices', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'date-desc' });
+  const page = patientTabPage('billing');
+  const result = await q('list', { collection: 'invoices', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id }, sort: 'date-desc' });
   const rows = (result.rows || []).map((inv) => `<div class="record-row">
     <div><strong>${esc(inv.invoiceNumber || '—')}</strong><small>${date(inv.date)} · ${currency(centsToMoney(inv.totalCents ?? inv.total))} · paid ${currency(centsToMoney(inv.paidCents ?? inv.paid))} · due ${currency(centsToMoney(inv.dueCents ?? inv.due))}</small></div>
     <div class="row-actions">${statusBadge(inv.status)}${button('Print', 'print-invoice', 'printer', 'link', `data-id="${attr(inv.id)}"`)}${inv.status !== 'Cancelled' ? button('Record payment', 'open-payment', 'credit', 'link', `data-id="${attr(inv.id)}"`) : ''}${can('billing.void') ? button('Void', 'void-invoice', 'trash', 'link', `data-id="${attr(inv.id)}"`) : ''}</div>
   </div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('receipt', 17)}<h2>Invoices</h2></div>${button('New invoice', 'open-invoice', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
-    ${rows || emptyState('receipt', 'No invoices yet', 'Billing for this patient appears here.', button('New invoice', 'open-invoice', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+    ${rows || emptyState('receipt', 'No invoices yet', 'Billing for this patient appears here.', button('New invoice', 'open-invoice', 'plus', 'secondary', `data-id="${attr(id)}"`))}
+    ${patientTabPager('billing', { page, total: result.total, label: 'invoice' })}</section>`;
 }
 
 async function renderPatientPayments(id, patient) {
-  const result = await q('list', { collection: 'payments', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'date-desc' });
+  const page = patientTabPage('payments');
+  const result = await q('list', { collection: 'payments', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id }, sort: 'date-desc' });
   const rows = (result.rows || []).map((payment) => `<div class="record-row">
     <div><strong>${esc(payment.receiptNumber || '—')} · ${money(payment)}</strong><small>${date(payment.date)} · ${esc(payment.method || '—')}${payment.refundedAmount ? ` · refunded ${currency(payment.refundedAmount)}` : ''}</small></div>
     <div class="row-actions">${statusBadge(payment.status || 'Recorded')}${button('Print receipt', 'print-payment', 'printer', 'link', `data-id="${attr(payment.id)}"`)}${can('payments.refund') ? button('Refund', 'open-refund', 'undo', 'link', `data-id="${attr(payment.id)}"`) : ''}</div>
   </div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('credit', 17)}<h2>Payments</h2></div>${button('Record payment', 'open-payment', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
-    ${rows || emptyState('credit', 'No payments yet', 'Payments for this patient appear here.', button('Record payment', 'open-payment', 'plus', 'secondary', `data-id="${attr(id)}"`))}</section>`;
+    ${rows || emptyState('credit', 'No payments yet', 'Payments for this patient appear here.', button('Record payment', 'open-payment', 'plus', 'secondary', `data-id="${attr(id)}"`))}
+    ${patientTabPager('payments', { page, total: result.total, label: 'payment' })}</section>`;
 }
 
 async function renderPatientStatement(id, patient) {
@@ -962,28 +1007,34 @@ async function renderPatientStatement(id, patient) {
 }
 
 async function renderPatientAttachments(id, patient) {
-  const result = await q('list', { collection: 'attachments', page: 1, pageSize: 100, filters: { patientId: id }, sort: 'recent' });
+  const page = patientTabPage('attachments');
+  const result = await q('list', { collection: 'attachments', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id }, sort: 'recent' });
   const rows = (result.rows || []).map((attachment) => `<div class="record-row">
     <div class="person-cell"><span class="file-icon">${icon(attachment.type?.startsWith('image/') ? 'image' : 'file', 20)}</span><div><strong>${esc(attachment.name || 'Untitled')}</strong><small>${date(attachment.createdAt?.slice(0, 10))} · ${esc(attachment.category || attachment.type || '—')} · ${formatBytes(attachment.size || 0)}</small></div></div>
     <div class="row-actions">${button('View', 'open-attachment', 'eye', 'link', `data-id="${attr(attachment.id)}"`)}${button('Download original', 'download-attachment', 'download', 'link', `data-id="${attr(attachment.id)}"`)}${can('attachments.delete') ? button('Remove', 'delete-attachment', 'trash', 'link', `data-id="${attr(attachment.id)}"`) : ''}</div>
   </div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('paperclip', 17)}<h2>Attachments</h2></div>${button('Attach file', 'open-attachment-add', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
     ${rows || emptyState('paperclip', 'No attachments yet', 'X-rays, PDFs and clinical documents attach to this patient. PDF active content is never embedded.')}
+    ${patientTabPager('attachments', { page, total: result.total, label: 'file' })}
   </section>`;
 }
 
 async function renderPatientReferrals(id, patient) {
-  const result = await q('list', { collection: 'referrals', page: 1, pageSize: 50, filters: { patientId: id }, sort: 'date-desc' });
+  const page = patientTabPage('referrals');
+  const result = await q('list', { collection: 'referrals', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id }, sort: 'date-desc' });
   const rows = (result.rows || []).map((referral) => `<div class="record-row"><div><strong>→ ${esc(referral.referralTo)}${referral.specialty ? ` (${esc(referral.specialty)})` : ''}</strong><small>${date(referral.date)} · ${esc(referral.reason || '')}${referral.response ? ` · response: ${esc(referral.response)}` : ''}</small></div><div class="row-actions">${statusBadge(referral.status || 'Sent')}${button('Edit', 'open-referral', 'edit', 'link', `data-id="${attr(referral.id)}"`)}</div></div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('send', 17)}<h2>Referrals</h2></div>${button('New referral', 'open-referral', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
-    ${rows || emptyState('send', 'No referrals yet', 'Outgoing referrals and their responses appear here.')}</section>`;
+    ${rows || emptyState('send', 'No referrals yet', 'Outgoing referrals and their responses appear here.')}
+    ${patientTabPager('referrals', { page, total: result.total, label: 'referral' })}</section>`;
 }
 
 async function renderPatientFollowups(id, patient) {
-  const result = await q('list', { collection: 'followUpTasks', page: 1, pageSize: 50, filters: { patientId: id }, sort: 'due' });
+  const page = patientTabPage('followups');
+  const result = await q('list', { collection: 'followUpTasks', page, pageSize: PATIENT_TAB_PAGE_SIZE, filters: { patientId: id }, sort: 'due' });
   const rows = (result.rows || []).map((task) => `<div class="record-row"><div><strong>${esc(task.title || 'Follow-up')}</strong><small>due ${date(task.dueDate)}${task.reason ? ` · ${esc(task.reason)}` : ''}</small></div><div class="row-actions">${statusBadge(task.status || 'Open')}${task.status !== 'Completed' ? button('Complete', 'complete-followup', 'check', 'link', `data-id="${attr(task.id)}"`) : ''}${button('Edit', 'open-followup', 'edit', 'link', `data-id="${attr(task.id)}"`)}</div></div>`).join('');
   return `<section class="card"><div class="card-title"><div class="card-title-text">${icon('flag', 17)}<h2>Follow-ups</h2></div>${button('Schedule follow-up', 'open-followup', 'plus', 'secondary', `data-id="${attr(id)}"`)}</div>
-    ${rows || emptyState('flag', 'No follow-ups scheduled', 'Follow-up dates from visits or manual scheduling appear here.')}</section>`;
+    ${rows || emptyState('flag', 'No follow-ups scheduled', 'Follow-up dates from visits or manual scheduling appear here.')}
+    ${patientTabPager('followups', { page, total: result.total, label: 'follow-up' })}</section>`;
 }
 
 /* ----------------------------- appointments ---------------------------- */
@@ -2689,9 +2740,14 @@ async function handleClick(event) {
       return;
 
     case 'open-patient': return openModal('patient', { patient: id ? cachedPatient(id) || (await q('record', { collection: 'patients', id })).record : {} });
-    case 'open-patient-profile': ui.patientId = id; ui.patientTab = 'overview'; ui.page = 'patients'; return render();
+    case 'open-patient-profile': ui.patientId = id; ui.patientTab = 'overview'; ui.patientTabPage = {}; ui.page = 'patients'; return render();
     case 'open-patient-merge': return openModal('merge', { patient: await q('record', { collection: 'patients', id }).then((r) => r.record) });
-    case 'patient-tab': ui.patientTab = target.dataset.tab; return render();
+    case 'patient-tab': ui.patientTab = target.dataset.tab; ui.patientTabPage = {}; return render();
+    case 'patient-tab-page': {
+      const tab = target.dataset.tab || ui.patientTab;
+      ui.patientTabPage = { ...(ui.patientTabPage || {}), [tab]: Math.max(1, Number(target.dataset.page) || 1) };
+      return render();
+    }
     case 'print-patient': { const record = await q('record', { collection: 'patients', id }).then((r) => r.record); return printPatient(record); }
     case 'print-patient-statement': { const record = await q('record', { collection: 'patients', id }).then((r) => r.record); return printPatientStatement(record); }
 
@@ -3975,6 +4031,7 @@ function applyDentalPatient(patientId) {
   ui.dentalPatientId = patientId;
   ui.patientId = patientId;
   ui.patientTab = 'dental';
+  ui.patientTabPage = {};
   ui.page = 'patients';
   render();
 }

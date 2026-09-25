@@ -1642,7 +1642,7 @@ export const OPS = {
         }
         return { ok: true, disabled: true, items: [], unread: 0, audit: [] };
       }
-      const { rows: drafts, errors } = deriveNotifications(repo, settings, { now: new Date(ctx.now()) });
+      const { rows: drafts, errors } = deriveNotifications(repo, settings, { now: new Date(ctx.now()), today: ctx.today() });
       const existing = [];
       for (let page = 1;; page += 1) {
         const batch = repo.listCollection('notifications', { page, pageSize: 200, sort: 'recent' });

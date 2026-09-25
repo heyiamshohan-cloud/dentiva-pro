@@ -5,7 +5,6 @@ import {
   DASHBOARD_PERIODS,
   analyticsSnapshot,
   buildTimelineEvents,
-  deriveOperationalNotifications,
   inDateRange,
   normaliseTags,
   periodBounds,
@@ -59,16 +58,6 @@ test('timeline projections include clinical, financial and document events', () 
     referrals: [], attachments: [], followUpTasks: []
   }, 'p1');
   assert.deepEqual(events.map((event) => event.type), ['Payment', 'Invoice', 'Prescription', 'Visit', 'Appointment']);
-});
-
-test('operational notifications are actionable and stable by record id', () => {
-  const notifications = deriveOperationalNotifications({
-    appointments: [{ id: 'a1', patientId: 'p1', date: '2026-09-22', status: 'Waiting' }],
-    visits: [{ id: 'v1', patientId: 'p1', date: '2026-09-20', followUpDate: '2026-09-22' }],
-    inventory: [{ id: 'i1', name: 'Gloves', currentStock: 2, minimumStock: 5 }, { id: 'i2', name: 'Expired', currentStock: 4, minimumStock: 2, expiryDate: '2026-09-22' }]
-  }, '2026-09-22');
-  assert.deepEqual(notifications.map((item) => item.id), ['wait:a1', 'stock:i1', 'expiry:i2', 'followup:v1']);
-  assert.ok(notifications.every((item) => item.page && item.recordId));
 });
 
 test('room-aware scheduling permits separate rooms but flags shared resources', () => {

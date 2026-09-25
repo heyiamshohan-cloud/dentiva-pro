@@ -20,7 +20,7 @@ The repository starts with an empty store by design. There are no sample patient
 
 | Gate | Result |
 |---|---|
-| `npm test` (unit + integration, both runtimes) | 142 tests — 140 pass, 0 fail, 2 skipped |
+| `npm test` (unit + integration, both runtimes) | 145 tests — 143 pass, 0 fail, 2 skipped |
 | `node scripts/v2-audit/differential-probe.mjs` (SQL vs JSON engine) | 0 findings |
 | `node scripts/v2-audit/surface-sweep.mjs` (every op, query, collection, sort key) | 0 failures |
 | Scale (1k → 100k patients) | measured to 100,000 patients / 945,086 records / 394 MB |
@@ -86,7 +86,7 @@ improvement. Full numbers: [`docs/V2_FINAL_RELEASE_AUDIT.md`](docs/V2_FINAL_RELE
 ```bash
 npm install
 npm run dev            # Vite dev server (browser mode on LocalRepo)
-npm test               # node:test suite (142 tests)
+npm test               # node:test suite (145 tests)
 npm run benchmark:datasets
 npm run start:desktop  # build + Electron (desktop mode on SqlRepo)
 ```

@@ -6,7 +6,8 @@
 - **Baseline:** v1.6.1 @ `32e8a76` (133 tests: 131 pass / 0 fail / 2 skipped)
 - **Target:** v2.0.0
 - **Branch:** `arena/01a0d7ca-dentiva-pro`
-- **Last updated:** 2026-09-25 (session 2)
+- **Last updated:** 2026-09-25 (session 3 — release engineering)
+- **HEAD:** `ec8454e` on `arena/01a0d7ca-dentiva-pro` (pushed to origin)
 - **Current suite:** 142 tests / 140 pass / 0 fail / 2 skipped (`npm test`)
 - **Differential probe:** `node scripts/v2-audit/differential-probe.mjs` → **0 findings**
   (0 invariant, 0 integrity, 0 engine divergence) at `/tmp/div8.json`
@@ -16,8 +17,15 @@
 
 ## 1. Current phase
 
-**Phase B — defect elimination (COMPLETE for every defect found so far) → Phase C — regression
-lock-in + release evidence (IN PROGRESS)**
+**Phase C — regression lock-in and release evidence: COMPLETE.**
+**Phase D — Windows build + verification: IN CI (`windows-latest`).**
+
+Local pre-build gate re-run on the frozen tree (`ec8454e`): `npm test` 142/140/0/2,
+differential probe 0 findings, surface sweep 0 failures, `npx vite build` → `dist/`
+(424.41 kB JS / 49.07 kB CSS), packaged runtime closure 22 modules / 0 broken imports.
+Windows artifacts are produced by `.github/workflows/windows-release.yml`; local
+packaging is impossible in this sandbox (egress to `release-assets.githubusercontent.com`
+is reset), so CI is the runner of record — see the release audit §8.1.
 
 ## 2. Completed phases
 
@@ -129,15 +137,53 @@ lock-in + release evidence (IN PROGRESS)**
 - [x] V2-01 (desktop directory failure)
 - [x] V2-05 (Bengali content)
 - [x] V2-06 (500-patient picker ceiling)
-- [ ] Packaged Windows installed-app verification (CI)
+- [x] Pre-build gate: tests + probe + sweep + build on the frozen tree
+- [x] Documentation truth audit (§22): README / CHANGELOG / USER_GUIDE / BUILD / PERFORMANCE_BASELINE
+- [ ] Windows build + packaged smoke + PE/ASAR/checksum verification — **CI run 36123316582**
+      (`.github/workflows/windows-release.yml` on `windows-latest`) — *outcome in flight*
+- [ ] Publish release `v2.0.0` with the four artifact assets — only after the run above is green
 
 ## 11. NEXT EXACT ACTION
 
-1. Record the final scale-ladder medians (1k/10k/25k/50k/100k) into
-   `docs/V2_FINAL_RELEASE_AUDIT.md` — the run is executed by
-   `node scripts/dataset-benchmark.mjs 1000,10000,25000,50000,100000`.
-2. Run `npx vite build` + `npm test` + probe + sweep one final time (pre-build gate).
-3. Bump `APP_VERSION`/`package.json` to 2.0.0, then build the Windows x64 artifacts
-   (NSIS + portable + ZIP) and publish checksums.
-4. Write `docs/V2_FINAL_RELEASE_AUDIT.md` and finish the README/CHANGELOG
-   truth audit (§22) for v2.0.0.
+1. Collect CI run `36123316582` (`gh run view 36123316582 --log-failed` on failure).
+   If a step fails, fix the cause and push again — do not weaken the gate.
+2. When green: confirm the run's `Dentiva-Pro-2.0.0-Windows-x64` artifact set and the
+   printed SHA-256 lines; record the run URL/artifact list in `docs/V2_FINAL_RELEASE_AUDIT.md` §8.
+3. Publish the commercial release — `gh workflow run "Dentiva Pro Windows release"
+   --ref arena/01a0d7ca-dentiva-pro` (publish step runs on `workflow_dispatch`) or push a
+   commit whose message contains `[publish-release]`. The workflow refuses to overwrite `v2.0.0`.
+4. Re-read §7 of the audit doc: only verification-depth items remain open (manual Windows
+   install pass, long-history rendering, golden images, local Playwright download).
+
+## 12. Session 3 — release engineering and CI forensics
+
+- Pushed `ec8454e` (v2.0.0 tree) to `origin/arena/01a0d7ca-dentiva-pro`; the push
+  triggered `.github/workflows/windows-release.yml` (run `36123316582`).
+- CI result: `npm ci` ✓, `npm run check` (145 tests + Vite build) ✓, Chromium install ✓,
+  viewport audit **30/48** — the three prescription-builder tests timed out on all six
+  viewports (`select[name="patientId"]`, a control the picker redesign removed) and the
+  job stopped before packaging.
+- Root-caused through the workflow's own failure annotations (job logs and artifacts are
+  served from a host this sandbox cannot reach): `actionTimeout` was unset, so one stale
+  selector burned the full 90 s test budget each run.
+- Fixed: the spec now drives the searchable picker (type → click result → assert the
+  hidden id), `playwright.config.mjs` fails actions after 15 s, and two further stale
+  references were removed (`tests/first-run.test.mjs` retired `language` field,
+  `scripts/windows-smoke.ps1` "Bengali" comment).
+- Added while waiting for CI (real defects, both fixed and tested):
+  V2-19 Patient 360 silent truncation + timeline field contract, V2-18 per-visit billing
+  parity, V2-16 notification clinic day, V2-17 dead notifier removal, V2-20 probe coverage.
+
+## 13. Files changed in session 3
+
+- `package.json` (2.0.0, `dentivaBuild` 2026.09.25), `package-lock.json`
+- `src/migrate-state.js` (`APP_VERSION`)
+- `README.md` — v2.0.0 header, verification table, honest performance table + stated limit,
+  corrected localization/pickering claims, CI description
+- `CHANGELOG.md` + `docs/CHANGELOG.md` — full 2.0.0 entry (V2-01..V2-15 grouped by user impact)
+- `docs/PERFORMANCE_BASELINE.md` — rewritten with the median-of-3 v2.0.0 ladder
+- `docs/USER_GUIDE.md` / `docs/BUILD.md` — Bengali review item removed, test count corrected
+- `docs/V2_FINAL_RELEASE_AUDIT.md` — §7 (local Playwright blocked) and §8/§8.1 (CI-produced
+  artifacts, exact asset and checksum names, local-packaging limitation with evidence)
+- `docs/FINAL_FORENSIC_AUDIT.md`, `docs/FLAGSHIP_UPGRADE_STATE.md`, `docs/V1.4.0_FORENSIC_AUDIT.md`
+  — residual Bengali code points removed

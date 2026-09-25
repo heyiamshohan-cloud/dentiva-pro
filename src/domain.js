@@ -121,13 +121,3 @@ export function normaliseTags(tags) {
   const values = Array.isArray(tags) ? tags : String(tags || '').split(',');
   return [...new Set(values.map((tag) => String(tag).trim().replace(/\s+/g, ' ')).filter(Boolean))].slice(0, 20);
 }
-
-export function deriveOperationalNotifications(state, today = new Date().toISOString().slice(0, 10)) {
-  const notifications = [];
-  const push = (id, type, title, message, page, recordId = '') => notifications.push({ id, type, title, message, page, recordId, date: today, read: false });
-  (state.appointments || []).filter((record) => !record.archived && record.date === today && ['Checked In', 'Waiting'].includes(record.status)).forEach((record) => push(`wait:${record.id}`, 'queue', 'Queue attention', `${record.patientName || record.patientId || 'Patient'} is waiting.`, 'queue', record.id));
-  (state.inventory || []).filter((record) => !record.archived && Number(record.currentStock) <= Number(record.minimumStock ?? state.settings?.lowStockThreshold ?? 0)).forEach((record) => push(`stock:${record.id}`, 'inventory', 'Low stock', `${record.name || 'Item'} needs review.`, 'inventory', record.id));
-  (state.inventory || []).filter((record) => !record.archived && record.expiryDate && record.expiryDate <= today).forEach((record) => push(`expiry:${record.id}`, 'inventory', 'Expiry review', `${record.name || 'Item'} has reached its expiry date.`, 'inventory', record.id));
-  (state.visits || []).filter((record) => !record.archived && record.followUpDate && record.followUpDate <= today).forEach((record) => push(`followup:${record.id}`, 'clinical', 'Follow-up due', 'A clinical follow-up is due.', 'clinical', record.id));
-  return notifications;
-}

@@ -18,13 +18,14 @@
 
 | Gate | Result |
 |------|--------|
-| Unit + integration suites (`npm test`) | **142 tests — 140 pass, 0 fail, 2 skipped** |
-| Cross-runtime differential probe | **0 findings** (0 invariant, 0 integrity, 0 engine divergence) |
+| Unit + integration suites (`npm test`) | **145 tests — 143 pass, 0 fail, 2 skipped** |
+| Cross-runtime differential probe (46 query invocations, 14 of them seeded-id) | **0 findings** (0 invariant, 0 integrity, 0 engine divergence) |
 | Full-surface sweep (ops × queries × collections × sort keys) | **0 failures** |
 | Financial invariants (paid + due = total, no negative balances/due) | **enforced in tests and asserted per invoice/patient in the probe** |
 | Scale (1k → 100k patients) | measured, **no artificial ceilings**; see §5 |
 | English-only product surface | **0 Bengali codepoints** anywhere in the repository |
-| Dead settings / dead buttons | 0 dead settings (settings-usage scan of all keys); query + op call-site audit found 1 unreachable query, now implemented (§3 V2-08) |
+| Dead settings / dead buttons | 0 dead settings (settings-usage scan of all keys); query + op call-site audit found 1 unreachable query, now implemented (§3 V2-08); 1 dead notifier removed (§3 V2-17) |
+| Silent truncation | 0 — every list is server-paged with a visible pager; the ten Patient 360 sub-lists are walked end-to-end in `tests/long-history.test.mjs` |
 | Known crashes / thrown ops | 0 (the sweep exercises every op with junk payloads and asserts errors are returned, never thrown) |
 
 **No release blocker remains.** Limitations that are real are documented in §6/§7.
@@ -66,6 +67,32 @@ test (or probe) that now prevents it from coming back.
 | V2-13 | Medium | Dead setting | `settings.paperProfile` existed in defaults and the update whitelist but **nothing read it** and no UI exposed it. | settings-usage scan (all 51 keys) | retired from defaults + whitelist and stripped on migration | settings scan = 0 dead keys |
 | V2-14 | Medium | Performance | The command palette ran a multi-collection full-text search **per keystroke** (1 336 ms at 100k patients) and searched 8 collections while rendering 6, paying for an exact `COUNT(*)` per group that it never displayed. | benchmark medians + `EXPLAIN QUERY PLAN` | 180 ms debounce + stale-response guard; rows-only `count: false` contract in both runtimes; exactly the 6 rendered groups are searched | `tests/v2-parity.test.mjs` rows-only + palette tests; §5 numbers |
 | V2-15 | Low | Runtime parity | An unknown collection returned `{rows, total: 0}` from SQL but a differently shaped payload from JSON, and `count:false` was honoured by only some paths — a caller could receive different fields per engine. | probe after adding `count:false` | `count`/`totalExact` contract uniform for **every** collection in both runtimes, including unknown collections | `tests/v2-parity.test.mjs` (21 collections) |
+| V2-16 | Medium | Notifications / clinic day | The notification engine anchored its day to the **machine's** local date (`isoDay(now)`), so on a host running UTC a Dhaka clinic's appointment/queue/follow-up/expiry signals keyed off the wrong day and their stable `auto_<kind>_<date>` ids were dated a day early. | clinic-day audit of `src/notifications.js` (4 day filters + the expiry window) | `deriveNotifications` takes the clinic day (`ctx.today()`, falling back to `clinicDate(now, settings.timezone)`); the expiry window is calendar arithmetic on that day; timestamps still come from the caller clock | `tests/notifications.test.mjs` — "notification signals key off the clinic calendar day, never the host clock" (19:30Z ⇒ clinic day 26th, only the 26th's appointment counted) |
+| V2-17 | Low | Dead code | `deriveOperationalNotifications` (`src/domain.js`) was the pre-v1.4 notifier: a pure function of a whole in-memory state object, superseded by the reconciled engine (`src/notifications.js`), referenced by nothing but its own test. It could never have produced a signal in the shipping product. | registry/call-site audit | removed with its test; the live engine keeps every signal kind (appointments, follow-ups, payments, stock, expiry, queue, backup) | `tests/notifications.test.mjs` covers all six derivable kinds on both runtimes |
+| V2-18 | Medium | Cross-runtime parity (money) | `visitBilling` returned `{ byVisit: {} }` on the JSON runtime — `LocalRepo` had no `visitBillingFor`, and the query fell back to an empty roll-up — so the Patient 360 visits tab showed no Billed/Paid/Due ribbon in browser mode while SQLite showed the real figures. The probe had never exercised the query with real visit ids, which is why it read as "0 findings". | extending the differential probe's query list with seeded ids | `LocalRepo.visitBillingFor` mirrors the SQL roll-up field-for-field (invoice + payment refs, billed/paid/due cents, cancelled/voided excluded, unknown ids ignored) | `tests/long-history.test.mjs` (roll-up identical across runtimes) + probe (`visitBilling` row) |
+| V2-19 | **High** | Silent truncation (Patient 360) | Every patient sub-list rendered its **first page and stopped**: 20 timeline events, 25 visits, 50 prescriptions/plans/referrals/follow-ups, 100 invoices/payments/attachments/audit events, with no pager — a patient with years of history silently lost records in the UI (the visits tab only printed a hint that older records were hidden). The Full timeline tab additionally rendered `row.title`/`row.subtitle`/`row.status`, **fields the timeline payload has never carried** (it returns `summary` + `record`), so every row showed an empty title. | long-history audit; payload/field cross-check | every tab is server-paged at 50 rows with a visible `1–50 of N` pager wired to the same paginated queries the rest of the product uses; the timeline tab calls the previously UI-unreachable `patientTimeline` query; timeline rows render `summary` + the record's own status | `tests/long-history.test.mjs` — 130 visits / 130 invoices / 130 payments walked page-by-page (every row exactly once, exact totals), plus a renderer-wiring assertion for all ten sub-lists |
+| V2-20 | Medium | Audit tooling (found no product defect) | The differential probe compared only 32 query invocations, almost all with generic parameters; the patient/visit-scoped queries were never driven with real ids, so a genuine cross-runtime divergence (V2-18) and the not-found/id-mismatch class could hide behind "0 findings". | probe review | the probe now drives 14 seeded-id query invocations per runtime (visitBilling, patientTimeline, patientAggregate, dentalHistory, invoiceDetail, appointmentDay, appointmentsBetween, record ×2, ledger, financial summary, rollups, statement, duplicates), each with the ids of the runtime under test | probe run over the whole surface with the new coverage → 0 findings |
+
+### Test-harness defects found by the release pipeline
+
+The Windows pipeline is also an audit instrument: it runs the renderer in six real
+viewports on `windows-latest`. Its first run against this tree (GitHub Actions run
+`36123316582`) reported **30 passed / 18 failed (of 48 executed)** — every failure
+was the same three prescription-builder tests on all six viewports, each ending in
+a 90-second *test timeout* rather than a clean assertion failure.
+
+| ID | Area | Defect | Root cause | Fix |
+|----|------|--------|-----------|-----|
+| V2-21 | Viewport specs | `rx: stage 1/2/3` hung on `form[data-form="prescription"] select[name="patientId"]`. The prescription builder has not rendered a `<select>` for the patient since the picker was replaced by the server-side lookup picker (a hidden `<input name="patientId">` plus a search box), so `selectOption()` waited forever. Because `playwright.config.mjs` had no `actionTimeout`, one stale selector consumed the whole 90-second test budget and a single stale spec nearly filled the 45-minute CI job. | spec written against the retired `<select>` picker (V2-06/V2-08 changed it) | the spec now drives the picker the way a clinician does — type the name, click the patient result, assert the hidden id field is filled (`pickPatient`). `playwright.config.mjs` sets `actionTimeout: 15s` / `navigationTimeout: 30s` so a stale locator fails fast with the selector named in the annotation instead of stalling the job. |
+
+The product itself was not at fault in any of the three tests: the page state
+captured at failure shows the prescription builder's page rendered with
+`pageErrors=[]` and no failed requests — the modal opened; only the test's
+selector was obsolete. Two further stale references were removed while
+correcting this: `tests/first-run.test.mjs` still submitted a retired `language`
+field, and `scripts/windows-smoke.ps1` described the document smoke as a
+"Bengali" workflow (the documents are English-only; the smoke's Unicode content
+is patient-typed text).
 
 Also corrected during the audit (no behaviour change, truthfulness only):
 a stale "browser/demo adapter" comment on the financial-summary fallback, the
@@ -73,10 +100,17 @@ a stale "browser/demo adapter" comment on the financial-summary fallback, the
 
 ---
 
+### CI evidence for this cycle
+
+| Run | What it proves | Result |
+|---|---|---|
+| `36123316582` (push, v2.0.0 tree) | `npm ci` → `npm run check` (145 tests + build) → Chromium install → 48 viewport runs | tests/build ✓; viewport 30/48 — the three rx tests hung on the retired selector (V2-21), so packaging never started |
+| `36123316582` step "Surface visual failure diagnostics" | failures are diagnosable without log access: 18 `::failure` annotations with the exact test title and the captured page state | used to root-cause V2-21 |
+
 ## 4. What the fixes are proven by
 
 ```
-npm test                                  → 142 tests, 140 pass, 0 fail, 2 skipped
+npm test                                  → 145 tests, 143 pass, 0 fail, 2 skipped
 node scripts/v2-audit/differential-probe.mjs → 0 findings (invariant/integrity/divergence)
 node scripts/v2-audit/surface-sweep.mjs      → 0 failures
 node scripts/dataset-benchmark.mjs 1000,10000,25000,50000,100000 → §5
@@ -105,6 +139,12 @@ established:
    collections including an unknown one;
 7. the command palette returns the same groups and rows in both runtimes and
    labels them without a second round trip.
+
+`tests/long-history.test.mjs` (new, 3 tests) proves the long-history case the
+audit could previously only assume: a patient with 130 visits, 130 invoices and
+130 payments is fully reachable — every page walked, every row exactly once,
+exact totals, per-visit money identical across runtimes — and that the renderer
+is wired to those paged queries.
 
 ---
 
@@ -180,8 +220,9 @@ rather than silently dropping patients. The old 500-patient *pickable* ceiling
 
 - A manual install → run → uninstall → reinstall pass on a physical Windows
   machine (CI covers the packaged artifact, not a human-observed install).
-- Long-history single patient (500+ visits/invoices/payments) rendering beyond
-  the paginated paths already asserted.
+- Long-history single patient: paging is proven for 130 visits/invoices/payments
+  per patient (`tests/long-history.test.mjs`); a 500+ record single patient has
+  not been rendered in a real browser window on a physical machine.
 - Golden-image regression screenshots for the redesigned screens (the visual
   suite asserts layout/interaction, not pixel diffs).
 - The browser viewport suite (`npm run test:visual`) could not execute **in this
